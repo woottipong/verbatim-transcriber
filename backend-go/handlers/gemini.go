@@ -129,16 +129,7 @@ func handleGeminiAudioData(conn *websocketFiber.Conn, session *GeminiSession, da
 				cleaned := cleanGeminiTranscription(text)
 				if cleaned != "" {
 					logFinalTranscript("Gemini", cleaned, 0)
-
-					response := map[string]interface{}{
-						"type":    "transcript",
-						"text":    cleaned,
-						"isFinal": true,
-					}
-
-					if err := conn.WriteJSON(response); err != nil {
-						sendError(conn, "Gemini", "Write error", err)
-					}
+					sendTranscript(conn, cleaned, true, 1.0)
 				}
 			}
 		}()

@@ -97,17 +97,13 @@ func HandleAzure(conn *websocketFiber.Conn, cfg *config.Config) {
 func handleAzureAudioData(conn *websocketFiber.Conn, session *AzureSession, data []byte, cfg *config.Config) {
 	session.audioBuffer = append(session.audioBuffer, data...)
 
-	if len(session.audioBuffer) >= session.batchSize && !session.isProcessing {
-		session.isProcessing = true
+	// Process when buffer reaches batch size
+	if len(session.audioBuffer) >= session.batchSize {
 		audioBlob := make([]byte, len(session.audioBuffer))
 		copy(audioBlob, session.audioBuffer)
 		session.audioBuffer = make([]byte, 0)
 
 		go func() {
-			defer func() {
-				session.isProcessing = false
-			}()
-
 			// Convert PCM to WAV (Azure expects WAV format)
 			wavBuffer := utils.ConvertPCMtoWAV(audioBlob, 16000, 1, 16)
 

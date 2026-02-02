@@ -15,8 +15,8 @@ type Message struct {
 
 type TranscriptResponse struct {
 	Type    string  `json:"type"`
-	Text    string  `json:"transcript"`
-	IsFinal bool    `json:"is_final"`
+	Text    string  `json:"text"`
+	IsFinal bool    `json:"isFinal"`
 	Channel Channel `json:"channel"`
 }
 

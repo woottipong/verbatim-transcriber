@@ -5,28 +5,13 @@ import "os"
 type Config struct {
 	Port                 string
 	Host                 string
-	DeepgramAPIKey       string
 	GeminiAPIKey         string
 	GoogleAPIKey         string
 	AzureSubscriptionKey string
 	AzureRegion          string
-	DeepgramConfig       DeepgramConfig
 	GeminiConfig         GeminiConfig
 	GoogleConfig         GoogleConfig
 	AzureConfig          AzureConfig
-}
-
-type DeepgramConfig struct {
-	Model          string
-	Language       string
-	SmartFormat    bool
-	InterimResults bool
-	Punctuate      bool
-	FillerWords    bool
-	Diarize        bool
-	Utterances     bool
-	Endpointing    int
-	VADTurnoff     int
 }
 
 type GeminiConfig struct {
@@ -57,23 +42,10 @@ func Load() *Config {
 	return &Config{
 		Port:                 getEnv("PORT", "3000"),
 		Host:                 getEnv("HOST", "localhost"),
-		DeepgramAPIKey:       os.Getenv("DEEPGRAM_API_KEY"),
 		GeminiAPIKey:         os.Getenv("GEMINI_API_KEY"),
 		GoogleAPIKey:         os.Getenv("GOOGLE_API_KEY"),
 		AzureSubscriptionKey: os.Getenv("AZURE_SUBSCRIPTION_KEY"),
 		AzureRegion:          getEnv("AZURE_REGION", "southeastasia"),
-		DeepgramConfig: DeepgramConfig{
-			Model:          "nova-2",
-			Language:       "th",
-			SmartFormat:    true,
-			InterimResults: true,
-			Punctuate:      true,
-			FillerWords:    false,
-			Diarize:        false,
-			Utterances:     false,
-			Endpointing:    2000,
-			VADTurnoff:     2000,
-		},
 		GeminiConfig: GeminiConfig{
 			Model:           "gemini-2.0-flash",
 			Temperature:     0,
@@ -111,7 +83,7 @@ EXAMPLES:
 		},
 		AzureConfig: AzureConfig{
 			Language:      "th-TH",
-			SampleRate:    48000,
+			SampleRate:    16000,
 			BitsPerSample: 16,
 			Channels:      1,
 		},
@@ -126,10 +98,6 @@ func getEnv(key, fallback string) string {
 }
 
 // Provider availability checks
-func (c *Config) HasDeepgramKey() bool {
-	return c.DeepgramAPIKey != ""
-}
-
 func (c *Config) HasGeminiKey() bool {
 	return c.GeminiAPIKey != ""
 }

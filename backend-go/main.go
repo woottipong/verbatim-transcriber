@@ -22,6 +22,15 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
+	// Debug: Show API key status (first 8 chars only)
+	log.Println("🔐 API Keys Status:")
+	if cfg.GeminiAPIKey != "" {
+		log.Printf("  ✅ Gemini: %s...", cfg.GeminiAPIKey[:min(8, len(cfg.GeminiAPIKey))])
+	}
+	if cfg.AzureSubscriptionKey != "" {
+		log.Printf("  ✅ Azure: %s...", cfg.AzureSubscriptionKey[:min(8, len(cfg.AzureSubscriptionKey))])
+	}
+
 	// Initialize Fiber app
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
@@ -59,11 +68,12 @@ func printStartupInfo(cfg *config.Config) {
 		enabled bool
 		path    string
 		icon    string
+		note    string
 	}{
-		{"Deepgram Nova-2", cfg.HasDeepgramKey(), "/deepgram", "🔷"},
-		{"Gemini 2.0 Flash", cfg.HasGeminiKey(), "/gemini", "✨"},
-		{"Google Cloud STT", cfg.HasGoogleKey(), "/google", "🌐"},
-		{"Azure Speech", cfg.HasAzureKey(), "/azure", "☁️"},
+		{"Deepgram Nova-2", true, "(direct browser)", "🔷", "No backend needed"},
+		{"Gemini 2.0 Flash", cfg.HasGeminiKey(), "/gemini", "✨", ""},
+		{"Google Cloud STT", cfg.HasGoogleKey(), "/google", "🌐", ""},
+		{"Azure Speech", cfg.HasAzureKey(), "/azure", "☁️", ""},
 	}
 
 	for _, p := range providers {
@@ -78,13 +88,17 @@ func printStartupInfo(cfg *config.Config) {
 
 	for _, p := range providers {
 		status := "❌ Disabled"
-		detail := "API key not configured"
+		detail := ""
 		if p.enabled {
 			status = "✅ Ready"
-			detail = fmt.Sprintf("ws://%s:%s%s", cfg.Host, cfg.Port, p.path)
+			if p.path != "" && p.path != "(direct browser)" {
+				detail = fmt.Sprintf("ws://%s:%s%s", cfg.Host, cfg.Port, p.path)
+			} else if p.note != "" {
+				detail = p.note
+			}
 		}
 		fmt.Printf(" %s %-20s %s\n", p.icon, p.name, status)
-		if p.enabled {
+		if detail != "" {
 			fmt.Printf("    └─ %s\n", detail)
 		}
 	}
@@ -110,4 +124,11 @@ func pluralize(count int) string {
 		return ""
 	}
 	return "s"
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

@@ -21,7 +21,7 @@ func SetupRoutes(app *fiber.App, cfg *config.Config) {
 	// Providers status endpoint
 	app.Get("/providers", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
-			"deepgram": cfg.HasDeepgramKey(),
+			"deepgram": true, // Always available (direct browser connection)
 			"gemini":   cfg.HasGeminiKey(),
 			"google":   cfg.HasGoogleKey(),
 			"azure":    cfg.HasAzureKey(),
@@ -31,21 +31,8 @@ func SetupRoutes(app *fiber.App, cfg *config.Config) {
 	// Conditionally setup WebSocket routes based on available API keys
 	enabledProviders := []string{}
 
-	// Deepgram
-	if cfg.HasDeepgramKey() {
-		app.Use("/deepgram", func(c *fiber.Ctx) error {
-			if websocket.IsWebSocketUpgrade(c) {
-				return c.Next()
-			}
-			return fiber.ErrUpgradeRequired
-		})
-		app.Get("/deepgram", websocket.New(func(c *websocket.Conn) {
-			handlers.HandleDeepgram(c, cfg)
-		}))
-		enabledProviders = append(enabledProviders, "Deepgram")
-	} else {
-		log.Println("⚠️  [Deepgram] Disabled - DEEPGRAM_API_KEY not configured")
-	}
+	// Deepgram - NOT USED (direct browser connection)
+	// Frontend connects directly to wss://api.deepgram.com
 
 	// Gemini
 	if cfg.HasGeminiKey() {
