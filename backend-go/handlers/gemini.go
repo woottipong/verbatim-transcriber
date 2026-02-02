@@ -47,13 +47,8 @@ func HandleGemini(conn *websocketFiber.Conn, cfg *config.Config) {
 				case "start":
 					logStarting("Gemini")
 
-					apiKey := msg.APIKey
-					if apiKey == "" {
-						apiKey = cfg.GeminiAPIKey
-					}
-
 					ctx := context.Background()
-					client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
+					client, err := genai.NewClient(ctx, option.WithAPIKey(cfg.GeminiAPIKey))
 					if err != nil {
 						sendError(conn, "Gemini", "Gemini client init failed", err)
 						continue

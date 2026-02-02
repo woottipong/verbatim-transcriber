@@ -59,17 +59,12 @@ func HandleAzure(conn *websocketFiber.Conn, cfg *config.Config) {
 				case "start":
 					logStarting("Azure")
 
-					subscriptionKey := msg.APIKey
-					if subscriptionKey == "" {
-						subscriptionKey = cfg.AzureSubscriptionKey
-					}
-
-					if subscriptionKey == "" || cfg.AzureRegion == "" {
+					if cfg.AzureSubscriptionKey == "" || cfg.AzureRegion == "" {
 						sendError(conn, "Azure", "Azure credentials not configured", nil)
 						continue
 					}
 
-					session.apiKey = subscriptionKey
+					session.apiKey = cfg.AzureSubscriptionKey
 					session.apiEndpoint = fmt.Sprintf(
 						"https://%s.stt.speech.microsoft.com/speech/recognition/conversation/cognitiveservices/v1",
 						cfg.AzureRegion,
