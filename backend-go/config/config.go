@@ -3,12 +3,17 @@ package config
 import "os"
 
 type Config struct {
-	Port           string
-	Host           string
-	DeepgramAPIKey string
-	GeminiAPIKey   string
-	DeepgramConfig DeepgramConfig
-	GeminiConfig   GeminiConfig
+	Port                 string
+	Host                 string
+	DeepgramAPIKey       string
+	GeminiAPIKey         string
+	GoogleAPIKey         string
+	AzureSubscriptionKey string
+	AzureRegion          string
+	DeepgramConfig       DeepgramConfig
+	GeminiConfig         GeminiConfig
+	GoogleConfig         GoogleConfig
+	AzureConfig          AzureConfig
 }
 
 type DeepgramConfig struct {
@@ -34,12 +39,29 @@ type GeminiConfig struct {
 	SystemInstruction string
 }
 
+type GoogleConfig struct {
+	Model        string
+	LanguageCode string
+	SampleRate   int
+	UseEnhanced  bool
+}
+
+type AzureConfig struct {
+	Language      string
+	SampleRate    int
+	BitsPerSample int
+	Channels      int
+}
+
 func Load() *Config {
 	return &Config{
-		Port:           getEnv("PORT", "3000"),
-		Host:           getEnv("HOST", "localhost"),
-		DeepgramAPIKey: os.Getenv("DEEPGRAM_API_KEY"),
-		GeminiAPIKey:   os.Getenv("GEMINI_API_KEY"),
+		Port:                 getEnv("PORT", "3000"),
+		Host:                 getEnv("HOST", "localhost"),
+		DeepgramAPIKey:       os.Getenv("DEEPGRAM_API_KEY"),
+		GeminiAPIKey:         os.Getenv("GEMINI_API_KEY"),
+		GoogleAPIKey:         os.Getenv("GOOGLE_API_KEY"),
+		AzureSubscriptionKey: os.Getenv("AZURE_SUBSCRIPTION_KEY"),
+		AzureRegion:          getEnv("AZURE_REGION", "southeastasia"),
 		DeepgramConfig: DeepgramConfig{
 			Model:          "nova-2",
 			Language:       "th",
@@ -80,6 +102,18 @@ EXAMPLES:
 ❌ WRONG: เพิ่ม "ครับ" "ค่ะ" ที่ไม่ได้ยิน
 ❌ WRONG: ถอดซ้ำข้อความเดิม
 ✅ CORRECT: ถอดเฉพาะที่ได้ยินชัดเจน 100%`,
+		},
+		GoogleConfig: GoogleConfig{
+			Model:        "default",
+			LanguageCode: "th-TH",
+			SampleRate:   48000,
+			UseEnhanced:  false,
+		},
+		AzureConfig: AzureConfig{
+			Language:      "th-TH",
+			SampleRate:    48000,
+			BitsPerSample: 16,
+			Channels:      1,
 		},
 	}
 }

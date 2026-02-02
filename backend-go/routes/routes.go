@@ -32,6 +32,20 @@ func SetupRoutes(app *fiber.App, cfg *config.Config) {
 		return fiber.ErrUpgradeRequired
 	})
 
+	app.Use("/google", func(c *fiber.Ctx) error {
+		if websocket.IsWebSocketUpgrade(c) {
+			return c.Next()
+		}
+		return fiber.ErrUpgradeRequired
+	})
+
+	app.Use("/azure", func(c *fiber.Ctx) error {
+		if websocket.IsWebSocketUpgrade(c) {
+			return c.Next()
+		}
+		return fiber.ErrUpgradeRequired
+	})
+
 	// WebSocket handlers
 	app.Get("/deepgram", websocket.New(func(c *websocket.Conn) {
 		handlers.HandleDeepgram(c, cfg)
@@ -39,5 +53,13 @@ func SetupRoutes(app *fiber.App, cfg *config.Config) {
 
 	app.Get("/gemini", websocket.New(func(c *websocket.Conn) {
 		handlers.HandleGemini(c, cfg)
+	}))
+
+	app.Get("/google", websocket.New(func(c *websocket.Conn) {
+		handlers.HandleGoogle(c, cfg)
+	}))
+
+	app.Get("/azure", websocket.New(func(c *websocket.Conn) {
+		handlers.HandleAzure(c, cfg)
 	}))
 }

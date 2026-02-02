@@ -3,8 +3,6 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"log"
 	"strings"
 	"thai-transcriber-backend/config"
 	"thai-transcriber-backend/utils"
@@ -22,7 +20,7 @@ type GeminiSession struct {
 }
 
 func HandleGemini(conn *websocketFiber.Conn, cfg *config.Config) {
-	log.Println("📱 [Gemini] Client connected")
+	logConnection("Gemini")
 
 	session := &GeminiSession{
 		audioBuffer:  make([]byte, 0),
@@ -30,17 +28,14 @@ func HandleGemini(conn *websocketFiber.Conn, cfg *config.Config) {
 		batchSize:    cfg.GeminiConfig.BatchSizeBytes,
 	}
 
-	// Send connected message
-	conn.WriteJSON(map[string]string{"type": "connected"})
+	sendConnected(conn)
 
-	defer func() {
-		log.Println("🔌 [Gemini] Client disconnected")
-	}()
+	defer logDisconnection("Gemini")
 
 	for {
 		msgType, message, err := conn.ReadMessage()
 		if err != nil {
-			log.Printf("❌ [Gemini] Read error: %v\n", err)
+			sendError(conn, "Gemini", "Read error", err)
 			break
 		}
 
@@ -50,7 +45,7 @@ func HandleGemini(conn *websocketFiber.Conn, cfg *config.Config) {
 			if err := json.Unmarshal(message, &msg); err == nil {
 				switch msg.Type {
 				case "start":
-					log.Println("🎬 [Gemini] Starting session")
+					logStarting("Gemini")
 
 					apiKey := msg.APIKey
 					if apiKey == "" {
@@ -60,11 +55,7 @@ func HandleGemini(conn *websocketFiber.Conn, cfg *config.Config) {
 					ctx := context.Background()
 					client, err := genai.NewClient(ctx, option.WithAPIKey(apiKey))
 					if err != nil {
-						log.Printf("❌ [Gemini] Client init error: %v\n", err)
-						conn.WriteJSON(map[string]string{
-							"type":  "error",
-							"error": fmt.Sprintf("Gemini client init failed: %v", err),
-						})
+						sendError(conn, "Gemini", "Gemini client init failed", err)
 						continue
 					}
 
@@ -77,14 +68,14 @@ func HandleGemini(conn *websocketFiber.Conn, cfg *config.Config) {
 						Parts: []genai.Part{genai.Text(cfg.GeminiConfig.SystemInstruction)},
 					}
 
-					conn.WriteJSON(map[string]string{"type": "started"})
+					sendStarted(conn)
 
 				case "stop":
-					log.Println("🛑 [Gemini] Stopping session")
+					logStopping("Gemini")
 					session.model = nil
 					session.audioBuffer = make([]byte, 0)
 					session.isProcessing = false
-					conn.WriteJSON(map[string]string{"type": "stopped"})
+					sendStopped(conn)
 				}
 			}
 		} else if msgType == websocketFiber.BinaryMessage {
@@ -123,11 +114,7 @@ func handleGeminiAudioData(conn *websocketFiber.Conn, session *GeminiSession, da
 			)
 
 			if err != nil {
-				log.Printf("❌ [Gemini] API error: %v\n", err)
-				conn.WriteJSON(map[string]string{
-					"type":  "error",
-					"error": err.Error(),
-				})
+				sendError(conn, "Gemini", "API error", err)
 				return
 			}
 
@@ -141,7 +128,7 @@ func handleGeminiAudioData(conn *websocketFiber.Conn, session *GeminiSession, da
 
 				cleaned := cleanGeminiTranscription(text)
 				if cleaned != "" {
-					log.Printf("📝 [Gemini] %s\n", cleaned)
+					logFinalTranscript("Gemini", cleaned, 0)
 
 					response := map[string]interface{}{
 						"type":    "transcript",
@@ -150,7 +137,7 @@ func handleGeminiAudioData(conn *websocketFiber.Conn, session *GeminiSession, da
 					}
 
 					if err := conn.WriteJSON(response); err != nil {
-						log.Printf("❌ [Gemini] Write error: %v\n", err)
+						sendError(conn, "Gemini", "Write error", err)
 					}
 				}
 			}
