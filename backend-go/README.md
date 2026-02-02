@@ -1,4 +1,4 @@
-# Thai Verbatim Transcriber - Go Backend
+# Real-time Thai Transcription - Go Backend
 
 Go backend implementation using Fiber framework for WebSocket-based real-time transcription.
 

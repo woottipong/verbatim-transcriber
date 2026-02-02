@@ -1,6 +1,6 @@
 /**
  * Application Constants
- * Centralized configuration for the Thai Verbatim Transcriber
+ * Centralized configuration for the Real-time Thai Transcription
  */
 
 import { ASRProvider } from '../types';

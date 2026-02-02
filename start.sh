@@ -45,7 +45,7 @@ done
 
 # Header
 echo -e "${CYAN}┌─────────────────────────────────────────┐${NC}"
-echo -e "${CYAN}│${NC}  ${BLUE}🎙️  Thai Verbatim Transcriber${NC}           ${CYAN}│${NC}"
+echo -e "${CYAN}│${NC}  ${BLUE}🎙️  Real-time Thai Transcription${NC}      ${CYAN}│${NC}"
 echo -e "${CYAN}│${NC}  ${NC}Multi-Provider ASR Comparison${NC}          ${CYAN}│${NC}"
 echo -e "${CYAN}└─────────────────────────────────────────┘${NC}"
 echo ""

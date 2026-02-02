@@ -1,5 +1,5 @@
 /**
- * Type definitions for Thai Verbatim Transcriber
+ * Type definitions for Real-time Thai Transcription
  */
 
 // ============================================

@@ -1,4 +1,4 @@
-# Thai Verbatim Transcriber - Frontend
+# Real-time Thai Transcription - Frontend
 
 Real-time Thai speech-to-text transcription UI built with React 19 + TypeScript + Vite.
 

@@ -120,9 +120,13 @@ export default function App() {
     localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(newConfig));
   }, [config]);
 
-  const handleToggleListening = useCallback(async () => {
-    if (isConnected || isConnecting) {
-      // Stop all providers + VAD
+  // Microphone control (separate from ASR providers)
+  const [microphoneActive, setMicrophoneActive] = useState(false);
+
+  const handleToggleMicrophone = useCallback(async () => {
+    if (microphoneActive) {
+      // Stop microphone - this will stop all providers
+      setMicrophoneActive(false);
       deepgramHook.stopStreaming();
       geminiHook.stopStreaming();
       googleHook.stopStreaming();
@@ -132,7 +136,8 @@ export default function App() {
         isVADStreamingRef.current = false;
       }
     } else {
-      // Check VAD status before starting
+      // Start microphone only - providers start individually
+      setMicrophoneActive(true);
       if (config.vadConfig?.enabled) {
         if (vad.isLoading) {
           isVADStreamingRef.current = true;
@@ -144,22 +149,45 @@ export default function App() {
       } else {
         isVADStreamingRef.current = true;
       }
-
-      // Only start providers that are available
-      if (isProviderEnabled(availableProviders, 'deepgram')) {
-        deepgramHook.startStreaming();
-      }
-      if (isProviderEnabled(availableProviders, 'gemini')) {
-        geminiHook.startStreaming();
-      }
-      if (isProviderEnabled(availableProviders, 'google')) {
-        googleHook.startStreaming();
-      }
-      if (isProviderEnabled(availableProviders, 'azure')) {
-        azureHook.startStreaming();
-      }
     }
-  }, [isConnected, isConnecting, deepgramHook, geminiHook, googleHook, azureHook, config.vadConfig, vad, availableProviders]);
+  }, [microphoneActive, deepgramHook, geminiHook, googleHook, azureHook, config.vadConfig, vad]);
+
+  // Individual provider controls
+  const handleStartProvider = useCallback((provider: 'deepgram' | 'gemini' | 'google' | 'azure') => {
+    if (!microphoneActive || !isProviderEnabled(availableProviders, provider)) return;
+
+    switch (provider) {
+      case 'deepgram':
+        deepgramHook.startStreaming();
+        break;
+      case 'gemini':
+        geminiHook.startStreaming();
+        break;
+      case 'google':
+        googleHook.startStreaming();
+        break;
+      case 'azure':
+        azureHook.startStreaming();
+        break;
+    }
+  }, [microphoneActive, deepgramHook, geminiHook, googleHook, azureHook, availableProviders]);
+
+  const handleStopProvider = useCallback((provider: 'deepgram' | 'gemini' | 'google' | 'azure') => {
+    switch (provider) {
+      case 'deepgram':
+        deepgramHook.stopStreaming();
+        break;
+      case 'gemini':
+        geminiHook.stopStreaming();
+        break;
+      case 'google':
+        googleHook.stopStreaming();
+        break;
+      case 'azure':
+        azureHook.stopStreaming();
+        break;
+    }
+  }, [deepgramHook, geminiHook, googleHook, azureHook]);
 
   const handleOpenSettings = useCallback(() => setIsSettingsOpen(true), []);
   const handleCloseSettings = useCallback(() => setIsSettingsOpen(false), []);
@@ -172,13 +200,13 @@ export default function App() {
   }, [deepgramHook, geminiHook, googleHook, azureHook]);
 
   // Status message
-  const statusMessage = isConnecting
-    ? 'Connecting to all providers...'
-    : isConnected
-      ? 'Listening... (Speak Thai)'
-      : vad.isLoading
-        ? 'Loading VAD... (tap to start anyway)'
-        : 'Tap microphone to start';
+  const statusMessage = microphoneActive
+    ? isConnected
+      ? 'Microphone Active - Providers Running'
+      : 'Microphone Active - Start providers below'
+    : vad.isLoading
+      ? 'Loading VAD... (tap to start anyway)'
+      : 'Tap microphone to activate';
 
   // Show config hint when there's an error and no API key configured
   const showConfigHint = !config.apiKey && !config.useBackend;
@@ -203,8 +231,8 @@ export default function App() {
               TH
             </span>
             <div>
-              <h1 className="text-lg font-bold text-white">Verbatim ASR</h1>
-              <p className="text-xs text-slate-400">Real-time Thai Transcription</p>
+              <h1 className="text-lg font-bold text-white">Real-time Thai Transcription</h1>
+              <p className="text-xs text-slate-400">Multi-Provider ASR Comparison</p>
             </div>
           </div>
 
@@ -299,9 +327,9 @@ export default function App() {
               </div>
 
               <RecordButton
-                isConnected={isConnected}
-                isConnecting={isConnecting}
-                onClick={handleToggleListening}
+                isConnected={microphoneActive}
+                isConnecting={false}
+                onClick={handleToggleMicrophone}
               />
 
               <p className="text-sm font-medium text-slate-300 text-center">
@@ -429,6 +457,10 @@ export default function App() {
               transcripts={azureHook.transcripts}
               interimTranscript={azureHook.interimTranscript}
               onClear={azureHook.clearTranscripts}
+              connectionState={azureHook.connectionState}
+              onStart={() => handleStartProvider('azure')}
+              onStop={() => handleStopProvider('azure')}
+              microphoneActive={microphoneActive}
             />
           </div>
 
@@ -442,6 +474,10 @@ export default function App() {
               transcripts={geminiHook.transcripts}
               interimTranscript={geminiHook.interimTranscript}
               onClear={geminiHook.clearTranscripts}
+              connectionState={geminiHook.connectionState}
+              onStart={() => handleStartProvider('gemini')}
+              onStop={() => handleStopProvider('gemini')}
+              microphoneActive={microphoneActive}
             />
           </div>
 
@@ -455,6 +491,10 @@ export default function App() {
               transcripts={googleHook.transcripts}
               interimTranscript={googleHook.interimTranscript}
               onClear={googleHook.clearTranscripts}
+              connectionState={googleHook.connectionState}
+              onStart={() => handleStartProvider('google')}
+              onStop={() => handleStopProvider('google')}
+              microphoneActive={microphoneActive}
             />
           </div>
 
@@ -468,6 +508,10 @@ export default function App() {
               transcripts={deepgramHook.transcripts}
               interimTranscript={deepgramHook.interimTranscript}
               onClear={deepgramHook.clearTranscripts}
+              connectionState={deepgramHook.connectionState}
+              onStart={() => handleStartProvider('deepgram')}
+              onStop={() => handleStopProvider('deepgram')}
+              microphoneActive={microphoneActive}
             />
           </div>
         </div>

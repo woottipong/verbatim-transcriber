@@ -48,7 +48,7 @@ func main() {
 
 func printStartupInfo(cfg *config.Config) {
 	fmt.Println("\n╔════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║  🎙️  Thai Verbatim Transcriber - Go Backend                     ║")
+	fmt.Println("║  🎙️  Real-time Thai Transcription - Go Backend             ║")
 	fmt.Println("╚════════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 

@@ -1,4 +1,4 @@
-# 📋 Project Summary - Thai Verbatim Transcriber
+# 📋 Project Summary - Real-time Thai Transcription
 
 Last Updated: February 2, 2026
 

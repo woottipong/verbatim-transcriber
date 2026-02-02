@@ -1,5 +1,5 @@
 /**
- * Utility functions for the Thai Verbatim Transcriber
+ * Utility functions for the Real-time Thai Transcription
  */
 
 import { MEDIA_RECORDER_CONFIG } from './constants';
