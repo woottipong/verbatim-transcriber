@@ -47,25 +47,67 @@ func main() {
 }
 
 func printStartupInfo(cfg *config.Config) {
-	fmt.Println("\n🎙️  Thai Verbatim Transcriber (Go Backend)")
-	fmt.Println("==========================================")
+	fmt.Println("\n╔════════════════════════════════════════════════════════════════╗")
+	fmt.Println("║  🎙️  Thai Verbatim Transcriber - Go Backend                     ║")
+	fmt.Println("╚════════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 
-	fmt.Println("📦 Available ASR Providers:")
-	if cfg.DeepgramAPIKey != "" {
-		fmt.Println("   ✅ Deepgram Nova-2 (/deepgram)")
-	} else {
-		fmt.Println("   ❌ Deepgram (API key not set)")
-	}
-	if cfg.GeminiAPIKey != "" {
-		fmt.Println("   ✅ Gemini 2.0 Flash (/gemini)")
-	} else {
-		fmt.Println("   ❌ Gemini (API key not set)")
+	// Count enabled providers
+	enabledCount := 0
+	providers := []struct {
+		name    string
+		enabled bool
+		path    string
+		icon    string
+	}{
+		{"Deepgram Nova-2", cfg.HasDeepgramKey(), "/deepgram", "🔷"},
+		{"Gemini 2.0 Flash", cfg.HasGeminiKey(), "/gemini", "✨"},
+		{"Google Cloud STT", cfg.HasGoogleKey(), "/google", "🌐"},
+		{"Azure Speech", cfg.HasAzureKey(), "/azure", "☁️"},
 	}
 
-	fmt.Printf("\n🚀 Server running on port %s\n", cfg.Port)
-	fmt.Printf("   Health: http://%s:%s/health\n", cfg.Host, cfg.Port)
-	fmt.Println("   WebSocket endpoints:")
-	fmt.Printf("     - ws://%s:%s/deepgram\n", cfg.Host, cfg.Port)
-	fmt.Printf("     - ws://%s:%s/gemini\n\n", cfg.Host, cfg.Port)
+	for _, p := range providers {
+		if p.enabled {
+			enabledCount++
+		}
+	}
+
+	// Display provider status
+	fmt.Printf("📦 ASR Providers: %d/%d enabled\n", enabledCount, len(providers))
+	fmt.Println("─────────────────────────────────────────────────────────────────")
+
+	for _, p := range providers {
+		status := "❌ Disabled"
+		detail := "API key not configured"
+		if p.enabled {
+			status = "✅ Ready"
+			detail = fmt.Sprintf("ws://%s:%s%s", cfg.Host, cfg.Port, p.path)
+		}
+		fmt.Printf(" %s %-20s %s\n", p.icon, p.name, status)
+		if p.enabled {
+			fmt.Printf("    └─ %s\n", detail)
+		}
+	}
+
+	fmt.Println()
+	fmt.Println("─────────────────────────────────────────────────────────────────")
+	fmt.Printf("🌐 Server:    http://%s:%s\n", cfg.Host, cfg.Port)
+	fmt.Printf("💚 Health:    http://%s:%s/health\n", cfg.Host, cfg.Port)
+	fmt.Printf("📊 Providers: http://%s:%s/providers\n", cfg.Host, cfg.Port)
+	fmt.Println("─────────────────────────────────────────────────────────────────")
+
+	if enabledCount == 0 {
+		fmt.Println("\n⚠️  WARNING: No ASR providers configured!")
+		fmt.Println("   Please set API keys in .env file")
+	} else {
+		fmt.Printf("\n🎉 Ready to transcribe! (%d provider%s available)\n", enabledCount, pluralize(enabledCount))
+	}
+	fmt.Println()
+}
+
+func pluralize(count int) string {
+	if count == 1 {
+		return ""
+	}
+	return "s"
 }
