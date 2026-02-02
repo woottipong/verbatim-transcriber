@@ -5,9 +5,13 @@ Go backend implementation using Fiber framework for WebSocket-based real-time tr
 ## Features
 
 - 🚀 High-performance Go + Fiber WebSocket server
-- 🎙️ Dual ASR providers: Deepgram Nova-2 & Gemini 2.0 Flash
+- 🎙️ Multi-provider ASR support: **Deepgram**, **Gemini**, **Google Cloud Speech-to-Text**
 - 🔄 Real-time streaming transcription
 - 🇹🇭 Optimized for Thai language verbatim transcription
+- ⚡ Dynamic provider activation based on available API keys
+- 💯 Pure Go implementation (no native dependencies required)
+
+> **Note on Azure:** Azure Speech Service requires native C SDK installation. Currently using stub implementation. See [AZURE_SDK_ISSUE.md](./AZURE_SDK_ISSUE.md) for details.
 
 ## Setup
 
@@ -25,17 +29,45 @@ cp .env.example .env
 # Edit .env and add your API keys
 ```
 
+**Note:** You only need to configure API keys for the providers you want to use. Endpoints for providers without API keys will be automatically disabled.
+
 ### 3. Run Server
 
 ```bash
 go run main.go
 ```
 
+The server will log which providers are enabled:
+```
+✅ Enabled providers: [Gemini Google]
+⚠️  [Deepgram] Disabled - DEEPGRAM_API_KEY not configured
+⚠️  [Azure] Disabled - AZURE_SUBSCRIPTION_KEY or AZURE_REGION not configured
+```
+
 ## API Endpoints
 
 - **Health Check**: `GET /health`
-- **Deepgram WebSocket**: `ws://localhost:3000/deepgram`
-- **Gemini WebSocket**: `ws://localhost:3000/gemini`
+- **Providers Status**: `GET /providers` - Check which providers are available
+- **Deepgram WebSocket**: `ws://localhost:3000/deepgram` (if `DEEPGRAM_API_KEY` is set)
+- **Gemini WebSocket**: `ws://localhost:3000/gemini` (if `GEMINI_API_KEY` is set)
+- **Google WebSocket**: `ws://localhost:3000/google` (if `GOOGLE_API_KEY` is set)
+- **Azure WebSocket**: `ws://localhost:3000/azure` (if `AZURE_SUBSCRIPTION_KEY` and `AZURE_REGION` are set)
+
+### Check Available Providers
+
+```bash
+curl http://localhost:3000/providers
+```
+
+Response:
+```json
+{
+  "deepgram": false,
+  "gemini": true,
+  "google": true,
+  "azure": false
+}
+```
 
 ## WebSocket Protocol
 

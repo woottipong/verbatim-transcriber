@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"log"
 	"thai-transcriber-backend/config"
 	"thai-transcriber-backend/handlers"
 
@@ -17,49 +18,87 @@ func SetupRoutes(app *fiber.App, cfg *config.Config) {
 		})
 	})
 
-	// WebSocket upgrade middleware
-	app.Use("/deepgram", func(c *fiber.Ctx) error {
-		if websocket.IsWebSocketUpgrade(c) {
-			return c.Next()
-		}
-		return fiber.ErrUpgradeRequired
+	// Providers status endpoint
+	app.Get("/providers", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{
+			"deepgram": cfg.HasDeepgramKey(),
+			"gemini":   cfg.HasGeminiKey(),
+			"google":   cfg.HasGoogleKey(),
+			"azure":    cfg.HasAzureKey(),
+		})
 	})
 
-	app.Use("/gemini", func(c *fiber.Ctx) error {
-		if websocket.IsWebSocketUpgrade(c) {
-			return c.Next()
-		}
-		return fiber.ErrUpgradeRequired
-	})
+	// Conditionally setup WebSocket routes based on available API keys
+	enabledProviders := []string{}
 
-	app.Use("/google", func(c *fiber.Ctx) error {
-		if websocket.IsWebSocketUpgrade(c) {
-			return c.Next()
-		}
-		return fiber.ErrUpgradeRequired
-	})
+	// Deepgram
+	if cfg.HasDeepgramKey() {
+		app.Use("/deepgram", func(c *fiber.Ctx) error {
+			if websocket.IsWebSocketUpgrade(c) {
+				return c.Next()
+			}
+			return fiber.ErrUpgradeRequired
+		})
+		app.Get("/deepgram", websocket.New(func(c *websocket.Conn) {
+			handlers.HandleDeepgram(c, cfg)
+		}))
+		enabledProviders = append(enabledProviders, "Deepgram")
+	} else {
+		log.Println("⚠️  [Deepgram] Disabled - DEEPGRAM_API_KEY not configured")
+	}
 
-	app.Use("/azure", func(c *fiber.Ctx) error {
-		if websocket.IsWebSocketUpgrade(c) {
-			return c.Next()
-		}
-		return fiber.ErrUpgradeRequired
-	})
+	// Gemini
+	if cfg.HasGeminiKey() {
+		app.Use("/gemini", func(c *fiber.Ctx) error {
+			if websocket.IsWebSocketUpgrade(c) {
+				return c.Next()
+			}
+			return fiber.ErrUpgradeRequired
+		})
+		app.Get("/gemini", websocket.New(func(c *websocket.Conn) {
+			handlers.HandleGemini(c, cfg)
+		}))
+		enabledProviders = append(enabledProviders, "Gemini")
+	} else {
+		log.Println("⚠️  [Gemini] Disabled - GEMINI_API_KEY not configured")
+	}
 
-	// WebSocket handlers
-	app.Get("/deepgram", websocket.New(func(c *websocket.Conn) {
-		handlers.HandleDeepgram(c, cfg)
-	}))
+	// Google Cloud Speech-to-Text
+	if cfg.HasGoogleKey() {
+		app.Use("/google", func(c *fiber.Ctx) error {
+			if websocket.IsWebSocketUpgrade(c) {
+				return c.Next()
+			}
+			return fiber.ErrUpgradeRequired
+		})
+		app.Get("/google", websocket.New(func(c *websocket.Conn) {
+			handlers.HandleGoogle(c, cfg)
+		}))
+		enabledProviders = append(enabledProviders, "Google")
+	} else {
+		log.Println("⚠️  [Google] Disabled - GOOGLE_API_KEY not configured")
+	}
 
-	app.Get("/gemini", websocket.New(func(c *websocket.Conn) {
-		handlers.HandleGemini(c, cfg)
-	}))
+	// Azure Speech Service
+	if cfg.HasAzureKey() {
+		app.Use("/azure", func(c *fiber.Ctx) error {
+			if websocket.IsWebSocketUpgrade(c) {
+				return c.Next()
+			}
+			return fiber.ErrUpgradeRequired
+		})
+		app.Get("/azure", websocket.New(func(c *websocket.Conn) {
+			handlers.HandleAzure(c, cfg)
+		}))
+		enabledProviders = append(enabledProviders, "Azure")
+	} else {
+		log.Println("⚠️  [Azure] Disabled - AZURE_SUBSCRIPTION_KEY or AZURE_REGION not configured")
+	}
 
-	app.Get("/google", websocket.New(func(c *websocket.Conn) {
-		handlers.HandleGoogle(c, cfg)
-	}))
-
-	app.Get("/azure", websocket.New(func(c *websocket.Conn) {
-		handlers.HandleAzure(c, cfg)
-	}))
+	// Log enabled providers
+	if len(enabledProviders) > 0 {
+		log.Printf("✅ Enabled providers: %v\n", enabledProviders)
+	} else {
+		log.Println("⚠️  No ASR providers enabled - Please configure API keys in .env")
+	}
 }

@@ -4,7 +4,6 @@ go 1.24.0
 
 require (
 	cloud.google.com/go/speech v1.29.0
-	github.com/Microsoft/cognitive-services-speech-sdk-go v1.43.0
 	github.com/gofiber/fiber/v2 v2.52.5
 	github.com/gofiber/websocket/v2 v2.2.1
 	github.com/google/generative-ai-go v0.15.0

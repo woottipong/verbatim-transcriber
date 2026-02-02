@@ -124,3 +124,20 @@ func getEnv(key, fallback string) string {
 	}
 	return fallback
 }
+
+// Provider availability checks
+func (c *Config) HasDeepgramKey() bool {
+	return c.DeepgramAPIKey != ""
+}
+
+func (c *Config) HasGeminiKey() bool {
+	return c.GeminiAPIKey != ""
+}
+
+func (c *Config) HasGoogleKey() bool {
+	return c.GoogleAPIKey != ""
+}
+
+func (c *Config) HasAzureKey() bool {
+	return c.AzureSubscriptionKey != "" && c.AzureRegion != ""
+}
