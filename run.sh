@@ -3,8 +3,8 @@
 # Thai Verbatim Transcriber - Quick Start
 # Run this one command to start everything!
 
-echo "🎙️  Thai Verbatim Transcriber"
-echo "==============================="
+echo "🎙️  Thai Verbatim Transcriber (Go Backend)"
+echo "==========================================="
 echo ""
 
 # Check if dependencies are installed
@@ -13,16 +13,24 @@ if [ ! -d "node_modules" ]; then
     npm install
 fi
 
-if [ ! -d "backend/node_modules" ]; then
-    echo "📦 Installing backend dependencies..."
-    cd backend && npm install && cd ..
+# Check if Go is installed
+if ! command -v go &> /dev/null; then
+    echo "❌ Go is not installed. Please install Go 1.22 or later."
+    echo "   Visit: https://go.dev/doc/install"
+    exit 1
+fi
+
+# Install Go dependencies if needed
+if [ ! -f "backend-go/go.sum" ]; then
+    echo "📦 Installing Go backend dependencies..."
+    cd backend-go && go mod download && cd ..
 fi
 
 echo ""
 echo "🚀 Starting servers..."
 echo ""
 echo "✨ Frontend: http://localhost:5173"
-echo "✨ Backend:  ws://localhost:3000"
+echo "✨ Backend:  ws://localhost:3000 (Go + Fiber)"
 echo ""
 echo "Press Ctrl+C to stop both servers"
 echo ""
@@ -41,8 +49,8 @@ trap cleanup SIGINT SIGTERM
 npm run dev &
 FRONTEND_PID=$!
 
-# Start backend in background
-(cd backend && npm start) &
+# Start Go backend in background
+(cd backend-go && go run main.go) &
 BACKEND_PID=$!
 
 # Wait for both processes
