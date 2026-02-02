@@ -22,15 +22,6 @@ func main() {
 	// Load configuration
 	cfg := config.Load()
 
-	// Debug: Show API key status (first 8 chars only)
-	log.Println("🔐 API Keys Status:")
-	if cfg.GeminiAPIKey != "" {
-		log.Printf("  ✅ Gemini: %s...", cfg.GeminiAPIKey[:min(8, len(cfg.GeminiAPIKey))])
-	}
-	if cfg.AzureSubscriptionKey != "" {
-		log.Printf("  ✅ Azure: %s...", cfg.AzureSubscriptionKey[:min(8, len(cfg.AzureSubscriptionKey))])
-	}
-
 	// Initialize Fiber app
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,

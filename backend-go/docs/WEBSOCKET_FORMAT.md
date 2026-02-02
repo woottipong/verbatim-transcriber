@@ -1,5 +1,16 @@
 # WebSocket Message Format Specification
 
+## 📋 Overview
+
+เอกสารนี้อธิบาย message format มาตรฐานที่ใช้สื่อสารระหว่าง **Frontend ↔ Backend** สำหรับทุก ASR providers
+
+```
+┌─────────────┐     Standardized JSON      ┌─────────────┐
+│   Browser   │ ◄────────────────────────► │  Go Backend │
+│  (Frontend) │    + Binary Audio          │   (Fiber)   │
+└─────────────┘                            └─────────────┘
+```
+
 ## Standard JSON Message Format (All Providers)
 
 ### 1. Connection Messages
@@ -83,12 +94,12 @@ func sendTranscript(conn *websocketFiber.Conn, text string, isFinal bool, confid
 
 ### Provider Status
 
-| Provider | Backend Handler | Uses sendTranscript() | Format                                 |
-| -------- | --------------- | --------------------- | -------------------------------------- |
-| Deepgram | ❌ Stub only     | N/A                   | Native Deepgram format (to be wrapped) |
-| Gemini   | ✅ Working       | ✅ Yes                 | Standard format                        |
-| Google   | ✅ Working       | ✅ Yes                 | Standard format                        |
-| Azure    | ✅ Working       | ✅ Yes                 | Standard format                        |
+| Provider | Backend Handler | Protocol            | Uses sendTranscript() | Status                                 |
+| -------- | --------------- | ------------------- | --------------------- | -------------------------------------- |
+| Deepgram | ❌ Stub only     | WebSocket (Direct)  | N/A                   | Frontend connects directly to Deepgram |
+| Gemini   | ✅ Working       | REST + Batch        | ✅ Yes                 | Standard format                        |
+| Google   | ✅ Working       | gRPC Streaming      | ✅ Yes                 | Standard format                        |
+| Azure    | ✅ Working       | WebSocket Streaming | ✅ Yes                 | Standard format                        |
 
 ## Frontend Implementation
 
@@ -150,12 +161,24 @@ const handleSocketMessage = useCallback((event: MessageEvent) => {
 
 ## Audio Format Requirements
 
-| Provider | Sample Rate | Format       | Encoding             |
-| -------- | ----------- | ------------ | -------------------- |
-| Deepgram | 48000 Hz    | Linear16 PCM | Int16                |
-| Gemini   | 16000 Hz    | WAV          | PCM → WAV conversion |
-| Google   | 48000 Hz    | Linear16 PCM | Int16                |
-| Azure    | 16000 Hz    | WAV          | PCM → WAV conversion |
+| Provider | Sample Rate | Format       | Encoding             | Notes                  |
+| -------- | ----------- | ------------ | -------------------- | ---------------------- |
+| Deepgram | 48000 Hz    | Linear16 PCM | Int16                | Direct to Deepgram API |
+| Gemini   | 16000 Hz    | WAV          | PCM → WAV conversion | Batch processing       |
+| Google   | 48000 Hz    | Linear16 PCM | Int16                | gRPC streaming         |
+| Azure    | 16000 Hz    | WAV          | PCM + RIFF header    | WebSocket streaming    |
+
+## Architecture Per Provider
+
+```
+Deepgram:  Frontend ──────────────────────► Deepgram API (Direct WebSocket)
+
+Gemini:    Frontend ──► Backend ──► Gemini REST API (Batch)
+
+Google:    Frontend ──► Backend ──► Google gRPC (Streaming)
+
+Azure:     Frontend ──► Backend ──► Azure WebSocket (Streaming)
+```
 
 ## Testing Checklist
 
@@ -166,6 +189,17 @@ const handleSocketMessage = useCallback((event: MessageEvent) => {
 - [x] Frontend hooks handle all message types consistently
 - [x] Deepgram hook has fallback for native format
 - [x] All providers use correct sample rates
+- [x] Azure WebSocket streaming with interim results
+- [x] Google gRPC streaming with interim results
+
+## Related Documentation
+
+| Document                                           | Description                             |
+| -------------------------------------------------- | --------------------------------------- |
+| [AZURE_WEBSOCKET_FLOW.md](AZURE_WEBSOCKET_FLOW.md) | Azure WebSocket binary protocol details |
+| [GOOGLE_GRPC_FLOW.md](GOOGLE_GRPC_FLOW.md)         | Google gRPC/Protobuf flow               |
+| [VAD_CONFIGURATION.md](VAD_CONFIGURATION.md)       | VAD settings for all providers          |
+| [PROVIDERS.md](PROVIDERS.md)                       | Provider overview and setup             |
 
 ## Migration Notes
 
@@ -174,7 +208,17 @@ const handleSocketMessage = useCallback((event: MessageEvent) => {
 2. ✅ Fixed `common.go` TranscriptResponse to use `isFinal` instead of `is_final`
 3. ✅ Updated Gemini handler to use `sendTranscript()` instead of manual map
 4. ✅ Updated Deepgram frontend hook to handle both formats (standard + native)
+5. ✅ **Azure: Migrated from REST API to WebSocket API** (interim results support)
 
 ### Backward Compatibility:
 - Deepgram frontend hook can handle both the new standard format and Deepgram's native format
 - No breaking changes for existing connections
+
+### Performance Comparison:
+
+| Provider | Latency (Interim) | Latency (Final) | Streaming Limit |
+| -------- | ----------------- | --------------- | --------------- |
+| Deepgram | ~200ms            | ~300ms          | No limit        |
+| Gemini   | N/A (batch)       | ~2-3s           | N/A             |
+| Google   | ~300-500ms        | ~500-1000ms     | **5 minutes**   |
+| Azure    | ~200-300ms        | ~500-1000ms     | No limit        |
