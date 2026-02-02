@@ -1,0 +1,31 @@
+{
+  "name": "thai-verbatim-transcriber",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "backend:install": "cd backend && npm install && cd ..",
+    "backend:start": "cd backend && npm start && cd ..",
+    "full-setup": "npm install && npm run backend:install",
+    "full-dev": "npm run dev & cd backend && npm start"
+  },
+  "dependencies": {
+    "@google-cloud/speech": "^7.2.1",
+    "@ricky0123/vad-react": "^0.0.36",
+    "lucide-react": "^0.563.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "autoprefixer": "^10.4.17",
+    "postcss": "^8.4.35",
+    "tailwindcss": "^3.4.1",
+    "typescript": "~5.8.2",
+    "vite": "^6.2.0"
+  }
+}
