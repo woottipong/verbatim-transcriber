@@ -1,355 +1,222 @@
-# 🎙️ Thai Verbatim Transcriber
+# 📋 Project Summary - Thai Verbatim Transcriber
 
-Real-time Thai speech-to-text transcription comparing **Deepgram Nova-2** vs **Gemini 2.0 Flash** side-by-side.
+Last Updated: February 2, 2026
 
-## 📋 Project Overview
+## 🎯 Overview
+Real-time Thai speech-to-text web application comparing **Deepgram Nova-2** vs **Gemini 2.0 Flash** side-by-side for verbatim transcription accuracy.
 
-| Key              | Value                                                         |
-| ---------------- | ------------------------------------------------------------- |
-| **Type**         | Web App - Real-time Thai Speech-to-Text                       |
-| **Purpose**      | Verbatim transcription comparison (Deepgram vs Gemini)        |
-| **Stack**        | React 19 + TypeScript + Vite (Frontend), Go + Fiber (Backend) |
-| **Architecture** | Provider-based modular backend, Custom React hooks            |
-| **Language**     | Thai (ภาษาไทย)                                                |
+## 🏗️ Current Architecture
 
-## ✨ Features
-
-- **Dual ASR Comparison** - Deepgram Nova-2 vs Gemini 2.0 Flash side-by-side
-- **Real-time Streaming** - Live transcription as you speak
-- **Verbatim Output** - No auto-formatting (`smart_format: false`)
-- **VAD Integration** - Voice Activity Detection (Silero VAD)
-- **Audio Visualization** - Real-time waveform display
-- **Interim Results** - Preview text before final confirmation
-- **Provider Architecture** - Easy to add new ASR providers
-
-## 🏗️ Architecture
-
+### Project Structure
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Frontend (React)                         │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────────────┐   │
-│  │ useDeepgram  │  │  useGemini   │  │       useVAD         │   │
-│  │   (hook)     │  │   (hook)     │  │  (Silero VAD model)  │   │
-│  └──────┬───────┘  └──────┬───────┘  └──────────┬───────────┘   │
-│         │                 │                      │               │
-│         │    WebSocket    │     WebSocket        │  Audio Stream │
-│         └────────┬────────┴──────────────────────┘               │
-└──────────────────┼───────────────────────────────────────────────┘
-                   │
-                   ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Backend (Node.js + WebSocket)                 │
-│  ┌────────────────────────────────────────────────────────────┐ │
-│  │                     WebSocket Server                        │ │
-│  │           /deepgram              /gemini                    │ │
-│  └──────────────┬───────────────────────┬─────────────────────┘ │
-│                 │                       │                       │
-│     ┌───────────▼───────────┐  ┌────────▼────────────┐         │
-│     │  DeepgramProvider     │  │   GeminiProvider    │         │
-│     │  - Real-time stream   │  │   - Batch process   │         │
-│     │  - 48kHz PCM          │  │   - 16kHz WAV       │         │
-│     │  - Interim results    │  │   - ~2sec chunks    │         │
-│     └───────────┬───────────┘  └────────┬────────────┘         │
-│                 │                       │                       │
-└─────────────────┼───────────────────────┼───────────────────────┘
-                  │                       │
-                  ▼                       ▼
-         ┌───────────────┐       ┌────────────────┐
-         │  Deepgram API │       │   Gemini API   │
-         │  (nova-2, th) │       │ (2.0-flash)    │
-         └───────────────┘       └────────────────┘
+thai-verbatim-transcriber/
+│
+├── frontend/                   # React 19 + TypeScript + Vite
+│   ├── .env                    # Environment config (gitignored)
+│   ├── .env.example            # Environment template
+│   ├── vite-env.d.ts           # TypeScript env declarations
+│   ├── package.json            # Frontend dependencies
+│   ├── App.tsx, index.tsx
+│   ├── components/, hooks/, lib/
+│   ├── public/                 # VAD WASM files
+│   └── metadata.json
+│
+├── backend-go/                 # Go + Fiber WebSocket server
+│   ├── .env                    # API keys (gitignored)
+│   ├── .env.example            # Environment template
+│   ├── main.go
+│   ├── config/, handlers/, routes/, utils/
+│   └── go.mod
+│
+├── run.sh                      # Quick start (both servers)
+├── start.sh                    # Full setup + start
+└── README.md                   # Main documentation
 ```
 
-## 🚀 Quick Start
+## 🔧 Key Technologies
 
-### Prerequisites
-- Node.js 18+ 
-- Go 1.22+ (for backend)
-- Deepgram API Key (https://deepgram.com)
-- Gemini API Key (https://aistudio.google.com)
+### Frontend
+- **React 19** - UI framework
+- **TypeScript** - Type safety
+- **Vite 6** - Build tool & dev server
+- **Tailwind CSS** - Styling
+- **Web Audio API** - Audio processing (48kHz/16kHz)
+- **WebSocket** - Real-time communication
+- **Silero VAD** - Voice Activity Detection (optional)
+- **Environment Variables** - `VITE_BACKEND_URL` for backend config
 
-### One Command Setup
+### Backend
+- **Go 1.22+** - High-performance server
+- **Fiber** - Web framework (Express-like)
+- **Gorilla WebSocket** - WebSocket handling
+- **Deepgram SDK** - Nova-2 streaming ASR
+- **Gemini SDK** - 2.0 Flash batch ASR
+- **Environment Variables** - `DEEPGRAM_API_KEY`, `GEMINI_API_KEY`
 
+## 📡 Communication Flow
+
+```
+Microphone → ScriptProcessorNode → WebSocket Client
+                                        ↓
+                            ws://localhost:3000/{provider}
+                                        ↓
+                                  Go WebSocket Server
+                                  /     ↓      \
+                          Deepgram   Fiber    Gemini
+                          (48kHz)   Router    (16kHz)
+                              ↓                  ↓
+                         Real-time          Batch (~2s)
+                         Streaming          Processing
+                              ↓                  ↓
+                         WebSocket ← JSON ← WebSocket
+                              ↓                  ↓
+                         React UI          React UI
+```
+
+## 🔑 Environment Configuration
+
+### Frontend (.env)
 ```bash
-./run.sh
+VITE_BACKEND_URL=ws://localhost:3000  # Backend WebSocket URL
 ```
 
-### Manual Setup
-
-**1. Install Dependencies**
+### Backend (.env)
 ```bash
-# Frontend
-cd frontend && npm install
-
-# Backend (Go)
-cd backend-go && go mod download
+DEEPGRAM_API_KEY=your_key_here
+GEMINI_API_KEY=your_key_here
+PORT=3000
 ```
 
-**2. Configure Environment**
-```bash
-# Backend environment (required)
-cd backend-go
-cp .env.example .env
-# Edit and add:
-# DEEPGRAM_API_KEY=your_key
-# GEMINI_API_KEY=your_key
+## 🚀 Deployment
 
-# Frontend environment (optional - for custom backend URL)
-cd ../frontend
-cp .env.example .env
-# VITE_BACKEND_URL=ws://localhost:3000 (default)
+### Quick Start
+```bash
+./run.sh  # Starts both frontend & backend
 ```
 
-**3. Start Servers**
-
+### Manual Start
 ```bash
-# Terminal 1 - Backend (port 3000)
+# Terminal 1 - Backend
 cd backend-go && go run main.go
 
-# Terminal 2 - Frontend (port 5173)
+# Terminal 2 - Frontend
 cd frontend && npm run dev
 ```
 
-**4. Open Browser**
-```
-http://localhost:5173
-```
-
-## 📁 Project Structure
-
-```
-thai-verbatim-transcriber/
-├── frontend/                   # Frontend React app
-│   ├── App.tsx                 # Main app component (dual panel layout)
-│   ├── types.ts                # Shared TypeScript interfaces
-│   ├── index.tsx               # React entry point
-│   ├── index.css               # Tailwind CSS styles
-│   ├── package.json            # Frontend dependencies
-│   ├── vite.config.ts          # Vite configuration
-│   ├── tsconfig.json           # TypeScript configuration
-│   │
-│   ├── hooks/
-│   │   ├── useDeepgram.ts      # Deepgram WebSocket streaming
-│   │   ├── useGemini.ts        # Gemini WebSocket streaming
-│   │   ├── useVAD.ts           # Voice Activity Detection (Silero)
-│   │   ├── useAudioVisualizer.ts # Canvas waveform visualization
-│   │   └── useAudioDevices.ts  # Microphone device selection
-│   │
-│   ├── components/
-│   │   ├── ConnectionBadge.tsx # Connection status indicator
-│   │   ├── RecordButton.tsx    # Start/stop recording button
-│   │   ├── ErrorBanner.tsx     # Error display component
-│   │   ├── TranscriptPanel.tsx # Transcript display area
-│   │   ├── Visualizer.tsx      # Audio waveform canvas
-│   │   ├── SettingsModal.tsx   # Configuration modal
-│   │   └── VADInfoBadge.tsx    # VAD status display
-│   │
-│   ├── lib/
-│   │   ├── constants.ts        # Default config, app constants
-│   │   └── utils.ts            # Utility functions
-│   │
-│   ├── public/
-│   │   ├── vad.config.js       # VAD WASM configuration
-│   │   └── *.wasm, *.onnx      # VAD model files
-│   │
-│   └── metadata.json           # App metadata (permissions)
-│
-├── backend-go/                 # Backend Go server
-│   ├── main.go                 # Main entry point
-│   ├── go.mod                  # Go dependencies
-│   ├── .env                    # Backend environment (gitignored)
-│   ├── .env.example            # Backend environment template
-│   ├── config/
-│   │   └── config.go           # Configuration management
-│   ├── handlers/
-│   │   ├── deepgram.go         # Deepgram WebSocket handler
-│   │   └── gemini.go           # Gemini WebSocket handler
-│   ├── routes/
-│   │   └── routes.go           # Route setup
-│   └── utils/
-│       └── audio.go            # Audio processing utilities
-│
-├── run.sh                      # Quick start script (both servers)
-├── start.sh                    # Full setup and start script
-└── README.md                   # This file
-```
-
-## 🔧 Key Technical Details
-
-### Audio Pipeline
-
-```
-Microphone (48kHz)
-    │
-    ▼
-ScriptProcessorNode (buffer: 4096)
-    │
-    ├──► Deepgram: Raw PCM Int16 @ 48kHz (streaming)
-    │
-    └──► Gemini: Downsample to 16kHz → Batch 64KB → Convert to WAV
-```
-
-### ASR Provider Comparison
-
-| Feature             | Deepgram Nova-2 | Gemini 2.0 Flash            |
-| ------------------- | --------------- | --------------------------- |
-| **Mode**            | True streaming  | Batch (~2 sec chunks)       |
-| **Sample Rate**     | 48,000 Hz       | 16,000 Hz                   |
-| **Format**          | Linear16 PCM    | WAV with header             |
-| **Interim Results** | ✅ Yes           | ❌ No                        |
-| **Latency**         | ~200ms          | ~2-3 sec                    |
-| **Thai Quality**    | Excellent       | Good (may add filler words) |
-
-### VAD (Voice Activity Detection)
-
-- **Library**: `@ricky0123/vad-react` (Silero VAD model)
-- **Purpose**: Detect speech to optimize bandwidth
-- **Fallback**: If VAD unavailable, streams all audio
-- **Config**: Threshold adjustable (0.1 - 0.9)
-
-### Critical Code Rules
-
-1. **Deepgram**: Keep `smart_format: false` for verbatim output
-2. **Gemini**: Use strict prompt to prevent hallucination (adding words not spoken)
-3. **Audio**: Always convert to correct sample rate before sending
-4. **WebSocket**: Handle connection states (DISCONNECTED → CONNECTING → CONNECTED)
-
-## ⚙️ Configuration
-
-### Frontend Config (`lib/constants.ts`)
-
-```typescript
-export const DEFAULT_CONFIG: AppConfig = {
-  backendUrl: 'ws://localhost:3000',
-  vadConfig: {
-    enabled: false,    // VAD disabled by default
-    threshold: 0.4,    // Speech detection sensitivity
-  },
-};
-```
-
-### Backend Config (`backend/src/config.ts`)
-
-```typescript
-// Deepgram - Streaming ASR
-DEEPGRAM_CONFIG = {
-  model: 'nova-2',
-  language: 'th',
-  smart_format: false,  // CRITICAL: Keep false for verbatim
-  interim_results: true,
-  encoding: 'linear16',
-  sample_rate: 48000,
-}
-
-// Gemini - Batch ASR
-GEMINI_CONFIG = {
-  model: 'gemini-2.0-flash',
-  temperature: 0,       // Deterministic output
-  systemInstruction: '...',  // Anti-hallucination prompt
-}
-```
-
-## 🛠️ Scripts
-
+### Production Build
 ```bash
 # Frontend
-npm run dev           # Start Vite dev server (port 5173)
-npm run build         # Production build
-npm run preview       # Preview production build
+cd frontend && npm run build
+# Output: dist/
 
 # Backend
-cd backend
-npm run dev           # Start with ts-node (hot reload)
-npm run build         # Compile TypeScript
-npm start             # Run compiled JavaScript
-
-# Full Stack
-./run.sh              # Install deps + start both servers
-./start.sh            # Start both without install
+cd backend-go && go build -o transcriber-backend
+# Output: transcriber-backend executable
 ```
 
-## 🔌 API Endpoints
+## 🎤 Audio Processing
 
-### Backend WebSocket Endpoints
+| Provider | Sample Rate | Format    | Mode      | Latency |
+| -------- | ----------- | --------- | --------- | ------- |
+| Deepgram | 48,000 Hz   | PCM Int16 | Streaming | ~200ms  |
+| Gemini   | 16,000 Hz   | WAV       | Batch     | ~2-3s   |
 
-| Endpoint                       | Provider | Description             |
-| ------------------------------ | -------- | ----------------------- |
-| `ws://localhost:3000/deepgram` | Deepgram | Real-time streaming ASR |
-| `ws://localhost:3000/gemini`   | Gemini   | Batch processing ASR    |
-| `GET /health`                  | -        | Health check            |
+**Audio Pipeline:**
+1. Microphone → 48kHz capture
+2. ScriptProcessorNode (4096 buffer)
+3. **Deepgram:** Direct PCM stream
+4. **Gemini:** Downsample → 64KB batches → WAV conversion
 
-### WebSocket Message Format
+## 🔧 Key Features
 
-**Client → Server**: Binary audio data (PCM Int16)
+### Implemented ✅
+- Dual ASR comparison (Deepgram + Gemini)
+- Real-time audio streaming
+- Voice Activity Detection (Silero VAD)
+- Audio visualization (waveform)
+- Connection state management
+- Error handling & recovery
+- Interim results preview
+- Device selection (microphone)
+- Settings persistence (localStorage)
+- Environment-based configuration
 
-**Server → Client (Deepgram)**:
-```json
-{
-  "type": "Results",
-  "channel": {
-    "alternatives": [{ "transcript": "ข้อความภาษาไทย" }]
-  },
-  "is_final": true
-}
+### Architecture Highlights
+- **Modular Backend:** Provider-based handlers (easy to add new ASR)
+- **Custom React Hooks:** useDeepgram, useGemini, useVAD
+- **Standalone Frontend:** Can be deployed separately with env config
+- **Type Safety:** Full TypeScript coverage
+- **Performance:** Go backend for high concurrency
+
+## 📝 Recent Changes
+
+### Migration to Modular Structure (Feb 2, 2026)
+1. **Frontend Separation**
+   - Moved all frontend code to `frontend/` folder
+   - Added environment variable support (`VITE_BACKEND_URL`)
+   - Created `vite-env.d.ts` for TypeScript env types
+   - Frontend can now be deployed standalone
+
+2. **Environment Management**
+   - Backend env files moved to `backend-go/`
+   - Frontend env files in `frontend/`
+   - Each module has its own `.env.example`
+
+3. **Removed from Root**
+   - `package.json` (no longer needed)
+   - `node_modules/` (moved to frontend/)
+   - `package-lock.json`
+   - All config files (distributed to modules)
+
+## 🧪 Testing
+
+### Frontend
+```bash
+cd frontend
+npm run build  # Test build
+npm run preview  # Test production build
 ```
 
-**Server → Client (Gemini)**:
-```json
-{
-  "type": "transcript",
-  "text": "ข้อความภาษาไทย",
-  "is_final": true
-}
+### Backend
+```bash
+cd backend-go
+go test ./...  # Run tests (if available)
+go run main.go  # Manual testing
 ```
 
-## 🐛 Troubleshooting
+## 📚 Documentation
 
-| Problem                 | Solution                                |
-| ----------------------- | --------------------------------------- |
-| No audio                | Check browser microphone permission     |
-| Connection failed       | Verify backend is running on port 3000  |
-| Empty transcripts       | Check API keys in backend/.env          |
-| Gemini adds extra words | Known issue - prompt tuning in progress |
-| VAD not working         | WASM files needed in public/ folder     |
-| Port 3000 in use        | `lsof -ti:3000 \| xargs kill -9`        |
+- [Main README](README.md) - Project overview & setup
+- [Frontend README](frontend/README.md) - Frontend-specific docs
+- [Backend README](backend-go/README.md) - Backend-specific docs (if exists)
 
-## 📝 Adding a New ASR Provider
+## 🎯 Future Enhancements
 
-1. Create `backend/src/providers/newprovider.ts`:
-```typescript
-import type { ASRProvider } from '../types.js';
+- [ ] Add unit tests (frontend & backend)
+- [ ] Docker Compose setup
+- [ ] CI/CD pipeline
+- [ ] Additional ASR providers (Google Speech-to-Text)
+- [ ] Export transcripts (TXT, JSON, SRT)
+- [ ] Real-time translation
+- [ ] Multi-language support
+- [ ] Performance monitoring
+- [ ] WebRTC for better audio quality
 
-export class NewProvider implements ASRProvider {
-  name = 'NewProvider';
-  
-  async connect(ws: WebSocket, onTranscript: (text: string, isFinal: boolean) => void) {
-    // Setup connection to ASR service
-  }
-  
-  send(audioData: ArrayBuffer) {
-    // Send audio to ASR service
-  }
-  
-  disconnect() {
-    // Cleanup
-  }
-}
-```
+## 🔗 External Services
 
-2. Register in `backend/src/providers/index.ts`
-3. Add route in `backend/src/server.ts`
-4. Create frontend hook `hooks/useNewProvider.ts`
+| Service    | Usage                    | Docs                                   |
+| ---------- | ------------------------ | -------------------------------------- |
+| Deepgram   | Speech-to-Text API       | https://developers.deepgram.com        |
+| Gemini     | Multimodal AI API        | https://ai.google.dev                  |
+| Silero VAD | Voice Activity Detection | https://github.com/snakers4/silero-vad |
 
-## 🔒 Security Notes
+## 👥 Development
 
-- **API Keys**: Store in `.env` files (never commit to git)
-- **Backend Mode**: Always use relay server in production
-- **CORS**: Configured for localhost in development
+**Agent Mode:** `fullstack-agent`  
+**Languages:** Thai & English  
+**Stack Expertise:** React, TypeScript, Go, WebSocket, ASR APIs
 
-## 📄 License
+---
 
-MIT
-
-## 👤 Author
-
-Woottipong ([@woottipong](https://github.com/woottipong))
+**ความพร้อม:** Production-ready for deployment  
+**ใช้งานได้:** ทั้ง development และ production

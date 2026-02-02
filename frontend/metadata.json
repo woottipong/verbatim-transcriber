@@ -1,6 +1,6 @@
 {
   "name": "Thai Verbatim Transcriber",
-  "description": "Real-time, low-latency Thai speech-to-text application using Deepgram Nova-2 with verbatim accuracy.",
+  "description": "Real-time Thai speech-to-text comparing Deepgram Nova-2 vs Gemini 2.0 Flash with verbatim accuracy.",
   "requestFramePermissions": [
     "microphone"
   ]
