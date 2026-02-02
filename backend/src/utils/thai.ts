@@ -41,6 +41,9 @@ export function cleanGeminiTranscription(text: string): string {
         // Remove markdown
         .replace(/```[\s\S]*?```/g, '')
         .replace(/`/g, '')
+        // Remove empty quotes (hallucination)
+        .replace(/""/g, '')
+        .replace(/"\s*"/g, '')
         // Remove periods after Thai text
         .replace(/([\u0E00-\u0E7F])\./g, '$1')
         // Remove repeated words

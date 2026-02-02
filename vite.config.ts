@@ -18,4 +18,21 @@ export default defineConfig({
       '@': path.resolve(__dirname, '.'),
     }
   },
+  optimizeDeps: {
+    include: ['@ricky0123/vad-react', '@ricky0123/vad-web'],
+  },
+  worker: {
+    format: 'es',
+  },
+  assetsInclude: ['**/*.onnx', '**/*.wasm'],
+  build: {
+    sourcemap: false,
+    rollupOptions: {
+      onwarn(warning, warn) {
+        // Ignore sourcemap warnings from vad-react
+        if (warning.code === 'SOURCEMAP_ERROR') return;
+        warn(warning);
+      },
+    },
+  },
 });

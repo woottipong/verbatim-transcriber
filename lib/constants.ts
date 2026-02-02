@@ -36,14 +36,14 @@ export const ASR_PROVIDERS = {
 export const DEEPGRAM_CONFIG = {
     MODEL: 'nova-2',
     LANGUAGE: 'th',
-    SMART_FORMAT: false, // CRITICAL: Keep false for verbatim transcription
+    SMART_FORMAT: true, // Enable for better formatting (numbers, spacing, etc.)
     INTERIM_RESULTS: true,
-    PUNCTUATE: false,
-    FILLER_WORDS: false, // Don't filter filler words for verbatim
+    PUNCTUATE: true, // Enable for Thai readability
+    FILLER_WORDS: false, // Keep filler words for verbatim
     DIARIZE: false,
     UTTERANCES: false,
-    ENDPOINTING: false, // Don't auto-segment, let speech flow naturally
-    VAD_TURNOFF: 0, // Disable Deepgram's VAD (using Silero instead)
+    ENDPOINTING: 2000, // Wait 2 seconds of silence before finalizing
+    VAD_TURNOFF: 2000, // Enable Deepgram VAD, wait 2 sec before cutting
     API_BASE_URL: 'wss://api.deepgram.com/v1/listen',
 } as const;
 
@@ -96,8 +96,8 @@ export const DEFAULT_CONFIG = {
         },
     },
     vadConfig: {
-        enabled: false, // Disabled - Silero VAD has WASM issues with Vite
-        threshold: 0.4, // Optimized for Thai (lower for soft consonants)
+        enabled: false, // ⚠️ DISABLED: VAD has WASM compatibility issues with Vite
+        threshold: 0.4, // Fallback mode: streams all audio (works perfectly)
     },
 } as const;
 
