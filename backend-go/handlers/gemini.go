@@ -144,16 +144,9 @@ func handleGeminiAudioData(conn *websocketFiber.Conn, session *GeminiSession, da
 					log.Printf("📝 [Gemini] %s\n", cleaned)
 
 					response := map[string]interface{}{
-						"type":     "transcript",
-						"is_final": true,
-						"channel": map[string]interface{}{
-							"alternatives": []map[string]interface{}{
-								{
-									"transcript": cleaned,
-									"confidence": 1.0,
-								},
-							},
-						},
+						"type":    "transcript",
+						"text":    cleaned,
+						"isFinal": true,
 					}
 
 					if err := conn.WriteJSON(response); err != nil {
