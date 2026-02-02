@@ -2,17 +2,15 @@
 
 Real-time Thai speech-to-text transcription comparing **Deepgram Nova-2** vs **Gemini 2.0 Flash** side-by-side.
 
-![Thai Verbatim Transcriber](https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6)
-
 ## 📋 Project Overview
 
-| Key | Value |
-|-----|-------|
-| **Type** | Web App - Real-time Thai Speech-to-Text |
-| **Purpose** | Verbatim transcription comparison (Deepgram vs Gemini) |
-| **Stack** | React 19 + TypeScript + Vite (Frontend), Node.js + WebSocket (Backend) |
-| **Architecture** | Provider-based modular backend, Custom React hooks |
-| **Language** | Thai (ภาษาไทย) |
+| Key              | Value                                                                  |
+| ---------------- | ---------------------------------------------------------------------- |
+| **Type**         | Web App - Real-time Thai Speech-to-Text                                |
+| **Purpose**      | Verbatim transcription comparison (Deepgram vs Gemini)                 |
+| **Stack**        | React 19 + TypeScript + Vite (Frontend), Node.js + WebSocket (Backend) |
+| **Architecture** | Provider-based modular backend, Custom React hooks                     |
+| **Language**     | Thai (ภาษาไทย)                                                         |
 
 ## ✨ Features
 
@@ -177,14 +175,14 @@ ScriptProcessorNode (buffer: 4096)
 
 ### ASR Provider Comparison
 
-| Feature | Deepgram Nova-2 | Gemini 2.0 Flash |
-|---------|-----------------|------------------|
-| **Mode** | True streaming | Batch (~2 sec chunks) |
-| **Sample Rate** | 48,000 Hz | 16,000 Hz |
-| **Format** | Linear16 PCM | WAV with header |
-| **Interim Results** | ✅ Yes | ❌ No |
-| **Latency** | ~200ms | ~2-3 sec |
-| **Thai Quality** | Excellent | Good (may add filler words) |
+| Feature             | Deepgram Nova-2 | Gemini 2.0 Flash            |
+| ------------------- | --------------- | --------------------------- |
+| **Mode**            | True streaming  | Batch (~2 sec chunks)       |
+| **Sample Rate**     | 48,000 Hz       | 16,000 Hz                   |
+| **Format**          | Linear16 PCM    | WAV with header             |
+| **Interim Results** | ✅ Yes           | ❌ No                        |
+| **Latency**         | ~200ms          | ~2-3 sec                    |
+| **Thai Quality**    | Excellent       | Good (may add filler words) |
 
 ### VAD (Voice Activity Detection)
 
@@ -258,11 +256,11 @@ npm start             # Run compiled JavaScript
 
 ### Backend WebSocket Endpoints
 
-| Endpoint | Provider | Description |
-|----------|----------|-------------|
+| Endpoint                       | Provider | Description             |
+| ------------------------------ | -------- | ----------------------- |
 | `ws://localhost:3000/deepgram` | Deepgram | Real-time streaming ASR |
-| `ws://localhost:3000/gemini` | Gemini | Batch processing ASR |
-| `GET /health` | - | Health check |
+| `ws://localhost:3000/gemini`   | Gemini   | Batch processing ASR    |
+| `GET /health`                  | -        | Health check            |
 
 ### WebSocket Message Format
 
@@ -290,14 +288,14 @@ npm start             # Run compiled JavaScript
 
 ## 🐛 Troubleshooting
 
-| Problem | Solution |
-|---------|----------|
-| No audio | Check browser microphone permission |
-| Connection failed | Verify backend is running on port 3000 |
-| Empty transcripts | Check API keys in backend/.env |
+| Problem                 | Solution                                |
+| ----------------------- | --------------------------------------- |
+| No audio                | Check browser microphone permission     |
+| Connection failed       | Verify backend is running on port 3000  |
+| Empty transcripts       | Check API keys in backend/.env          |
 | Gemini adds extra words | Known issue - prompt tuning in progress |
-| VAD not working | WASM files needed in public/ folder |
-| Port 3000 in use | `lsof -ti:3000 \| xargs kill -9` |
+| VAD not working         | WASM files needed in public/ folder     |
+| Port 3000 in use        | `lsof -ti:3000 \| xargs kill -9`        |
 
 ## 📝 Adding a New ASR Provider
 
