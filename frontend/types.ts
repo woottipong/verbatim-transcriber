@@ -89,6 +89,11 @@ export interface ProviderConfig {
     apiKey?: string;       // Gemini API key
     temperature?: number;  // 0-1
   };
+  azure?: {
+    subscriptionKey?: string; // Azure Speech Service subscription key
+    region?: string;          // Azure region (e.g., 'southeastasia')
+    model?: string;           // 'default', 'enhanced', etc.
+  };
 }
 
 /**

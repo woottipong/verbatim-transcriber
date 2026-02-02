@@ -1,5 +1,5 @@
 /**
- * Gemini 2.0 Flash Hook
+ * Azure Speech Service Hook
  * Backend relay for audio transcription via Go server (16kHz PCM)
  */
 
@@ -14,10 +14,10 @@ import {
     cleanupAudio,
     cleanupWebSocket,
     addFinalTranscript,
-    cleanGeminiText,
+    cleanThaiText,
 } from '../lib/audio';
 
-export const useGemini = (config: AppConfig, sharedVAD?: SharedVADProps) => {
+export const useAzure = (config: AppConfig, sharedVAD?: SharedVADProps) => {
     const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
     const [transcripts, setTranscripts] = useState<TranscriptSegment[]>([]);
     const [interimTranscript, setInterimTranscript] = useState<string>('');
@@ -47,7 +47,7 @@ export const useGemini = (config: AppConfig, sharedVAD?: SharedVADProps) => {
 
                 case 'transcript':
                     if (data.text) {
-                        const text = cleanGeminiText(data.text);
+                        const text = cleanThaiText(data.text);
                         if (text) {
                             if (data.isFinal) {
                                 addFinalTranscript(setTranscripts, text);
@@ -68,7 +68,7 @@ export const useGemini = (config: AppConfig, sharedVAD?: SharedVADProps) => {
                     break;
             }
         } catch (err) {
-            console.error('[Gemini] Parse error:', err);
+            console.error('[Azure] Parse error:', err);
         }
     }, []);
 
@@ -98,14 +98,14 @@ export const useGemini = (config: AppConfig, sharedVAD?: SharedVADProps) => {
         setError(null);
 
         try {
-            // 16kHz for Gemini
+            // 16kHz for Azure
             const constraints = getMicrophoneConstraints(config.audioDeviceId, 16000);
             const stream = await navigator.mediaDevices.getUserMedia(constraints);
             streamRef.current = stream;
             setMediaStream(stream);
 
             setConnectionState(ConnectionState.CONNECTING);
-            const wsUrl = `${config.backendUrl}/gemini`;
+            const wsUrl = `${config.backendUrl}/azure`;
             const socket = new WebSocket(wsUrl);
             socketRef.current = socket;
 
@@ -139,7 +139,7 @@ export const useGemini = (config: AppConfig, sharedVAD?: SharedVADProps) => {
 
             socket.onerror = () => {
                 setConnectionState(ConnectionState.ERROR);
-                setError('Failed to connect to Gemini backend');
+                setError('Failed to connect to Azure backend');
             };
         } catch (err: any) {
             setError(err.message || 'Failed to start streaming');

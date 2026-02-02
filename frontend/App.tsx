@@ -1,7 +1,9 @@
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Settings, Mic2 } from 'lucide-react';
 import { useDeepgram } from './hooks/useDeepgram';
 import { useGemini } from './hooks/useGemini';
+import { useGoogle } from './hooks/useGoogle';
+import { useAzure } from './hooks/useAzure';
 import { useAudioDevices } from './hooks/useAudioDevices';
 import { useVAD } from './hooks/useVAD';
 import Visualizer from './components/Visualizer';
@@ -14,16 +16,26 @@ import VADInfoBadge from './components/VADInfoBadge';
 import { ConnectionState, AppConfig, ASRProvider } from './types';
 import { STORAGE_KEYS, DEFAULT_CONFIG, ASR_PROVIDERS } from './lib/constants';
 import { safeJsonParse } from './lib/utils';
+import { checkAvailableProviders, isProviderEnabled, ProvidersResponse } from './lib/api';
 
 // Load initial config from localStorage or use defaults
 const getInitialConfig = (): AppConfig => {
   const saved = localStorage.getItem(STORAGE_KEYS.CONFIG);
-  return saved ? safeJsonParse<AppConfig>(saved, DEFAULT_CONFIG) : DEFAULT_CONFIG;
+  const parsedConfig = saved ? safeJsonParse<AppConfig>(saved, DEFAULT_CONFIG) : DEFAULT_CONFIG;
+
+  // Always override with env variables if available (env takes priority)
+  return {
+    ...parsedConfig,
+    apiKey: import.meta.env.VITE_DEEPGRAM_API_KEY || parsedConfig.apiKey,
+    backendUrl: import.meta.env.VITE_BACKEND_URL || parsedConfig.backendUrl,
+  };
 };
 
 export default function App() {
   const [config, setConfig] = useState<AppConfig>(getInitialConfig);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [availableProviders, setAvailableProviders] = useState<ProvidersResponse | null>(null);
+  const [isCheckingProviders, setIsCheckingProviders] = useState(false);
 
   // Shared VAD streaming state (controlled by single VAD instance)
   const isVADStreamingRef = useRef<boolean>(false);
@@ -32,28 +44,44 @@ export default function App() {
   // Get available audio devices
   const { devices: audioDevices } = useAudioDevices();
 
+  // Check which providers are available on backend
+  useEffect(() => {
+    const checkProviders = async () => {
+      if (config.useBackend) {
+        try {
+          setIsCheckingProviders(true);
+          const providers = await checkAvailableProviders(config.backendUrl);
+          setAvailableProviders(providers);
+        } catch (error) {
+          setAvailableProviders(null); // Fallback to allow all
+        } finally {
+          setIsCheckingProviders(false);
+        }
+      }
+    };
+    checkProviders();
+  }, [config.useBackend, config.backendUrl]);
+
   // Single shared VAD instance for both providers
   const vad = useVAD({
     config: config.vadConfig || { enabled: false, threshold: 0.5 },
     audioDeviceId: config.audioDeviceId,
     onSpeechStart: () => {
-      console.log('🎤 [Shared VAD] Speech detected');
       isVADStreamingRef.current = true;
       setVadIsSpeaking(true);
     },
     onSpeechEnd: () => {
-      console.log('🔇 [Shared VAD] Speech ended');
       isVADStreamingRef.current = false;
       setVadIsSpeaking(false);
     },
-    onVADMisfire: () => {
-      console.log('⚠️ [Shared VAD] VAD misfire');
-    },
+    onVADMisfire: () => { },
   });
 
-  // Use BOTH hooks simultaneously with shared VAD state
+  // Use ALL 4 hooks simultaneously with shared VAD state
   const deepgramHook = useDeepgram(config, { vad, isVADStreamingRef });
   const geminiHook = useGemini(config, { vad, isVADStreamingRef });
+  const googleHook = useGoogle(config, { vad, isVADStreamingRef });
+  const azureHook = useAzure(config, { vad, isVADStreamingRef });
 
   // VAD status from shared VAD
   const vadStatus = {
@@ -62,13 +90,17 @@ export default function App() {
     isLoading: vad.isLoading,
   };
 
-  // Check if either is connected
+  // Check if any provider is connected
   const isConnected =
     deepgramHook.connectionState === ConnectionState.CONNECTED ||
-    geminiHook.connectionState === ConnectionState.CONNECTED;
+    geminiHook.connectionState === ConnectionState.CONNECTED ||
+    googleHook.connectionState === ConnectionState.CONNECTED ||
+    azureHook.connectionState === ConnectionState.CONNECTED;
   const isConnecting =
     deepgramHook.connectionState === ConnectionState.CONNECTING ||
-    geminiHook.connectionState === ConnectionState.CONNECTING;
+    geminiHook.connectionState === ConnectionState.CONNECTING ||
+    googleHook.connectionState === ConnectionState.CONNECTING ||
+    azureHook.connectionState === ConnectionState.CONNECTING;
 
   // Handlers
   const handleConfigSave = useCallback((newConfig: AppConfig) => {
@@ -90,9 +122,11 @@ export default function App() {
 
   const handleToggleListening = useCallback(async () => {
     if (isConnected || isConnecting) {
-      // Stop both + VAD
+      // Stop all providers + VAD
       deepgramHook.stopStreaming();
       geminiHook.stopStreaming();
+      googleHook.stopStreaming();
+      azureHook.stopStreaming();
       if (config.vadConfig?.enabled) {
         vad.pause();
         isVADStreamingRef.current = false;
@@ -101,27 +135,31 @@ export default function App() {
       // Check VAD status before starting
       if (config.vadConfig?.enabled) {
         if (vad.isLoading) {
-          // VAD still loading - stream all as fallback
-          console.log('⏳ [App] VAD still loading, streaming all audio as fallback');
           isVADStreamingRef.current = true;
         } else if (vad.isReady) {
           await vad.start();
-          console.log('🎯 [App] Shared VAD started');
-          // isVADStreamingRef will be set by VAD callbacks
         } else {
-          // VAD enabled but failed to init - still allow streaming
-          console.log('⚠️ [App] VAD failed to init, streaming all audio');
           isVADStreamingRef.current = true;
         }
       } else {
-        // VAD disabled, stream all audio
-        console.log('🎯 [App] VAD disabled, streaming all audio');
         isVADStreamingRef.current = true;
       }
-      deepgramHook.startStreaming();
-      geminiHook.startStreaming();
+
+      // Only start providers that are available
+      if (isProviderEnabled(availableProviders, 'deepgram')) {
+        deepgramHook.startStreaming();
+      }
+      if (isProviderEnabled(availableProviders, 'gemini')) {
+        geminiHook.startStreaming();
+      }
+      if (isProviderEnabled(availableProviders, 'google')) {
+        googleHook.startStreaming();
+      }
+      if (isProviderEnabled(availableProviders, 'azure')) {
+        azureHook.startStreaming();
+      }
     }
-  }, [isConnected, isConnecting, deepgramHook, geminiHook, config.vadConfig, vad]);
+  }, [isConnected, isConnecting, deepgramHook, geminiHook, googleHook, azureHook, config.vadConfig, vad, availableProviders]);
 
   const handleOpenSettings = useCallback(() => setIsSettingsOpen(true), []);
   const handleCloseSettings = useCallback(() => setIsSettingsOpen(false), []);
@@ -129,11 +167,13 @@ export default function App() {
   const handleClearTranscripts = useCallback(() => {
     deepgramHook.clearTranscripts();
     geminiHook.clearTranscripts();
-  }, [deepgramHook, geminiHook]);
+    googleHook.clearTranscripts();
+    azureHook.clearTranscripts();
+  }, [deepgramHook, geminiHook, googleHook, azureHook]);
 
   // Status message
   const statusMessage = isConnecting
-    ? 'Connecting to both providers...'
+    ? 'Connecting to all providers...'
     : isConnected
       ? 'Listening... (Speak Thai)'
       : vad.isLoading
@@ -143,8 +183,15 @@ export default function App() {
   // Show config hint when there's an error and no API key configured
   const showConfigHint = !config.apiKey && !config.useBackend;
 
-  // Use Deepgram's media stream for visualizer
-  const mediaStream = deepgramHook.mediaStream || geminiHook.mediaStream;
+  // Use any available media stream for visualizer
+  const mediaStream = deepgramHook.mediaStream || geminiHook.mediaStream || googleHook.mediaStream || azureHook.mediaStream;
+
+  // Helper to check if provider is available
+  // Returns true if we haven't checked yet (null) - fallback to trying all providers
+  const checkProviderAvailable = (providerName: string) => {
+    if (availableProviders === null) return true; // Haven't checked yet, allow all
+    return isProviderEnabled(availableProviders, providerName);
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
@@ -162,11 +209,15 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
-            {/* Dual ASR Badge */}
+            {/* Multi ASR Badge */}
             <div className="flex items-center gap-2 bg-slate-800/50 backdrop-blur-sm rounded-lg px-3 py-1.5 border border-slate-700/50">
               <span className="text-xs font-medium text-indigo-400">Deepgram</span>
               <span className="text-slate-600">+</span>
               <span className="text-xs font-medium text-purple-400">Gemini</span>
+              <span className="text-slate-600">+</span>
+              <span className="text-xs font-medium text-blue-400">Google</span>
+              <span className="text-slate-600">+</span>
+              <span className="text-xs font-medium text-cyan-400">Azure</span>
             </div>
 
             {/* Audio Input Device Selector */}
@@ -202,21 +253,35 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main 2-Column Layout */}
+      {/* Main Layout */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        {/* Error Banner */}
-        {(deepgramHook.error || geminiHook.error) && (
+        {/* Error Banner - Only show for enabled providers */}
+        {(deepgramHook.error || geminiHook.error || googleHook.error || azureHook.error) && (
           <div className="mb-4 space-y-2">
-            {deepgramHook.error && (
+            {deepgramHook.error && checkProviderAvailable('deepgram') && (
               <ErrorBanner
                 error={`Deepgram: ${deepgramHook.error}`}
                 showConfigHint={showConfigHint}
                 onConfigClick={handleOpenSettings}
               />
             )}
-            {geminiHook.error && (
+            {geminiHook.error && checkProviderAvailable('gemini') && (
               <ErrorBanner
                 error={`Gemini: ${geminiHook.error}`}
+                showConfigHint={showConfigHint}
+                onConfigClick={handleOpenSettings}
+              />
+            )}
+            {googleHook.error && checkProviderAvailable('google') && (
+              <ErrorBanner
+                error={`Google: ${googleHook.error}`}
+                showConfigHint={showConfigHint}
+                onConfigClick={handleOpenSettings}
+              />
+            )}
+            {azureHook.error && checkProviderAvailable('azure') && (
+              <ErrorBanner
+                error={`Azure: ${azureHook.error}`}
                 showConfigHint={showConfigHint}
                 onConfigClick={handleOpenSettings}
               />
@@ -224,32 +289,28 @@ export default function App() {
           </div>
         )}
 
-        {/* 2-Column Grid: Desktop side-by-side, Mobile stacked */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-180px)]">
-          {/* Left: Control Panel */}
-          <div className="lg:col-span-4 flex flex-col gap-4">
-            {/* Visualizer Card */}
-            <div className="bg-slate-800/50 backdrop-blur-sm rounded-2xl shadow-xl border border-slate-700/50 p-6 flex flex-col items-center justify-center">
-              {/* Audio Visualizer */}
-              <div className="w-full mb-6">
+        {/* Control Panel - Top Section */}
+        <div className="mb-6 bg-slate-800/50 backdrop-blur-sm rounded-2xl shadow-xl border border-slate-700/50 p-6">
+          <div className="flex flex-col lg:flex-row items-center justify-between gap-6">
+            {/* Left: Visualizer + Record Button */}
+            <div className="flex flex-col items-center gap-4 lg:w-1/3">
+              <div className="w-full">
                 <Visualizer mediaStream={mediaStream} isListening={isConnected} />
               </div>
 
-              {/* Record Button - Larger */}
               <RecordButton
                 isConnected={isConnected}
                 isConnecting={isConnecting}
                 onClick={handleToggleListening}
               />
 
-              {/* Status Text */}
-              <p className="mt-4 text-sm font-medium text-slate-300 text-center">
+              <p className="text-sm font-medium text-slate-300 text-center">
                 {statusMessage}
               </p>
 
-              {/* VAD Status Indicator - Only when ready and enabled */}
+              {/* VAD Status Indicator */}
               {config.vadConfig?.enabled && isConnected && vadStatus?.isReady && (
-                <div className="mt-3 flex items-center gap-2">
+                <div className="flex items-center gap-2">
                   <div className={`w-2 h-2 rounded-full transition-colors ${vadStatus.isSpeaking ? 'bg-green-500' : 'bg-slate-600'}`}></div>
                   <span className="text-xs text-slate-400">
                     {vadStatus.isSpeaking ? 'Speaking' : 'Listening'}
@@ -258,45 +319,93 @@ export default function App() {
               )}
             </div>
 
-            {/* Stats Card */}
-            <div className="bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-700/30 p-4">
-              <div className="space-y-3">
-                <div>
-                  <p className="text-xs text-slate-400 mb-1">Deepgram</p>
-                  <div className="grid grid-cols-2 gap-2 text-center">
-                    <div>
-                      <p className="text-xl font-bold text-indigo-400">{deepgramHook.transcripts.length}</p>
-                      <p className="text-xs text-slate-500">Segments</p>
-                    </div>
-                    <div>
-                      <p className="text-xl font-bold text-indigo-300">
-                        {deepgramHook.transcripts.reduce((acc, t) => acc + t.text.length, 0)}
-                      </p>
-                      <p className="text-xs text-slate-500">Chars</p>
-                    </div>
+            {/* Right: Stats Grid */}
+            <div className="lg:w-2/3 grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Deepgram Stats */}
+              <div className={`bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-700/30 p-4 ${!checkProviderAvailable('deepgram') ? 'opacity-40' : ''}`}>
+                <p className="text-xs font-semibold text-indigo-400 mb-2 flex items-center gap-1">
+                  Deepgram Nova-2
+                  {!checkProviderAvailable('deepgram') && <span className="text-slate-500 text-[10px]">(disabled)</span>}
+                </p>
+                <div className="space-y-1">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-indigo-400">{deepgramHook.transcripts.length}</p>
+                    <p className="text-xs text-slate-500">Segments</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-indigo-300">
+                      {deepgramHook.transcripts.reduce((acc, t) => acc + t.text.length, 0)}
+                    </p>
+                    <p className="text-xs text-slate-500">Chars</p>
                   </div>
                 </div>
+              </div>
 
-                <div className="border-t border-slate-700/30 pt-3">
-                  <p className="text-xs text-slate-400 mb-1">Gemini</p>
-                  <div className="grid grid-cols-2 gap-2 text-center">
-                    <div>
-                      <p className="text-xl font-bold text-purple-400">{geminiHook.transcripts.length}</p>
-                      <p className="text-xs text-slate-500">Segments</p>
-                    </div>
-                    <div>
-                      <p className="text-xl font-bold text-purple-300">
-                        {geminiHook.transcripts.reduce((acc, t) => acc + t.text.length, 0)}
-                      </p>
-                      <p className="text-xs text-slate-500">Chars</p>
-                    </div>
+              {/* Gemini Stats */}
+              <div className={`bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-700/30 p-4 ${!checkProviderAvailable('gemini') ? 'opacity-40' : ''}`}>
+                <p className="text-xs font-semibold text-purple-400 mb-2 flex items-center gap-1">
+                  Gemini 2.0 Flash
+                  {!checkProviderAvailable('gemini') && <span className="text-slate-500 text-[10px]">(disabled)</span>}
+                </p>
+                <div className="space-y-1">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-purple-400">{geminiHook.transcripts.length}</p>
+                    <p className="text-xs text-slate-500">Segments</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-purple-300">
+                      {geminiHook.transcripts.reduce((acc, t) => acc + t.text.length, 0)}
+                    </p>
+                    <p className="text-xs text-slate-500">Chars</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Google Stats */}
+              <div className={`bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-700/30 p-4 ${!checkProviderAvailable('google') ? 'opacity-40' : ''}`}>
+                <p className="text-xs font-semibold text-blue-400 mb-2 flex items-center gap-1">
+                  Google Cloud STT
+                  {!checkProviderAvailable('google') && <span className="text-slate-500 text-[10px]">(disabled)</span>}
+                </p>
+                <div className="space-y-1">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-blue-400">{googleHook.transcripts.length}</p>
+                    <p className="text-xs text-slate-500">Segments</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-blue-300">
+                      {googleHook.transcripts.reduce((acc, t) => acc + t.text.length, 0)}
+                    </p>
+                    <p className="text-xs text-slate-500">Chars</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Azure Stats */}
+              <div className={`bg-slate-800/30 backdrop-blur-sm rounded-xl border border-slate-700/30 p-4 ${!checkProviderAvailable('azure') ? 'opacity-40' : ''}`}>
+                <p className="text-xs font-semibold text-cyan-400 mb-2 flex items-center gap-1">
+                  Azure Speech
+                  {!checkProviderAvailable('azure') && <span className="text-slate-500 text-[10px]">(disabled)</span>}
+                </p>
+                <div className="space-y-1">
+                  <div className="text-center">
+                    <p className="text-2xl font-bold text-cyan-400">{azureHook.transcripts.length}</p>
+                    <p className="text-xs text-slate-500">Segments</p>
+                  </div>
+                  <div className="text-center">
+                    <p className="text-lg font-bold text-cyan-300">
+                      {azureHook.transcripts.reduce((acc, t) => acc + t.text.length, 0)}
+                    </p>
+                    <p className="text-xs text-slate-500">Chars</p>
                   </div>
                 </div>
               </div>
             </div>
+          </div>
 
-            {/* VAD Status Badge - Show current settings */}
-            {config.vadConfig?.enabled && (
+          {/* VAD Status Badge */}
+          {config.vadConfig?.enabled && (
+            <div className="mt-4">
               <VADInfoBadge
                 enabled={config.vadConfig.enabled}
                 threshold={config.vadConfig.threshold}
@@ -304,36 +413,62 @@ export default function App() {
                 isLoading={vad.isLoading}
                 isSpeaking={vadIsSpeaking}
               />
-            )}
+            </div>
+          )}
+        </div>
+
+        {/* Transcript Panels - Stacked Grid (2x2 on desktop, stacked on mobile) */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* Azure Panel */}
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between mb-2 px-1">
+              <h3 className="text-sm font-semibold text-cyan-400">Azure Speech Service</h3>
+              <ConnectionBadge state={azureHook.connectionState} />
+            </div>
+            <TranscriptPanel
+              transcripts={azureHook.transcripts}
+              interimTranscript={azureHook.interimTranscript}
+              onClear={azureHook.clearTranscripts}
+            />
           </div>
 
-          {/* Right: Dual Transcript Panels */}
-          <div className="lg:col-span-8 grid grid-cols-1 lg:grid-cols-2 gap-4">
-            {/* Deepgram Panel */}
-            <div className="flex flex-col">
-              <div className="flex items-center justify-between mb-2 px-1">
-                <h3 className="text-sm font-semibold text-indigo-400">Deepgram Nova-2</h3>
-                <ConnectionBadge state={deepgramHook.connectionState} />
-              </div>
-              <TranscriptPanel
-                transcripts={deepgramHook.transcripts}
-                interimTranscript={deepgramHook.interimTranscript}
-                onClear={deepgramHook.clearTranscripts}
-              />
+          {/* Gemini Panel */}
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between mb-2 px-1">
+              <h3 className="text-sm font-semibold text-purple-400">Gemini 2.0 Flash</h3>
+              <ConnectionBadge state={geminiHook.connectionState} />
             </div>
+            <TranscriptPanel
+              transcripts={geminiHook.transcripts}
+              interimTranscript={geminiHook.interimTranscript}
+              onClear={geminiHook.clearTranscripts}
+            />
+          </div>
 
-            {/* Gemini Panel */}
-            <div className="flex flex-col">
-              <div className="flex items-center justify-between mb-2 px-1">
-                <h3 className="text-sm font-semibold text-purple-400">Gemini 2.0 Flash</h3>
-                <ConnectionBadge state={geminiHook.connectionState} />
-              </div>
-              <TranscriptPanel
-                transcripts={geminiHook.transcripts}
-                interimTranscript={geminiHook.interimTranscript}
-                onClear={geminiHook.clearTranscripts}
-              />
+          {/* Google Panel */}
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between mb-2 px-1">
+              <h3 className="text-sm font-semibold text-blue-400">Google Cloud STT</h3>
+              <ConnectionBadge state={googleHook.connectionState} />
             </div>
+            <TranscriptPanel
+              transcripts={googleHook.transcripts}
+              interimTranscript={googleHook.interimTranscript}
+              onClear={googleHook.clearTranscripts}
+            />
+          </div>
+
+          {/* Deepgram Panel */}
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between mb-2 px-1">
+              <h3 className="text-sm font-semibold text-indigo-400">Deepgram Nova-2</h3>
+              <ConnectionBadge state={deepgramHook.connectionState} />
+            </div>
+            <TranscriptPanel
+              transcripts={deepgramHook.transcripts}
+              interimTranscript={deepgramHook.interimTranscript}
+              onClear={deepgramHook.clearTranscripts}
+            />
           </div>
         </div>
       </main>

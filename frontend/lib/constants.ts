@@ -87,7 +87,7 @@ export const VISUALIZER_CONFIG = {
 // Default App Configuration
 export const DEFAULT_CONFIG = {
     provider: ASRProvider.DEEPGRAM, // Default to Deepgram
-    apiKey: '',
+    apiKey: import.meta.env.VITE_DEEPGRAM_API_KEY || '',
     backendUrl: import.meta.env.VITE_BACKEND_URL || 'ws://localhost:3000',
     useBackend: true, // Default to safer backend mode
     providerConfig: {

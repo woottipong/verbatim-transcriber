@@ -1,6 +1,7 @@
 /**
- * Gemini 2.0 Flash Hook
- * Backend relay for audio transcription via Go server (16kHz PCM)
+ * Google Cloud Speech-to-Text Hook
+ * Backend relay for audio transcription via Go server (48kHz PCM)
+ * Currently disabled - requires GOOGLE_API_KEY in backend
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -14,10 +15,10 @@ import {
     cleanupAudio,
     cleanupWebSocket,
     addFinalTranscript,
-    cleanGeminiText,
+    cleanThaiText,
 } from '../lib/audio';
 
-export const useGemini = (config: AppConfig, sharedVAD?: SharedVADProps) => {
+export const useGoogle = (config: AppConfig, sharedVAD?: SharedVADProps) => {
     const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
     const [transcripts, setTranscripts] = useState<TranscriptSegment[]>([]);
     const [interimTranscript, setInterimTranscript] = useState<string>('');
@@ -47,7 +48,7 @@ export const useGemini = (config: AppConfig, sharedVAD?: SharedVADProps) => {
 
                 case 'transcript':
                     if (data.text) {
-                        const text = cleanGeminiText(data.text);
+                        const text = cleanThaiText(data.text);
                         if (text) {
                             if (data.isFinal) {
                                 addFinalTranscript(setTranscripts, text);
@@ -68,7 +69,7 @@ export const useGemini = (config: AppConfig, sharedVAD?: SharedVADProps) => {
                     break;
             }
         } catch (err) {
-            console.error('[Gemini] Parse error:', err);
+            console.error('[Google] Parse error:', err);
         }
     }, []);
 
@@ -98,21 +99,21 @@ export const useGemini = (config: AppConfig, sharedVAD?: SharedVADProps) => {
         setError(null);
 
         try {
-            // 16kHz for Gemini
-            const constraints = getMicrophoneConstraints(config.audioDeviceId, 16000);
+            // 48kHz for Google
+            const constraints = getMicrophoneConstraints(config.audioDeviceId, 48000);
             const stream = await navigator.mediaDevices.getUserMedia(constraints);
             streamRef.current = stream;
             setMediaStream(stream);
 
             setConnectionState(ConnectionState.CONNECTING);
-            const wsUrl = `${config.backendUrl}/gemini`;
+            const wsUrl = `${config.backendUrl}/google`;
             const socket = new WebSocket(wsUrl);
             socketRef.current = socket;
 
             socket.onopen = () => {
                 socket.send(JSON.stringify({ type: 'start' }));
 
-                const { audioContext, processor, source } = createAudioProcessor(stream, 16000);
+                const { audioContext, processor, source } = createAudioProcessor(stream, 48000);
                 audioContextRef.current = audioContext;
                 processorRef.current = processor;
                 sourceRef.current = source;
@@ -139,7 +140,7 @@ export const useGemini = (config: AppConfig, sharedVAD?: SharedVADProps) => {
 
             socket.onerror = () => {
                 setConnectionState(ConnectionState.ERROR);
-                setError('Failed to connect to Gemini backend');
+                setError('Failed to connect to Google backend');
             };
         } catch (err: any) {
             setError(err.message || 'Failed to start streaming');
