@@ -5,13 +5,13 @@ Go backend implementation using Fiber framework for WebSocket-based real-time tr
 ## Features
 
 - 🚀 High-performance Go + Fiber WebSocket server
-- 🎙️ Multi-provider ASR support: **Deepgram**, **Gemini**, **Google Cloud Speech-to-Text**
+- 🎙️ Multi-provider ASR support: **Deepgram**, **Gemini**, **Google Cloud Speech-to-Text**, **Azure Speech Service**
 - 🔄 Real-time streaming transcription
 - 🇹🇭 Optimized for Thai language verbatim transcription
 - ⚡ Dynamic provider activation based on available API keys
-- 💯 Pure Go implementation (no native dependencies required)
+- 💯 Pure Go implementation (no native C dependencies required)
 
-> **Note on Azure:** Azure Speech Service requires native C SDK installation. Currently using stub implementation. See [AZURE_SDK_ISSUE.md](./AZURE_SDK_ISSUE.md) for details.
+> **Note on Azure:** Using REST API approach (batch mode ~1-2 sec chunks) instead of native SDK for pure Go compatibility.
 
 ## Setup
 
