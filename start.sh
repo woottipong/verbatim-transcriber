@@ -10,13 +10,11 @@ echo -e "${BLUE}================================${NC}\n"
 
 # Install frontend dependencies
 echo -e "${GREEN}📦 Installing frontend dependencies...${NC}"
-npm install
+cd frontend && npm install && cd ..
 
-# Install backend dependencies
-echo -e "${GREEN}📦 Installing backend dependencies...${NC}"
-cd backend
-npm install
-cd ..
+# Install backend dependencies (Go)
+echo -e "${GREEN}📦 Installing Go backend dependencies...${NC}"
+cd backend-go && go mod download && cd ..
 
 echo -e "\n${GREEN}✅ Installation complete!${NC}\n"
 
@@ -34,19 +32,17 @@ trap cleanup SIGINT
 
 # Start frontend (Vite)
 echo -e "${GREEN}▶️  Starting Frontend on http://localhost:5173${NC}"
-npm run dev &
+(cd frontend && npm run dev) &
 FRONTEND_PID=$!
 
-# Start backend (Node.js)
+# Start backend (Go)
 echo -e "${GREEN}▶️  Starting Backend on ws://localhost:3000${NC}"
-cd backend
-npm start &
+(cd backend-go && go run main.go) &
 BACKEND_PID=$!
-cd ..
 
 echo -e "\n${GREEN}✨ Both servers running!${NC}"
 echo -e "${BLUE}Frontend:${NC} http://localhost:5173"
-echo -e "${BLUE}Backend:${NC}  ws://localhost:3000"
+echo -e "${BLUE}Backend:${NC}  ws://localhost:3000 (Go + Fiber)"
 echo -e "\n${BLUE}Press Ctrl+C to stop both servers${NC}\n"
 
 # Wait for both processes

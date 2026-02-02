@@ -4,13 +4,13 @@ Real-time Thai speech-to-text transcription comparing **Deepgram Nova-2** vs **G
 
 ## 📋 Project Overview
 
-| Key              | Value                                                                  |
-| ---------------- | ---------------------------------------------------------------------- |
-| **Type**         | Web App - Real-time Thai Speech-to-Text                                |
-| **Purpose**      | Verbatim transcription comparison (Deepgram vs Gemini)                 |
-| **Stack**        | React 19 + TypeScript + Vite (Frontend), Node.js + WebSocket (Backend) |
-| **Architecture** | Provider-based modular backend, Custom React hooks                     |
-| **Language**     | Thai (ภาษาไทย)                                                         |
+| Key              | Value                                                         |
+| ---------------- | ------------------------------------------------------------- |
+| **Type**         | Web App - Real-time Thai Speech-to-Text                       |
+| **Purpose**      | Verbatim transcription comparison (Deepgram vs Gemini)        |
+| **Stack**        | React 19 + TypeScript + Vite (Frontend), Go + Fiber (Backend) |
+| **Architecture** | Provider-based modular backend, Custom React hooks            |
+| **Language**     | Thai (ภาษาไทย)                                                |
 
 ## ✨ Features
 
@@ -64,6 +64,7 @@ Real-time Thai speech-to-text transcription comparing **Deepgram Nova-2** vs **G
 
 ### Prerequisites
 - Node.js 18+ 
+- Go 1.22+ (for backend)
 - Deepgram API Key (https://deepgram.com)
 - Gemini API Key (https://aistudio.google.com)
 
@@ -78,29 +79,35 @@ Real-time Thai speech-to-text transcription comparing **Deepgram Nova-2** vs **G
 **1. Install Dependencies**
 ```bash
 # Frontend
-npm install
+cd frontend && npm install
 
-# Backend
-cd backend && npm install
+# Backend (Go)
+cd backend-go && go mod download
 ```
 
 **2. Configure Environment**
 ```bash
-# Backend environment
-cp backend/.env.example backend/.env
+# Backend environment (required)
+cd backend-go
+cp .env.example .env
 # Edit and add:
 # DEEPGRAM_API_KEY=your_key
 # GEMINI_API_KEY=your_key
+
+# Frontend environment (optional - for custom backend URL)
+cd ../frontend
+cp .env.example .env
+# VITE_BACKEND_URL=ws://localhost:3000 (default)
 ```
 
 **3. Start Servers**
 
 ```bash
 # Terminal 1 - Backend (port 3000)
-cd backend && npm run dev
+cd backend-go && go run main.go
 
 # Terminal 2 - Frontend (port 5173)
-npm run dev
+cd frontend && npm run dev
 ```
 
 **4. Open Browser**
@@ -112,50 +119,59 @@ http://localhost:5173
 
 ```
 thai-verbatim-transcriber/
-├── App.tsx                     # Main app component (dual panel layout)
-├── types.ts                    # Shared TypeScript interfaces
-├── index.tsx                   # React entry point
-├── index.css                   # Tailwind CSS styles
+├── frontend/                   # Frontend React app
+│   ├── App.tsx                 # Main app component (dual panel layout)
+│   ├── types.ts                # Shared TypeScript interfaces
+│   ├── index.tsx               # React entry point
+│   ├── index.css               # Tailwind CSS styles
+│   ├── package.json            # Frontend dependencies
+│   ├── vite.config.ts          # Vite configuration
+│   ├── tsconfig.json           # TypeScript configuration
+│   │
+│   ├── hooks/
+│   │   ├── useDeepgram.ts      # Deepgram WebSocket streaming
+│   │   ├── useGemini.ts        # Gemini WebSocket streaming
+│   │   ├── useVAD.ts           # Voice Activity Detection (Silero)
+│   │   ├── useAudioVisualizer.ts # Canvas waveform visualization
+│   │   └── useAudioDevices.ts  # Microphone device selection
+│   │
+│   ├── components/
+│   │   ├── ConnectionBadge.tsx # Connection status indicator
+│   │   ├── RecordButton.tsx    # Start/stop recording button
+│   │   ├── ErrorBanner.tsx     # Error display component
+│   │   ├── TranscriptPanel.tsx # Transcript display area
+│   │   ├── Visualizer.tsx      # Audio waveform canvas
+│   │   ├── SettingsModal.tsx   # Configuration modal
+│   │   └── VADInfoBadge.tsx    # VAD status display
+│   │
+│   ├── lib/
+│   │   ├── constants.ts        # Default config, app constants
+│   │   └── utils.ts            # Utility functions
+│   │
+│   ├── public/
+│   │   ├── vad.config.js       # VAD WASM configuration
+│   │   └── *.wasm, *.onnx      # VAD model files
+│   │
+│   └── metadata.json           # App metadata (permissions)
 │
-├── hooks/
-│   ├── useDeepgram.ts          # Deepgram WebSocket streaming
-│   ├── useGemini.ts            # Gemini WebSocket streaming
-│   ├── useVAD.ts               # Voice Activity Detection (Silero)
-│   ├── useAudioVisualizer.ts   # Canvas waveform visualization
-│   └── useAudioDevices.ts      # Microphone device selection
+├── backend-go/                 # Backend Go server
+│   ├── main.go                 # Main entry point
+│   ├── go.mod                  # Go dependencies
+│   ├── .env                    # Backend environment (gitignored)
+│   ├── .env.example            # Backend environment template
+│   ├── config/
+│   │   └── config.go           # Configuration management
+│   ├── handlers/
+│   │   ├── deepgram.go         # Deepgram WebSocket handler
+│   │   └── gemini.go           # Gemini WebSocket handler
+│   ├── routes/
+│   │   └── routes.go           # Route setup
+│   └── utils/
+│       └── audio.go            # Audio processing utilities
 │
-├── components/
-│   ├── ConnectionBadge.tsx     # Connection status indicator
-│   ├── RecordButton.tsx        # Start/stop recording button
-│   ├── ErrorBanner.tsx         # Error display component
-│   ├── TranscriptPanel.tsx     # Transcript display area
-│   ├── Visualizer.tsx          # Audio waveform canvas
-│   ├── SettingsModal.tsx       # Configuration modal
-│   └── VADInfoBadge.tsx        # VAD status display
-│
-├── lib/
-│   ├── constants.ts            # Default config, app constants
-│   └── utils.ts                # Utility functions
-│
-├── backend/
-│   ├── server.ts               # Legacy entry (redirects to src/)
-│   ├── package.json            # Backend dependencies
-│   └── src/
-│       ├── server.ts           # Main WebSocket server (~130 lines)
-│       ├── config.ts           # Centralized configuration
-│       ├── types.ts            # Backend TypeScript interfaces
-│       ├── providers/
-│       │   ├── index.ts        # Provider registry
-│       │   ├── deepgram.ts     # Deepgram ASR provider
-│       │   └── gemini.ts       # Gemini ASR provider
-│       └── utils/
-│           ├── index.ts        # Utils barrel export
-│           ├── audio.ts        # PCM→WAV conversion
-│           └── thai.ts         # Thai text cleanup functions
-│
-└── public/
-    ├── vad.config.js           # VAD WASM configuration
-    └── *.wasm, *.onnx          # VAD model files (not in git)
+├── run.sh                      # Quick start script (both servers)
+├── start.sh                    # Full setup and start script
+└── README.md                   # This file
 ```
 
 ## 🔧 Key Technical Details

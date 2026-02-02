@@ -8,9 +8,9 @@ echo "==========================================="
 echo ""
 
 # Check if dependencies are installed
-if [ ! -d "node_modules" ]; then
+if [ ! -d "frontend/node_modules" ]; then
     echo "📦 Installing frontend dependencies..."
-    npm install
+    cd frontend && npm install && cd ..
 fi
 
 # Check if Go is installed
@@ -46,7 +46,7 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 # Start frontend in background
-npm run dev &
+(cd frontend && npm run dev) &
 FRONTEND_PID=$!
 
 # Start Go backend in background
