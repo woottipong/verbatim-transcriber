@@ -9,8 +9,9 @@ import (
 
 // Common message types
 type Message struct {
-	Type   string `json:"type"`
-	APIKey string `json:"apiKey,omitempty"`
+	Type       string `json:"type"`
+	APIKey     string `json:"apiKey,omitempty"`
+	SampleRate int    `json:"sampleRate,omitempty"` // Sample rate from frontend audio context
 }
 
 type TranscriptResponse struct {

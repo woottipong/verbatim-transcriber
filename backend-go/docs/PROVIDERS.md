@@ -56,9 +56,10 @@ VITE_DEEPGRAM_API_KEY=your_deepgram_key
 GEMINI_API_KEY=your_gemini_key
 
 # Google Cloud Speech-to-Text
-GOOGLE_API_KEY=your_google_api_key
-# หรือใช้ Service Account:
-# GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account.json
+# ใช้ Service Account JSON file (recommended)
+GOOGLE_APPLICATION_CREDENTIALS=./credential/stt-google.json
+# หรือใช้ API key:
+# GOOGLE_API_KEY=your_google_api_key
 
 # Azure Speech Service
 AZURE_SUBSCRIPTION_KEY=your_subscription_key

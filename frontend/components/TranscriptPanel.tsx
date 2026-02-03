@@ -98,10 +98,13 @@ const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
                                 <span className="text-base">{segment.text}</span>
                             </div>
                         ))}
-                        {/* Interim Text */}
+                        {/* Interim Text - Real-time Preview */}
                         {interimTranscript && (
-                            <div className="text-slate-400 italic font-light leading-relaxed p-2 rounded-lg bg-slate-700/20 border-l-2 border-indigo-500/50 animate-pulse">
-                                <span className="text-xs text-slate-500 mr-2">...</span>
+                            <div className="text-slate-200 leading-relaxed p-3 rounded-lg bg-indigo-900/20 border-l-4 border-indigo-400 shadow-lg">
+                                <div className="flex items-center gap-2 mb-1">
+                                    <span className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse"></span>
+                                    <span className="text-xs text-indigo-300 font-medium">Live</span>
+                                </div>
                                 <span className="text-base">{interimTranscript}</span>
                             </div>
                         )}

@@ -3,6 +3,8 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log"
+	"strings"
 	"thai-transcriber-backend/config"
 
 	speech "cloud.google.com/go/speech/apiv1"
@@ -53,6 +55,15 @@ func HandleGoogle(conn *websocketFiber.Conn, cfg *config.Config) {
 
 					ctx := context.Background()
 
+					// ใช้ sampleRate จาก frontend (ถ้ามี) หรือใช้ค่า default จาก config
+					sampleRate := cfg.GoogleConfig.SampleRate
+					if msg.SampleRate > 0 {
+						sampleRate = msg.SampleRate
+						log.Printf("🎤 [Google] Using sample rate from frontend: %d Hz\n", sampleRate)
+					} else {
+						log.Printf("🎤 [Google] Using default sample rate: %d Hz\n", sampleRate)
+					}
+
 					// Initialize client
 					var client *speech.Client
 					if msg.APIKey != "" {
@@ -61,6 +72,9 @@ func HandleGoogle(conn *websocketFiber.Conn, cfg *config.Config) {
 					} else if cfg.GoogleAPIKey != "" {
 						// Use config API key
 						client, err = speech.NewClient(ctx, option.WithAPIKey(cfg.GoogleAPIKey))
+					} else if cfg.GoogleApplicationCredentials != "" {
+						// Use service account JSON file
+						client, err = speech.NewClient(ctx, option.WithCredentialsFile(cfg.GoogleApplicationCredentials))
 					} else {
 						// Use default credentials (ADC)
 						client, err = speech.NewClient(ctx)
@@ -87,13 +101,18 @@ func HandleGoogle(conn *websocketFiber.Conn, cfg *config.Config) {
 						StreamingRequest: &speechpb.StreamingRecognizeRequest_StreamingConfig{
 							StreamingConfig: &speechpb.StreamingRecognitionConfig{
 								Config: &speechpb.RecognitionConfig{
-									Encoding:        speechpb.RecognitionConfig_LINEAR16,
-									SampleRateHertz: int32(cfg.GoogleConfig.SampleRate),
-									LanguageCode:    cfg.GoogleConfig.LanguageCode,
-									Model:           cfg.GoogleConfig.Model,
-									UseEnhanced:     cfg.GoogleConfig.UseEnhanced,
+									Encoding:                   speechpb.RecognitionConfig_LINEAR16,
+									SampleRateHertz:            int32(sampleRate), // ใช้ค่าจาก frontend
+									LanguageCode:               cfg.GoogleConfig.LanguageCode,
+									Model:                      cfg.GoogleConfig.Model,
+									UseEnhanced:                cfg.GoogleConfig.UseEnhanced,
+									MaxAlternatives:            1,
+									EnableAutomaticPunctuation: true,
+									ProfanityFilter:            false, // ไม่กรองคำหยาบ (verbatim)
+									EnableWordTimeOffsets:      false,
 								},
-								InterimResults: true,
+								InterimResults:  true,
+								SingleUtterance: false, // ให้ stream ต่อเนื่อง ไม่ตัดหลังประโยคแรก
 							},
 						},
 					})
@@ -130,7 +149,15 @@ func HandleGoogle(conn *websocketFiber.Conn, cfg *config.Config) {
 				})
 
 				if err != nil {
-					sendError(conn, "Google", "Failed to send audio", err)
+					// Check if it's EOF or stream closed
+					if err.Error() == "EOF" || strings.Contains(err.Error(), "stream is done") {
+						log.Printf("⚠️  [Google] Stream closed - stopping session\n")
+						session.isProcessing = false
+						session.stream = nil
+						sendError(conn, "Google", "Stream closed. Please restart.", nil)
+					} else {
+						sendError(conn, "Google", "Failed to send audio", err)
+					}
 				}
 			}
 		}
@@ -141,7 +168,15 @@ func handleGoogleResponses(conn *websocketFiber.Conn, session *GoogleSession) {
 	for {
 		resp, err := session.stream.Recv()
 		if err != nil {
-			sendError(conn, "Google", "Stream error", err)
+			// Check if it's the 5-minute limit error
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "maximum allowed stream duration") ||
+				strings.Contains(errMsg, "DeadlineExceeded") {
+				log.Printf("⚠️  [Google] 5-minute limit reached - session needs restart\n")
+				sendError(conn, "Google", "5-minute limit reached. Please restart the session.", err)
+			} else {
+				sendError(conn, "Google", "Stream error", err)
+			}
 			break
 		}
 
@@ -153,6 +188,7 @@ func handleGoogleResponses(conn *websocketFiber.Conn, session *GoogleSession) {
 
 				sendTranscript(conn, alt.Transcript, result.IsFinal, confidence)
 
+				// Log เฉพาะ final results (interim ส่งไป UI โดยไม่ log)
 				if result.IsFinal {
 					logFinalTranscript("Google", alt.Transcript, confidence)
 				}

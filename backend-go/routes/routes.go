@@ -63,7 +63,7 @@ func SetupRoutes(app *fiber.App, cfg *config.Config) {
 		}))
 		enabledProviders = append(enabledProviders, "Google")
 	} else {
-		log.Println("⚠️  [Google] Disabled - GOOGLE_API_KEY not configured")
+		log.Println("⚠️  [Google] Disabled - GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_API_KEY not configured")
 	}
 
 	// Azure Speech Service

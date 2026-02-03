@@ -50,7 +50,7 @@ The server will log which providers are enabled:
 - **Providers Status**: `GET /providers` - Check which providers are available
 - **Deepgram WebSocket**: `ws://localhost:3000/deepgram` (if `DEEPGRAM_API_KEY` is set)
 - **Gemini WebSocket**: `ws://localhost:3000/gemini` (if `GEMINI_API_KEY` is set)
-- **Google WebSocket**: `ws://localhost:3000/google` (if `GOOGLE_API_KEY` is set)
+- **Google WebSocket**: `ws://localhost:3000/google` (if `GOOGLE_APPLICATION_CREDENTIALS` or `GOOGLE_API_KEY` is set)
 - **Azure WebSocket**: `ws://localhost:3000/azure` (if `AZURE_SUBSCRIPTION_KEY` and `AZURE_REGION` are set)
 
 ### Check Available Providers

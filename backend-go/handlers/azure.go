@@ -148,7 +148,7 @@ func connectAzureWebSocket(session *AzureSession, cfg *config.Config) error {
 	session.azureConn = azureConn
 
 	// Send speech.config message
-	if err := sendSpeechConfig(session); err != nil {
+	if err := sendSpeechConfig(session, cfg); err != nil {
 		azureConn.Close()
 		return fmt.Errorf("failed to send speech config: %v", err)
 	}
@@ -163,7 +163,7 @@ func connectAzureWebSocket(session *AzureSession, cfg *config.Config) error {
 	return nil
 }
 
-func sendSpeechConfig(session *AzureSession) error {
+func sendSpeechConfig(session *AzureSession, cfg *config.Config) error {
 	// Speech config JSON
 	speechConfig := map[string]interface{}{
 		"context": map[string]interface{}{
@@ -177,6 +177,21 @@ func sendSpeechConfig(session *AzureSession) error {
 				"name":     "thai-transcriber-backend",
 				"version":  "1.0.0",
 			},
+			"audio": map[string]interface{}{
+				"source": map[string]interface{}{
+					"type": "microphone",
+				},
+			},
+		},
+		"recognition": map[string]interface{}{
+			// ลดเวลา silence ที่ใช้ในการตัดประโยค (หน่วย: milliseconds)
+			"segmentation": map[string]interface{}{
+				"segmentationSilenceTimeoutMs":         fmt.Sprintf("%d", cfg.AzureConfig.SegmentationSilenceTimeout),
+				"initialSilenceTimeoutMs":              "5000",
+				"segmentationMaximumSilenceDurationMs": "800",
+			},
+			// เปิด interim results ให้ส่งบ่อยขึ้น
+			"enableInterimResults": true,
 		},
 	}
 
@@ -317,7 +332,7 @@ func parseAzureTextMessage(conn *websocket.Conn, message []byte) {
 
 	switch path {
 	case "speech.hypothesis":
-		// Interim result
+		// Interim result - ส่งไป UI โดยไม่ log (เพื่อความสะอาด)
 		var hypothesis AzureSpeechHypothesis
 		if err := json.Unmarshal(body, &hypothesis); err == nil && hypothesis.Text != "" {
 			sendTranscript(conn, hypothesis.Text, false, 0.0)

@@ -3,15 +3,16 @@ package config
 import "os"
 
 type Config struct {
-	Port                 string
-	Host                 string
-	GeminiAPIKey         string
-	GoogleAPIKey         string
-	AzureSubscriptionKey string
-	AzureRegion          string
-	GeminiConfig         GeminiConfig
-	GoogleConfig         GoogleConfig
-	AzureConfig          AzureConfig
+	Port                         string
+	Host                         string
+	GeminiAPIKey                 string
+	GoogleAPIKey                 string
+	GoogleApplicationCredentials string
+	AzureSubscriptionKey         string
+	AzureRegion                  string
+	GeminiConfig                 GeminiConfig
+	GoogleConfig                 GoogleConfig
+	AzureConfig                  AzureConfig
 }
 
 type GeminiConfig struct {
@@ -32,20 +33,22 @@ type GoogleConfig struct {
 }
 
 type AzureConfig struct {
-	Language      string
-	SampleRate    int
-	BitsPerSample int
-	Channels      int
+	Language                   string
+	SampleRate                 int
+	BitsPerSample              int
+	Channels                   int
+	SegmentationSilenceTimeout int // milliseconds - ลดค่านี้เพื่อให้ตัดประโยคเร็วขึ้น
 }
 
 func Load() *Config {
 	return &Config{
-		Port:                 getEnv("PORT", "3000"),
-		Host:                 getEnv("HOST", "localhost"),
-		GeminiAPIKey:         os.Getenv("GEMINI_API_KEY"),
-		GoogleAPIKey:         os.Getenv("GOOGLE_API_KEY"),
-		AzureSubscriptionKey: os.Getenv("AZURE_SUBSCRIPTION_KEY"),
-		AzureRegion:          getEnv("AZURE_REGION", "southeastasia"),
+		Port:                         getEnv("PORT", "3000"),
+		Host:                         getEnv("HOST", "localhost"),
+		GeminiAPIKey:                 os.Getenv("GEMINI_API_KEY"),
+		GoogleAPIKey:                 os.Getenv("GOOGLE_API_KEY"),
+		GoogleApplicationCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+		AzureSubscriptionKey:         os.Getenv("AZURE_SUBSCRIPTION_KEY"),
+		AzureRegion:                  getEnv("AZURE_REGION", "southeastasia"),
 		GeminiConfig: GeminiConfig{
 			Model:           "gemini-2.0-flash",
 			Temperature:     0,
@@ -76,16 +79,17 @@ EXAMPLES:
 ✅ CORRECT: ถอดเฉพาะที่ได้ยินชัดเจน 100%`,
 		},
 		GoogleConfig: GoogleConfig{
-			Model:        "default",
+			Model:        "latest_long", // Best for continuous speech & conversations
 			LanguageCode: "th-TH",
 			SampleRate:   48000,
-			UseEnhanced:  false,
+			UseEnhanced:  true, // Enhanced model for better accuracy
 		},
 		AzureConfig: AzureConfig{
-			Language:      "th-TH",
-			SampleRate:    16000,
-			BitsPerSample: 16,
-			Channels:      1,
+			Language:                   "th-TH",
+			SampleRate:                 16000,
+			BitsPerSample:              16,
+			Channels:                   1,
+			SegmentationSilenceTimeout: 500, // 500ms - ลดลงจาก default 1000ms
 		},
 	}
 }
@@ -103,7 +107,7 @@ func (c *Config) HasGeminiKey() bool {
 }
 
 func (c *Config) HasGoogleKey() bool {
-	return c.GoogleAPIKey != ""
+	return c.GoogleAPIKey != "" || c.GoogleApplicationCredentials != ""
 }
 
 func (c *Config) HasAzureKey() bool {

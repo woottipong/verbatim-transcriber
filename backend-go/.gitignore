@@ -9,6 +9,11 @@ transcriber-backend
 # Environment
 .env
 
+# Credentials (Google service account, API keys, etc.)
+credential/
+credentail/
+*.json
+
 # Go
 *.test
 *.out

@@ -1,7 +1,7 @@
 /**
  * Google Cloud Speech-to-Text Hook
  * Backend relay for audio transcription via Go server (48kHz PCM)
- * Currently disabled - requires GOOGLE_API_KEY in backend
+ * Requires GOOGLE_APPLICATION_CREDENTIALS or GOOGLE_API_KEY in backend
  */
 
 import { useState, useEffect, useRef, useCallback } from 'react';
@@ -111,12 +111,18 @@ export const useGoogle = (config: AppConfig, sharedVAD?: SharedVADProps) => {
             socketRef.current = socket;
 
             socket.onopen = () => {
-                socket.send(JSON.stringify({ type: 'start' }));
-
                 const { audioContext, processor, source } = createAudioProcessor(stream, 48000);
                 audioContextRef.current = audioContext;
                 processorRef.current = processor;
                 sourceRef.current = source;
+
+                // ส่งค่า sampleRate จริงจาก audioContext ไป backend
+                const actualSampleRate = audioContext.sampleRate;
+                console.log(`[Google] Audio context sample rate: ${actualSampleRate}Hz`);
+                socket.send(JSON.stringify({
+                    type: 'start',
+                    sampleRate: actualSampleRate
+                }));
 
                 if (!config.vadConfig?.enabled) {
                     isStreamingRef.current = true;
