@@ -21,28 +21,39 @@
 ┌──────────────────────────────────────────────────────────────┐
 │                        ผู้ใช้งาน (Browser)                      │
 │                              │                               │
-│                         WebRTC Audio                         │
+│                    WebRTC (Audio + Video)                    │
 │                              ▼                               │
 │  ┌─────────────────────────────────────────────────────────┐ │
 │  │                    LiveKit Server                       │ │
-│  │         (จัดการ Room, Audio Track, Data Channel)         │ │
+│  │    (จัดการ Room, Audio/Video Track, Data Channel)        │ │
 │  └─────────────────────────────────────────────────────────┘ │
 │                              │                               │
-│                         Audio Stream                         │
-│                              ▼                               │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │                     ASR Agent (Go)                      │ │
-│  │  ┌─────────────────┐      ┌─────────────────┐           │ │
-│  │  │   Google STT    │ ──── │   Azure Speech  │           │ │
-│  │  │   (Primary)     │      │   (Backup)      │           │ │
-│  │  └─────────────────┘      └─────────────────┘           │ │
-│  └─────────────────────────────────────────────────────────┘ │
+│              ┌───────────────┴───────────────┐               │
+│              ▼                               ▼               │
+│  ┌─────────────────────┐         ┌─────────────────────┐     │
+│  │    Audio Stream     │         │    Video Stream     │     │
+│  │         │           │         │    (Future Use)     │     │
+│  │         ▼           │         │  • Recording        │     │
+│  │  ┌─────────────┐    │         │  • Live View        │     │
+│  │  │ ASR Agent   │    │         │  • AI Analysis      │     │
+│  │  │ Google/Azure│    │         └─────────────────────┘     │
+│  │  └─────────────┘    │                                     │
+│  └─────────────────────┘                                     │
 │                              │                               │
 │                      Transcript (Data Channel)               │
 │                              ▼                               │
 │                      แสดงผลทันที (< 500ms)                     │
 └──────────────────────────────────────────────────────────────┘
 ```
+
+### 🎥 WebRTC Capabilities
+
+| Track Type       | รองรับ | Use Case                      |
+| ---------------- | ----- | ----------------------------- |
+| **Audio**        | ✅     | Transcription (Primary)       |
+| **Video**        | ✅     | Recording, Live View (Future) |
+| **Screen Share** | ✅     | Share หน้าจอ (Future)          |
+| **Data Channel** | ✅     | ส่ง Transcript กลับ             |
 
 ---
 
@@ -101,6 +112,12 @@
 - **Google STT latest_long** - Model ที่ดีที่สุดสำหรับภาษาไทย
 - **Azure Backup** - Failover อัตโนมัติ
 
+### 5. 🎥 Video-Ready (Future Expansion)
+- **บันทึกการประชุม** - Video + Transcript คู่กัน
+- **Speaker Identification** - ระบุว่าใครกำลังพูด
+- **Live Captioning** - แสดง subtitle บน video
+- **Screen Share** - รองรับการ share หน้าจอ
+
 ---
 
 ## 🔄 Migration Strategy
@@ -141,6 +158,12 @@ Phase 5: Migrate ผู้ใช้ทั้งหมด → ปิดระบ�
 > - User Experience ดีขึ้นมาก (Latency ลด 75%)
 > - ลด support tickets เรื่อง connection หลุด
 > - รองรับ growth ได้ 10x
+
+**Q: รองรับ Video ด้วยไหม?**
+> ใช่ WebRTC รองรับทั้ง Audio และ Video
+> - Phase แรกเน้น Audio + Transcription ก่อน
+> - สามารถเพิ่ม Video Recording/Live View ในอนาคตได้ทันที
+> - ไม่ต้องเปลี่ยน infrastructure
 
 ---
 
