@@ -10,9 +10,13 @@ type Config struct {
 	GoogleApplicationCredentials string
 	AzureSubscriptionKey         string
 	AzureRegion                  string
+	LiveKitAPIKey                string
+	LiveKitAPISecret             string
+	LiveKitURL                   string
 	GeminiConfig                 GeminiConfig
 	GoogleConfig                 GoogleConfig
 	AzureConfig                  AzureConfig
+	LiveKitConfig                LiveKitConfig
 }
 
 type GeminiConfig struct {
@@ -40,6 +44,10 @@ type AzureConfig struct {
 	SegmentationSilenceTimeout int // milliseconds - ลดค่านี้เพื่อให้ตัดประโยคเร็วขึ้น
 }
 
+type LiveKitConfig struct {
+	TokenExpiry int // seconds
+}
+
 func Load() *Config {
 	return &Config{
 		Port:                         getEnv("PORT", "3000"),
@@ -49,6 +57,9 @@ func Load() *Config {
 		GoogleApplicationCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
 		AzureSubscriptionKey:         os.Getenv("AZURE_SUBSCRIPTION_KEY"),
 		AzureRegion:                  getEnv("AZURE_REGION", "southeastasia"),
+		LiveKitAPIKey:                os.Getenv("LIVEKIT_API_KEY"),
+		LiveKitAPISecret:             os.Getenv("LIVEKIT_API_SECRET"),
+		LiveKitURL:                   getEnv("LIVEKIT_WS_URL", "ws://localhost:7880"),
 		GeminiConfig: GeminiConfig{
 			Model:           "gemini-2.0-flash",
 			Temperature:     0,
@@ -91,6 +102,9 @@ EXAMPLES:
 			Channels:                   1,
 			SegmentationSilenceTimeout: 500, // 500ms - ลดลงจาก default 1000ms
 		},
+		LiveKitConfig: LiveKitConfig{
+			TokenExpiry: 3600, // 1 hour
+		},
 	}
 }
 
@@ -112,4 +126,8 @@ func (c *Config) HasGoogleKey() bool {
 
 func (c *Config) HasAzureKey() bool {
 	return c.AzureSubscriptionKey != "" && c.AzureRegion != ""
+}
+
+func (c *Config) HasLiveKitKey() bool {
+	return c.LiveKitAPIKey != "" && c.LiveKitAPISecret != ""
 }
