@@ -35,6 +35,22 @@ func SetupRoutes(app *fiber.App, cfg *config.Config) {
 			return handlers.HandleLiveKitToken(c, cfg)
 		})
 		log.Println("✅ [LiveKit] Token service enabled at POST /livekit/token")
+
+		// LiveKit Agent endpoints (requires ASR provider)
+		if cfg.HasGoogleKey() || cfg.HasAzureKey() {
+			app.Post("/livekit/agent/start", func(c *fiber.Ctx) error {
+				return handlers.HandleAgentStart(c, cfg)
+			})
+			app.Post("/livekit/agent/stop", func(c *fiber.Ctx) error {
+				return handlers.HandleAgentStop(c, cfg)
+			})
+			app.Get("/livekit/agent/status", func(c *fiber.Ctx) error {
+				return handlers.HandleAgentStatus(c, cfg)
+			})
+			log.Println("✅ [LiveKit Agent] Enabled at /livekit/agent/*")
+		} else {
+			log.Println("⚠️  [LiveKit Agent] Disabled - No ASR provider configured (Google or Azure)")
+		}
 	} else {
 		log.Println("⚠️  [LiveKit] Disabled - LIVEKIT_API_KEY or LIVEKIT_API_SECRET not configured")
 	}
