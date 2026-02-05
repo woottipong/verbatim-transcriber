@@ -13,6 +13,7 @@ import (
 
 	lksdk "github.com/livekit/server-sdk-go/v2"
 	"github.com/pion/webrtc/v4"
+	"gopkg.in/hraban/opus.v2"
 )
 
 // TranscriptMessage represents a transcript sent to clients via Data Channel
@@ -198,6 +199,20 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 	go a.handleTranscriptionResults(provider, participant)
 
 	// Read audio samples and send to ASR
+	// Create Opus decoder using hraban/opus (CGO binding)
+	// WebRTC typically uses 48kHz stereo, but we'll decode to mono
+	opusDecoder, err := opus.NewDecoder(48000, 1) // 48kHz, mono
+	if err != nil {
+		log.Printf("❌ [Agent] Failed to create Opus decoder: %v", err)
+		return
+	}
+
+	// PCM buffer for decoded audio (max 120ms frame at 48kHz mono = 5760 samples)
+	pcmBuffer := make([]int16, 5760)
+
+	log.Println("🎧 [Agent] Starting audio processing loop...")
+
+	packetCount := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -212,13 +227,41 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 			break
 		}
 
-		// Extract audio payload (Opus encoded)
-		// Note: For production, you'd need to decode Opus to PCM
-		// LiveKit SDK handles some of this, but may need additional decoding
-		audioData := pkt.Payload
+		// Decode Opus to PCM
+		opusData := pkt.Payload
+		if len(opusData) == 0 {
+			continue
+		}
 
-		// Send to ASR provider
-		if err := provider.SendAudio(audioData); err != nil {
+		packetCount++
+		if packetCount%100 == 1 {
+			log.Printf("📦 [Agent] Packet #%d, Opus size: %d bytes", packetCount, len(opusData))
+		}
+
+		// Decode Opus to PCM int16
+		samplesDecoded, err := opusDecoder.Decode(opusData, pcmBuffer)
+		if err != nil {
+			log.Printf("⚠️ [Agent] Opus decode error: %v", err)
+			continue
+		}
+
+		if samplesDecoded == 0 {
+			continue
+		}
+
+		if packetCount%100 == 1 {
+			log.Printf("🔊 [Agent] Decoded %d samples (%d bytes PCM)", samplesDecoded, samplesDecoded*2)
+		}
+
+		// Convert int16 PCM to bytes (Little Endian) for ASR
+		pcmBytes := make([]byte, samplesDecoded*2)
+		for i := 0; i < samplesDecoded; i++ {
+			pcmBytes[i*2] = byte(pcmBuffer[i])
+			pcmBytes[i*2+1] = byte(pcmBuffer[i] >> 8)
+		}
+
+		// Send PCM to ASR provider
+		if err := provider.SendAudio(pcmBytes); err != nil {
 			log.Printf("❌ [Agent] Error sending audio to ASR: %v", err)
 			break
 		}

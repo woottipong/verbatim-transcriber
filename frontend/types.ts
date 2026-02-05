@@ -107,6 +107,17 @@ export interface TranscriptSegment {
 }
 
 /**
+ * LiveKit transcript message from Agent (via Data Channel)
+ */
+export interface LiveKitTranscriptMessage {
+  text: string;
+  is_final: boolean;
+  confidence?: number;
+  timestamp?: number;
+  provider?: string;
+}
+
+/**
  * WebSocket connection states
  */
 export enum ConnectionState {

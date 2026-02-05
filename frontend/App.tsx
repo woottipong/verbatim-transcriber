@@ -4,6 +4,7 @@ import { useDeepgram } from './hooks/useDeepgram';
 import { useGemini } from './hooks/useGemini';
 import { useGoogle } from './hooks/useGoogle';
 import { useAzure } from './hooks/useAzure';
+import { useLiveKit } from './hooks/useLiveKit';
 import { useAudioDevices } from './hooks/useAudioDevices';
 import { useVAD } from './hooks/useVAD';
 import Visualizer from './components/Visualizer';
@@ -12,6 +13,7 @@ import ConnectionBadge from './components/ConnectionBadge';
 import RecordButton from './components/RecordButton';
 import ErrorBanner from './components/ErrorBanner';
 import TranscriptPanel from './components/TranscriptPanel';
+import LiveKitPanel from './components/LiveKitPanel';
 import VADInfoBadge from './components/VADInfoBadge';
 import { ConnectionState, AppConfig, ASRProvider } from './types';
 import { STORAGE_KEYS, DEFAULT_CONFIG, ASR_PROVIDERS } from './lib/constants';
@@ -82,6 +84,14 @@ export default function App() {
   const geminiHook = useGemini(config, { vad, isVADStreamingRef });
   const googleHook = useGoogle(config, { vad, isVADStreamingRef });
   const azureHook = useAzure(config, { vad, isVADStreamingRef });
+
+  // LiveKit WebRTC hook for ultra-low latency transcription
+  const livekitHook = useLiveKit({
+    serverUrl: import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880',
+    tokenEndpoint: `${config.backendUrl.replace('ws://', 'http://').replace('wss://', 'https://')}/livekit/token`,
+    roomName: 'thai-transcription',
+    autoConnect: false,
+  });
 
   // VAD status from shared VAD
   const vadStatus = {
@@ -246,6 +256,8 @@ export default function App() {
               <span className="text-xs font-medium text-blue-400">Google</span>
               <span className="text-slate-600">+</span>
               <span className="text-xs font-medium text-cyan-400">Azure</span>
+              <span className="text-slate-600">+</span>
+              <span className="text-xs font-medium text-purple-400">LiveKit</span>
             </div>
 
             {/* Audio Input Device Selector */}
@@ -447,6 +459,21 @@ export default function App() {
 
         {/* Transcript Panels - Stacked Grid (2x2 on desktop, stacked on mobile) */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {/* LiveKit Panel - WebRTC Ultra-low Latency */}
+          <div className="lg:col-span-2">
+            <LiveKitPanel
+              transcripts={livekitHook.transcripts}
+              interimTranscript={livekitHook.interimTranscript}
+              connectionState={livekitHook.connectionState}
+              isAgentConnected={livekitHook.isAgentConnected}
+              participantCount={livekitHook.participants.length + 1}
+              error={livekitHook.error}
+              onConnect={livekitHook.connect}
+              onDisconnect={livekitHook.disconnect}
+              onClear={livekitHook.clearTranscripts}
+            />
+          </div>
+
           {/* Azure Panel */}
           <div className="flex flex-col">
             <div className="flex items-center justify-between mb-2 px-1">

@@ -14,6 +14,7 @@ require (
 	github.com/livekit/server-sdk-go/v2 v2.13.3
 	github.com/pion/webrtc/v4 v4.2.3
 	google.golang.org/api v0.256.0
+	gopkg.in/hraban/opus.v2 v2.0.0-20230925203106-0188a62cb302
 )
 
 require (
