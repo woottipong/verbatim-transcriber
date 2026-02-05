@@ -30,11 +30,10 @@ func setupHealthRoutes(app *fiber.App, cfg *config.Config) {
 
 	app.Get("/providers", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
-			"deepgram": true, // Always available (direct browser connection)
-			"gemini":   cfg.HasGeminiKey(),
-			"google":   cfg.HasGoogleKey(),
-			"azure":    cfg.HasAzureKey(),
-			"livekit":  cfg.HasLiveKitKey(),
+			"gemini":  cfg.HasGeminiKey(),
+			"google":  cfg.HasGoogleKey(),
+			"azure":   cfg.HasAzureKey(),
+			"livekit": cfg.HasLiveKitKey(),
 		})
 	})
 }
@@ -76,8 +75,6 @@ func setupLiveKitRoutes(app *fiber.App, cfg *config.Config) {
 // setupASRRoutes configures WebSocket routes for ASR providers
 func setupASRRoutes(app *fiber.App, cfg *config.Config) {
 	var enabled []string
-
-	// Deepgram: Frontend connects directly to wss://api.deepgram.com
 
 	if cfg.HasGeminiKey() {
 		registerWSRoute(app, "/gemini", func(c *websocket.Conn) { handler.HandleGemini(c, cfg) })

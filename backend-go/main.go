@@ -61,7 +61,6 @@ func printStartupInfo(cfg *config.Config) {
 		icon    string
 		note    string
 	}{
-		{"Deepgram Nova-2", true, "(direct browser)", "🔷", "No backend needed"},
 		{"Gemini 2.0 Flash", cfg.HasGeminiKey(), "/gemini", "✨", ""},
 		{"Google Cloud STT", cfg.HasGoogleKey(), "/google", "🌐", ""},
 		{"Azure Speech", cfg.HasAzureKey(), "/azure", "☁️", ""},
