@@ -14,11 +14,6 @@ rtc:
   # TCP port for WebRTC (fallback when UDP blocked)
   tcp_port: 7881
 
-# API Keys (use environment variables in production)
-# Format: api_key: api_secret
-keys:
-  devkey: secret
-
 # Logging configuration
 logging:
   level: info
