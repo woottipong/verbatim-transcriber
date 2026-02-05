@@ -25,8 +25,17 @@ func SetupRoutes(app *fiber.App, cfg *config.Config) {
 			"gemini":   cfg.HasGeminiKey(),
 			"google":   cfg.HasGoogleKey(),
 			"azure":    cfg.HasAzureKey(),
+			"livekit":  cfg.HasLiveKitConfig(),
 		})
 	})
+
+	// LiveKit token endpoint
+	if cfg.HasLiveKitConfig() {
+		app.Post("/livekit/token", handlers.HandleLiveKitToken)
+		log.Println("✅ [LiveKit] Token endpoint enabled at /livekit/token")
+	} else {
+		log.Println("⚠️  [LiveKit] Disabled - LIVEKIT_API_KEY or LIVEKIT_API_SECRET not configured")
+	}
 
 	// Conditionally setup WebSocket routes based on available API keys
 	enabledProviders := []string{}

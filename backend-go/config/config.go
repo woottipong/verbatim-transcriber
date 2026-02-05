@@ -10,6 +10,9 @@ type Config struct {
 	GoogleApplicationCredentials string
 	AzureSubscriptionKey         string
 	AzureRegion                  string
+	LiveKitAPIKey                string
+	LiveKitAPISecret             string
+	LiveKitWsUrl                 string
 	GeminiConfig                 GeminiConfig
 	GoogleConfig                 GoogleConfig
 	AzureConfig                  AzureConfig
@@ -49,6 +52,9 @@ func Load() *Config {
 		GoogleApplicationCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
 		AzureSubscriptionKey:         os.Getenv("AZURE_SUBSCRIPTION_KEY"),
 		AzureRegion:                  getEnv("AZURE_REGION", "southeastasia"),
+		LiveKitAPIKey:                os.Getenv("LIVEKIT_API_KEY"),
+		LiveKitAPISecret:             os.Getenv("LIVEKIT_API_SECRET"),
+		LiveKitWsUrl:                 getEnv("LIVEKIT_WS_URL", "ws://localhost:7880"),
 		GeminiConfig: GeminiConfig{
 			Model:           "gemini-2.0-flash",
 			Temperature:     0,
@@ -112,4 +118,8 @@ func (c *Config) HasGoogleKey() bool {
 
 func (c *Config) HasAzureKey() bool {
 	return c.AzureSubscriptionKey != "" && c.AzureRegion != ""
+}
+
+func (c *Config) HasLiveKitConfig() bool {
+	return c.LiveKitAPIKey != "" && c.LiveKitAPISecret != ""
 }

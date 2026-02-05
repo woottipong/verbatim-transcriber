@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: livekit-server
+    ports:
+      - "7880:7880"   # HTTP
+      - "7881:7881"   # WebRTC TCP
+      - "7882:7882/udp" # WebRTC UDP
+      - "7883:7883"   # Turn/TCP
+    environment:
+      LIVEKIT_KEYS: "devkey: secret123"
+      LIVEKIT_REDIS_ADDRESS: redis:6379
+    command: --dev --bind 0.0.0.0 --node-ip localhost
+    depends_on:
+      - redis
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml
+
+  redis:
+    image: redis:alpine
+    container_name: livekit-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+
+volumes:
+  redis-data:
