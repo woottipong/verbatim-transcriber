@@ -43,6 +43,7 @@ func main() {
 
 	// Start server
 	addr := fmt.Sprintf("%s:%s", cfg.Host, cfg.Port)
+	log.Printf("🚀 Server starting at http://%s:%s\n", cfg.Host, cfg.Port)
 	log.Fatal(app.Listen(addr))
 }
 
@@ -52,47 +53,40 @@ func printStartupInfo(cfg *config.Config) {
 	fmt.Println("╚════════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 
-	// Count enabled providers
-	enabledCount := 0
-	providers := []struct {
+	// Provider status table
+	type providerInfo struct {
 		name    string
 		enabled bool
 		path    string
 		icon    string
-		note    string
-	}{
-		{"Gemini 2.0 Flash", cfg.HasGeminiKey(), "/gemini", "✨", ""},
-		{"Google Cloud STT", cfg.HasGoogleKey(), "/google", "🌐", ""},
-		{"Azure Speech", cfg.HasAzureKey(), "/azure", "☁️", ""},
+	}
+	providers := []providerInfo{
+		{"Gemini 2.0 Flash", cfg.HasGeminiKey(), "/gemini", "✨"},
+		{"Google Cloud STT", cfg.HasGoogleKey(), "/google", "🌐"},
+		{"Azure Speech", cfg.HasAzureKey(), "/azure", "☁️"},
 	}
 
+	enabledCount := 0
 	for _, p := range providers {
 		if p.enabled {
 			enabledCount++
 		}
 	}
 
-	// Display provider status
 	fmt.Printf("📦 ASR Providers: %d/%d enabled\n", enabledCount, len(providers))
 	fmt.Println("─────────────────────────────────────────────────────────────────")
-
 	for _, p := range providers {
 		status := "❌ Disabled"
 		detail := ""
 		if p.enabled {
 			status = "✅ Ready"
-			if p.path != "" && p.path != "(direct browser)" {
-				detail = fmt.Sprintf("ws://%s:%s%s", cfg.Host, cfg.Port, p.path)
-			} else if p.note != "" {
-				detail = p.note
-			}
+			detail = fmt.Sprintf("ws://%s:%s%s", cfg.Host, cfg.Port, p.path)
 		}
 		fmt.Printf(" %s %-20s %s\n", p.icon, p.name, status)
-		if detail != "" {
+		if p.enabled && detail != "" {
 			fmt.Printf("    └─ %s\n", detail)
 		}
 	}
-
 	fmt.Println()
 	fmt.Println("─────────────────────────────────────────────────────────────────")
 	fmt.Printf("🌐 Server:    http://%s:%s\n", cfg.Host, cfg.Port)
@@ -114,11 +108,4 @@ func pluralize(count int) string {
 		return ""
 	}
 	return "s"
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
