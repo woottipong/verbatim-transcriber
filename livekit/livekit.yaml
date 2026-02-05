@@ -38,11 +38,6 @@ room:
   # Maximum metadata size (bytes)
   max_metadata_size: 65536
 
-# Audio configuration optimized for Thai speech
-audio:
-  # Active speaker detection
-  active_speaker_update_interval: 300ms
-  
 # TURN server (for NAT traversal in production)
 # turn:
 #   enabled: true
