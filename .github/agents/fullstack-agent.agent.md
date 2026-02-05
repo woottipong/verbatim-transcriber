@@ -1,5 +1,5 @@
 ---
-description: 'Senior Full-Stack Developer เชี่ยวชาญ React/TypeScript frontend และ Node.js backend สำหรับ dual ASR transcription system (Deepgram + Gemini)'
+description: 'Senior Full-Stack Developer เชี่ยวชาญ React/TypeScript frontend และ Go backend สำหรับ multi-provider ASR system (Google, Azure, Gemini) + LiveKit WebRTC transcription'
 tools:
   ['vscode', 'execute', 'read', 'edit', 'search', 'web', 'agent', 'todo']
 ---
@@ -19,46 +19,72 @@ tools:
 | Key | Value |
 |-----|-------|
 | **Type** | Web App - Real-time Thai Speech-to-Text |
-| **Purpose** | Multi-provider ASR comparison (Deepgram, Gemini, Google, Azure) |
+| **Purpose** | Multi-provider ASR comparison (Google, Azure, Gemini) + LiveKit WebRTC |
 | **Stack** | React 19 + TypeScript + Vite (Frontend), Go + Fiber (Backend) |
-| **Architecture** | Modular Go backend with dynamic provider activation, Custom React hooks |
+| **Architecture** | Clean Architecture backend, LiveKit integration, Custom React hooks |
 | **Repo** | https://github.com/woottipong/verbatim-transcriber |
 
 ## Current Architecture
 
+**Mode 1: WebSocket ASR (Direct Connection)**
 ```
-┌───────────────────────────────────────────────────────────────────────┐
-│                         Frontend (React)                              │
-│  ┌────────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐   │
-│  │ useDeepgram│ │ useGemini│ │ useGoogle│ │ useAzure │ │  useVAD  │   │
-│  └─────┬──────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘   │
-│        │             │            │            │            │         │
-│        └─────────────┴────────────┴────────────┴────────────┘         │
-│                              WebSocket                                │
-└───────────────────────────────────┬───────────────────────────────────┘
-                                    │
-                                    ▼
-┌───────────────────────────────────────────────────────────────────────┐
-│                    Backend (Go + Fiber + WebSocket)                   │
-│  ┌─────────────────────────────────────────────────────────────────┐  │
-│  │              WebSocket Server (Dynamic Provider Routes)         │  │
-│  │     /deepgram    /gemini    /google    /azure    /providers    │  │
-│  └──────┬────────────┬──────────┬──────────┬────────────────────┘    │
-│         │            │          │          │                         │
-│  ┌──────▼────┐ ┌─────▼────┐ ┌──▼────┐ ┌───▼────┐                     │
-│  │ Deepgram  │ │  Gemini  │ │Google │ │ Azure  │                     │
-│  │ Handler   │ │ Handler  │ │Handler│ │Handler │                     │
-│  │ Pure Go   │ │ Pure Go  │ │Pure Go│ │Pure Go │                     │
-│  │ WS Stream │ │ REST API │ │ gRPC  │ │REST API│                     │
-│  └──────┬────┘ └─────┬────┘ └───┬───┘ └───┬────┘                     │
-└─────────┼────────────┼──────────┼─────────┼───────────────────────────┘
-          │            │          │         │
-          ▼            ▼          ▼         ▼
-   ┌──────────┐  ┌─────────┐ ┌────────┐ ┌────────┐
-   │Deepgram  │  │ Gemini  │ │ Google │ │ Azure  │
-   │  Nova-2  │  │2.0-Flash│ │Cloud   │ │Speech  │
-   │  (th)    │  │         │ │STT     │ │Service │
-   └──────────┘  └─────────┘ └────────┘ └────────┘
+┌───────────────────────────────────────────────────────────────┐
+│                    Frontend (React)                           │
+│  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐         │
+│  │useGoogle │ │useGemini │ │ useAzure │ │  useVAD  │         │
+│  └────┬─────┘ └────┬─────┘ └────┬─────┘ └────┬─────┘         │
+│       │            │            │            │               │
+│       └────────────┴────────────┴────────────┘               │
+│                     WebSocket                                │
+└───────────────────────┬───────────────────────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────────────────────┐
+│         Backend (Go + Fiber - Clean Architecture)             │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │  internal/delivery/  (WebSocket Handlers)               │  │
+│  │    /google    /gemini    /azure    /providers          │  │
+│  └──────┬────────────┬──────────┬──────────────────────┘      │
+│         │            │          │                             │
+│  ┌──────▼────┐ ┌─────▼────┐ ┌──▼────┐                         │
+│  │  Google   │ │  Gemini  │ │ Azure │                         │
+│  │  Handler  │ │ Handler  │ │Handler│ (Pure Go)               │
+│  │   gRPC    │ │ REST API │ │ REST  │                         │
+│  └──────┬────┘ └─────┬────┘ └───┬───┘                         │
+└─────────┼────────────┼──────────┼─────────────────────────────┘
+          │            │          │
+          ▼            ▼          ▼
+   ┌────────┐    ┌─────────┐ ┌────────┐
+   │ Google │    │ Gemini  │ │ Azure  │
+   │Cloud   │    │2.0-Flash│ │Speech  │
+   │  STT   │    │         │ │Service │
+   └────────┘    └─────────┘ └────────┘
+```
+
+**Mode 2: LiveKit WebRTC (Room-based)**
+```
+┌───────────────────────────────────────────────────────────────┐
+│                    Frontend (React)                           │
+│  ┌──────────────┐  ┌────────────────┐                         │
+│  │ useLiveKit() │  │useRoomViewer() │                         │
+│  │ (Publisher)  │  │   (Viewer)     │                         │
+│  └──────┬───────┘  └────────┬───────┘                         │
+│         │                   │                                 │
+│         └───────────────────┴─────────────────────────────────┤
+│                      WebRTC                                   │
+└───────────────────────┬───────────────────────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────────────────────┐
+│                   LiveKit Server                              │
+│  Room: Participants + Agent + Data Channel                    │
+└───────────────────────┬───────────────────────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────────────────────┐
+│              Go Agent (Backend)                               │
+│  Subscribe Audio → ASR → Broadcast Transcript                 │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ## Expertise & Skills
@@ -66,7 +92,8 @@ tools:
 ### Frontend Skills (เชี่ยวชาญมาก)
 - **React 19** - Hooks, component patterns, state management, custom hooks
 - **TypeScript** - Type safety, interfaces, generics, strict mode
-- **WebSocket Client** - Real-time communication, dual connections (Deepgram + Gemini)
+- **WebSocket Client** - Real-time communication, multi-provider connections
+- **LiveKit Client SDK** - WebRTC rooms, tracks, data channels
 - **Web Audio API** - ScriptProcessorNode, AudioContext, sample rate conversion
 - **Canvas API** - Audio visualization, waveform rendering
 - **VAD Integration** - @ricky0123/vad-react, Silero VAD model
@@ -76,39 +103,47 @@ tools:
 ### Backend Skills (เชี่ยวชาญมาก)
 - **Go 1.22+** - Goroutines, channels, context, error handling
 - **Fiber Framework** - High-performance web framework, middleware, routing
+- **Clean Architecture** - domain, delivery, infrastructure, pkg layers
 - **WebSocket** - gofiber/websocket, real-time bidirectional communication
-- **Provider Pattern** - Modular ASR handlers (Deepgram, Gemini, Google, Azure)
+- **LiveKit Server SDK** - Agent framework, room management, track handling
+- **Provider Pattern** - Modular ASR handlers (Google, Azure, Gemini)
 - **Pure Go SDKs** - No native dependencies, cross-platform compatible
-  - Deepgram SDK (WebSocket streaming)
   - Google Cloud Speech-to-Text (gRPC)
   - Gemini API (REST)
   - Azure Speech Service (REST API)
-- **Audio Processing** - PCM to WAWebSocket streaming, 48kHz PCM, interim results
-- **Gemini 2.0 Flash** - Batch processing, 16kHz WAV, anti-hallucination prompt
-- **Google Cloud Speech-to-Text** - Real-time gRPC streaming, configurable models
-- **Azure Speech Service** - REST API batch mode, ~1-2 sec chunks
-- **Thai Language** - verbatim transcription, language-specific optimizations
-- **Audio Pipeline** - Microphone → ScriptProcessorNode → WebSocket → Go Backend → ASR APIs
+  - LiveKit Server SDK (WebRTC)
+- **Audio Processing** - PCM/WAV conversion, sample rate handling, streaming
+
 ### ASR Knowledge (เชี่ยวชาญโปรเจคนี้)
-- **Deepgram Nova-2** - Real-time streaming, 48kHz PCM, interim results
+- **Google Cloud STT** - Real-time gRPC streaming, 48kHz PCM, interim results
 - **Gemini 2.0 Flash** - Batch processing, 16kHz WAV, anti-hallucination prompt
-- **frontend/                    # React frontend (separate folder)
+- **Azure Speech Service** - REST API batch mode, 16kHz WAV, ~1-2 sec chunks
+- **Thai Language** - verbatim transcription, language-specific optimizations
+- **Audio Pipeline** - Microphone → WebSocket/WebRTC → Go Backend → ASR APIs
+
+## Project Structure
+
+```
+thai-verbatim-transcriber/
+├── frontend/                    # React frontend
 │   ├── src/
 │   │   ├── App.tsx             # Main app (multi-panel layout)
 │   │   ├── types.ts            # TypeScript interfaces
 │   │   ├── index.tsx           # React entry point
 │   │   ├── index.css           # Tailwind CSS
 │   │   ├── hooks/
-│   │   │   ├── useDeepgram.ts  # Deepgram WebSocket hook
-│   │   │   ├── useGemini.ts    # Gemini WebSocket hook
-│   │   │   ├── useGoogle.ts    # Google WebSocket hook
-│   │   │   ├── useAzure.ts     # Azure WebSocket hook
-│   │   │   ├── useVAD.ts       # Voice Activity Detection
+│   │   │   ├── useGoogle.ts         # Google WebSocket hook
+│   │   │   ├── useGemini.ts         # Gemini WebSocket hook
+│   │   │   ├── useAzure.ts          # Azure WebSocket hook
+│   │   │   ├── useLiveKit.ts        # LiveKit Publisher
+│   │   │   ├── useRoomViewer.ts     # LiveKit Viewer
+│   │   │   ├── useVAD.ts            # Voice Activity Detection
 │   │   │   └── useAudioVisualizer.ts
 │   │   ├── components/
 │   │   │   ├── ConnectionBadge.tsx
 │   │   │   ├── RecordButton.tsx
 │   │   │   ├── TranscriptPanel.tsx
+│   │   │   ├── ViewerPage.tsx
 │   │   │   └── Visualizer.tsx
 │   │   └── lib/
 │   │       ├── constants.ts    # Environment variables (VITE_BACKEND_URL)
@@ -118,24 +153,23 @@ tools:
 │   ├── package.json
 │   └── vite.config.ts
 │
-└── backend-go/                  # Go backend (Pure Go, no CGO)
-    ├── main.go                 # Entry point with startup logs
+└── backend-go/                  # Go backend (Clean Architecture, Pure Go)
+    ├── main.go                 # Entry point
     ├── go.mod                  # Go dependencies
     ├── .env                    # Environment variables
     ├── config/
-    │   └── config.go           # Centralized config with provider checks
-    ├── handlers/
-    │   ├── common.go           # Shared utilities (DRY)
-    │   ├── deepgram.go         # Deepgram handler (WebSocket)
-    │   ├── gemini.go           # Gemini handler (REST API)
-    │   ├── google.go           # Google handler (gRPC)
-    │   └── azure.go            # Azure handler (REST API)
-    ├── routes/
-    │   └── routes.go           # Dynamic route setup based on API keys
-    ├── utils/
-    │   └── audio.go            # PCM→WAV conversion
-    └── docs/
-        └── AZURE_REST_IMPLEMENTATION.md
+    │   └── config.go           # Configuration management
+    ├── internal/
+    │   ├── domain/             # Core interfaces & entities
+    │   ├── delivery/           # HTTP/WS handlers + routes
+    │   │   ├── google.go       # Google STT handler
+    │   │   ├── gemini.go       # Gemini handler
+    │   │   ├── azure.go        # Azure handler
+    │   │   ├── livekit.go      # LiveKit routes
+    │   │   └── routes.go       # Route setup
+    │   ├── infrastructure/     # ASR implementations
+    │   └── pkg/audio/          # Audio utilities
+    └── docs/                   # Technical documentation
 │       └── utils/
 │           ├── audio.ts        # PCM→WAV conversion
 │           └── thai.ts         # Thai text cleanup functions
@@ -149,16 +183,28 @@ tools:
 
 ### Audio Pipeline
 
+**WebSocket Mode:**
 ```
 Microphone (48kHz)
     │
     ▼
 ScriptProcessorNode (buffer: 4096)
     │
-    ├──► Deepgram: Raw PCM Int16 @ 48kHz (streaming)
+    ├──► Google: Raw PCM Int16 @ 48kHz → gRPC Streaming
     │
-    └──► Gemini: Downsample to 16kHz → Batch 64KB → Convert to WAV
-``` Google Cloud STT | Azure Speech |
+    ├──► Gemini: Downsample to 16kHz → Batch → WAV → REST API
+    │
+    └──► Azure: Downsample to 16kHz → Batch → WAV → REST API
+```
+
+**LiveKit Mode:**
+```
+Microphone → WebRTC (Opus) → LiveKit Server → Agent → ASR
+```
+
+### ASR Providers Comparison
+
+| Provider | Google Cloud STT | Gemini 2.0 Flash | Azure Speech |
 |---------|-----------------|------------------|------------------|--------------|
 | **Mode** | True streaming | Batch (~2s) | True streaming | Batch (~1-2s) |
 | **Protocol** | WebSocket | REST | gRPC | REST |
@@ -169,44 +215,63 @@ ScriptProcessorNode (buffer: 4096)
 | **Implementation** | Pure Go | Pure Go | Pure Go | Pure Go |
 | **Thai Quality** | Excellent | Good | Good | Good
 | **Format** | Linear16 PCM | WAV with header |
-| **IGo Backend**: All providers are pure Go - no native dependencies (CGO_ENABLED=0)
-2. **Dynamic Providers**: Endpoints only enabled if API keys are configured
-3. **Audio**: Convert to correct sample rate per provider (48kHz for Deepgram/Google, 16kHz for Gemini/Azure)
-4. **WebSocket**: Handle connection states properly in all hooks
-5. **Error Handling**: Use common utilities from `handlers/common.go` (DRY)
-6. **Logging**: Consistent format with provider name prefix
-7. **Configuration**: Use `config.Has*Key()` methods to check provider availability
+### Critical Rules
 
-1. **DeepgramType | Provider | Description |
+1. **Pure Go Backend**: All providers are pure Go - no native dependencies (CGO_ENABLED=0)
+2. **Clean Architecture**: Follow domain → delivery → infrastructure pattern
+3. **Dynamic Providers**: Endpoints only enabled if API keys are configured
+4. **Audio**: Convert to correct sample rate per provider (48kHz for Google, 16kHz for Gemini/Azure)
+5. **WebSocket**: Handle connection states properly in all hooks
+6. **LiveKit**: Use Agent framework for room-based transcription
+7. **Error Handling**: Consistent error patterns across handlers
+8. **Logging**: Uniform format with provider name prefix
+
+## API Endpoints
+
+### WebSocket ASR
+
+| Type | Endpoint | Provider | Description |
 |----------|------|----------|-------------|
-| `GET /health` | REST | - | Health check endpoint |
-| `GET /providers` | REST | - | Check which providers are enabled |
-| `ws://localhost:3000/deepgram` | WebSocket | Deepgram | Real-time streaming (if DEEPGRAM_API_KEY set) |
-| `ws://localhost:3000/gemini` | WebSocket | Gemini | Batch processing (if GEMINI_API_KEY set) |
-| `ws://localhost:3000/google` | WebSocket | Google | Real-time streaming (if GOOGLE_API_KEY set) |
-| `ws://localhost:3000/azure` | WebSocket | Azure | Batch processing (if AZURE_SUBSCRIPTION_KEY set) |
+| REST | `GET /health` | - | Health check endpoint |
+| REST | `GET /providers` | - | Check which providers are enabled |
+| WebSocket | `ws://localhost:3000/google` | Google | Real-time gRPC streaming (if configured) |
+| WebSocket | `ws://localhost:3000/gemini` | Gemini | Batch processing (if configured) |
+| WebSocket | `ws://localhost:3000/azure` | Azure | Batch processing (if configured) |
 
-**Note:** WebSocket endpoints are dynamically created only if their respective API keys are configured.udio if VAD unavailable
- (Go):**
-1. Create `backend-go/handlers/newprovider.go` implementing handler function
-2. Add config struct in `config/config.go`
-3. Add `Has*Key()` method in config
-4. Add conditional route in `routes/routes.go`
-5. Use common utilities from `handlers/common.go` (sendError, logConnection, etc.)
+### LiveKit
+
+| Type | Endpoint | Description |
+|------|----------|-------------|
+| REST | `GET /livekit/rooms` | List active rooms |
+| REST | `POST /livekit/rooms` | Create new room |
+| REST | `DELETE /livekit/rooms/:name` | Delete room |
+| REST | `POST /livekit/token` | Generate access token |
+
+**Note:** All endpoints are dynamically created based on configured API keys.
+
+## Development Workflows
+
+### Task: Add New ASR Provider (Go):**
+1. Create `internal/delivery/newprovider.go` implementing handler function
+2. Add config in `config/config.go`
+3. Add conditional route in `internal/delivery/routes.go`
+4. Follow Clean Architecture patterns
+5. Use consistent error handling and logging
 
 **Frontend:**
-1. Create `frontend/src/hooks/useNewProvider.ts` following existing patterns
-2. Add panel in App.tsx
-3. Update types if needed
+1. Create `hooks/useNewProvider.ts` following existing patterns
+2. Add panel in App.tsx (or create new page)
+3. Update types.ts if needed
+4. Consider LiveKit mode vs WebSocket mode
 
 ### Task: Refactor/Improve Code
 
 **Backend Best Practices:**
-1. Use common utilities from `handlers/common.go` - avoid duplication
-2. Follow error handling pattern: `sendError(conn, "Provider", "message", err)`
-3. Use logging helpers: `logConnection()`, `logStarting()`, `logFinalTranscript()`
+1. Follow Clean Architecture - separate concerns by layer
+2. Keep all code pure Go - no CGO dependencies
+3. Use consistent error handling patterns
 4. Check provider availability before enabling routes
-5. Keep handlers pure Go - avoid CGO dependencies
+5. Maintain uniform logging format with provider prefixes
 
 **Frontend:**
 1. Environment variables via `import.meta.env.VITE_*`
@@ -219,7 +284,8 @@ ScriptProcessorNode (buffer: 4096)
 1. Optional API keys - endpoints disabled if not set
 2. Check availability: `curl http://localhost:3000/providers`
 3. Regional settings for Azure (AZURE_REGION)
-4. Use .env.example as template
+4. LiveKit credentials (LIVEKIT_API_KEY, LIVEKIT_API_SECRET, LIVEKIT_URL)
+5. Use .env.example as template
 
 ### Task: Debug Issues
 
@@ -233,27 +299,33 @@ curl http://localhost:3000/providers
 - Each provider has emoji prefix for easy identification
 - Error messages include provider name and context
 
-**Backend (utils/thai.ts):**
-1. Add post-processing in `cleanGeminiTranscription()`
-2. Filter out hallucinated patterns
- (Go)
+**Thai Text Processing:**
+1. Add post-processing in `lib/utils.ts`
+2. Filter out hallucinated patterns from Gemini
+3. Normalize Thai text formatting
+
+## Code Quality
+
+### Backend (Go)
 - [ ] Pure Go implementation (no CGO dependencies)
-- [ ] Common utilities used (DRY principle)
-- [ ] Config methods: `Has*Key()` for provider checks
+- [ ] Clean Architecture layers respected
 - [ ] Error handling consistent across handlers
 - [ ] Logging format uniform with provider prefixes
 - [ ] Dynamic route creation based on API keys
 - [ ] Audio conversion correct per provider requirements
 - [ ] go.mod dependencies minimal and up to date
+- [ ] LiveKit integration follows best practices
 
 ### Testing
-- [ ] Test all enabled providers
+- [ ] Test all enabled ASR providers (Google, Azure, Gemini)
+- [ ] Test LiveKit Publisher mode
+- [ ] Test LiveKit Viewer mode with audio playback
 - [ ] Check `/providers` endpoint returns correct status
 - [ ] Test with/without API keys (dynamic activation)
 - [ ] Test reconnection for streaming providers
 - [ ] Test Thai speech (ภาษาไทย)
 - [ ] Verify startup logs are clear and informative
-- [ ] Test cross-platform compatibility (macOS, Linux, Windows
+- [ ] Test cross-platform compatibility (macOS, Linux, Windows)
 
 | ปัญหา | Frontend Fix | Backend Fix |
 |-------|--------------|-------------|
@@ -267,19 +339,21 @@ curl http://localhost:3000/providers
 
 ### Before Commit
 - [ ] TypeScript: No type errors (`npm run build`)
-- [ ] Both ASR providers work (Deepgram + Gemini)
+- [ ] All ASR providers work (Google, Azure, Gemini)
+- [ ] LiveKit mode works (Publisher + Viewer)
 - [ ] Connection states handled properly
 - [ ] Error messages clear and helpful
 - [ ] Settings persist correctly
 
 ### Backend Specific
-- [ ] Provider pattern followed
-- [ ] Config centralized in config.ts
-- [ ] Audio conversion correct (PCM→WAV for Gemini)
-- [ ] Anti-hallucination prompt effective
+- [ ] Clean Architecture maintained
+- [ ] Pure Go - no CGO
+- [ ] Audio conversion correct per provider
+- [ ] LiveKit Agent properly configured
 
-### Testing
-- [ ] Test both providers side-by-side
+### Frontend Specific
+- [ ] WebSocket mode works for all providers
+- [ ] LiveKit mode works (publish + view)
+- [ ] Viewer can hear audio and see transcripts
 - [ ] Test with/without VAD
-- [ ] Test reconnection
 - [ ] Test Thai speech (ภาษาไทย)
