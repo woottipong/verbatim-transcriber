@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { Settings, Mic2 } from 'lucide-react';
+import { Settings, Mic2, Eye, Wrench } from 'lucide-react';
 import { useDeepgram } from './hooks/useDeepgram';
 import { useGemini } from './hooks/useGemini';
 import { useGoogle } from './hooks/useGoogle';
@@ -15,10 +15,23 @@ import ErrorBanner from './components/ErrorBanner';
 import TranscriptPanel from './components/TranscriptPanel';
 import LiveKitPanel from './components/LiveKitPanel';
 import VADInfoBadge from './components/VADInfoBadge';
+import ViewerPage from './components/ViewerPage';
+import AdminPage from './components/AdminPage';
 import { ConnectionState, AppConfig, ASRProvider } from './types';
 import { STORAGE_KEYS, DEFAULT_CONFIG, ASR_PROVIDERS } from './lib/constants';
 import { safeJsonParse } from './lib/utils';
 import { checkAvailableProviders, isProviderEnabled, ProvidersResponse } from './lib/api';
+
+// Page types for routing
+type PageType = 'main' | 'viewer' | 'admin';
+
+// Check URL hash to determine initial page
+const getInitialPage = (): PageType => {
+  const hash = window.location.hash;
+  if (hash === '#viewer') return 'viewer';
+  if (hash === '#admin') return 'admin';
+  return 'main';
+};
 
 // Load initial config from localStorage or use defaults
 const getInitialConfig = (): AppConfig => {
@@ -38,6 +51,16 @@ export default function App() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [availableProviders, setAvailableProviders] = useState<ProvidersResponse | null>(null);
   const [isCheckingProviders, setIsCheckingProviders] = useState(false);
+  const [currentPage, setCurrentPage] = useState<PageType>(getInitialPage);
+
+  // Handle hash change for routing
+  useEffect(() => {
+    const handleHashChange = () => {
+      setCurrentPage(getInitialPage());
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
 
   // Shared VAD streaming state (controlled by single VAD instance)
   const isVADStreamingRef = useRef<boolean>(false);
@@ -85,11 +108,14 @@ export default function App() {
   const googleHook = useGoogle(config, { vad, isVADStreamingRef });
   const azureHook = useAzure(config, { vad, isVADStreamingRef });
 
+  // LiveKit room name state - can be changed by user
+  const [livekitRoomName, setLivekitRoomName] = useState('thai-transcription');
+
   // LiveKit WebRTC hook for ultra-low latency transcription
   const livekitHook = useLiveKit({
     serverUrl: import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880',
     tokenEndpoint: `${config.backendUrl.replace('ws://', 'http://').replace('wss://', 'https://')}/livekit/token`,
-    roomName: 'thai-transcription',
+    roomName: livekitRoomName,
     autoConnect: false,
   });
 
@@ -231,6 +257,36 @@ export default function App() {
     return isProviderEnabled(availableProviders, providerName);
   };
 
+  // Open viewer in new tab
+  const openViewerTab = useCallback(() => {
+    window.open(`${window.location.origin}${window.location.pathname}#viewer`, '_blank');
+  }, []);
+
+  // Open admin in new tab
+  const openAdminTab = useCallback(() => {
+    window.open(`${window.location.origin}${window.location.pathname}#admin`, '_blank');
+  }, []);
+
+  // Render Viewer Page (when opened directly with #viewer hash)
+  if (currentPage === 'viewer') {
+    return (
+      <ViewerPage
+        onBack={() => window.close()}
+        backendUrl={config.backendUrl}
+      />
+    );
+  }
+
+  // Render Admin Page (when opened directly with #admin hash)
+  if (currentPage === 'admin') {
+    return (
+      <AdminPage
+        onBack={() => window.close()}
+        backendUrl={config.backendUrl}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
       {/* Compact Header */}
@@ -247,6 +303,26 @@ export default function App() {
           </div>
 
           <div className="flex items-center gap-3">
+            {/* Viewer Page Button - Opens in new tab */}
+            <button
+              onClick={openViewerTab}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg border border-emerald-500/30 transition"
+              title="Open Viewer in New Tab"
+            >
+              <Eye size={16} />
+              Viewer
+            </button>
+
+            {/* Admin Page Button - Opens in new tab */}
+            <button
+              onClick={openAdminTab}
+              className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-orange-400 hover:text-orange-300 bg-orange-500/10 hover:bg-orange-500/20 rounded-lg border border-orange-500/30 transition"
+              title="Open Admin in New Tab"
+            >
+              <Wrench size={16} />
+              Admin
+            </button>
+
             {/* Multi ASR Badge */}
             <div className="flex items-center gap-2 bg-slate-800/50 backdrop-blur-sm rounded-lg px-3 py-1.5 border border-slate-700/50">
               <span className="text-xs font-medium text-indigo-400">Deepgram</span>
@@ -466,8 +542,11 @@ export default function App() {
               interimTranscript={livekitHook.interimTranscript}
               connectionState={livekitHook.connectionState}
               isAgentConnected={livekitHook.isAgentConnected}
+              agentName={livekitHook.agentIdentity}
               participantCount={livekitHook.participants.length + 1}
               error={livekitHook.error}
+              roomName={livekitRoomName}
+              onRoomNameChange={setLivekitRoomName}
               onConnect={livekitHook.connect}
               onDisconnect={livekitHook.disconnect}
               onClear={livekitHook.clearTranscripts}

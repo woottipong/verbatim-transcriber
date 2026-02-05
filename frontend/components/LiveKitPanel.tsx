@@ -5,11 +5,12 @@
  * Features:
  * - Real-time WebRTC connection status
  * - Agent connection indicator
+ * - Room name selection
  * - Lower latency than WebSocket (200-500ms vs 500-2000ms)
  */
 
-import React, { useRef, useEffect } from 'react';
-import { Trash2, Play, Square, Radio, Users } from 'lucide-react';
+import React, { useRef, useEffect, useState } from 'react';
+import { Trash2, Play, Square, Radio, Users, Copy, Check } from 'lucide-react';
 import { TranscriptSegment, ConnectionState } from '../types';
 
 interface LiveKitPanelProps {
@@ -17,8 +18,11 @@ interface LiveKitPanelProps {
     interimTranscript: string;
     connectionState: ConnectionState;
     isAgentConnected: boolean;
+    agentName: string | null;
     participantCount: number;
     error: string | null;
+    roomName: string;
+    onRoomNameChange: (name: string) => void;
     onConnect: () => void;
     onDisconnect: () => void;
     onClear: () => void;
@@ -29,13 +33,17 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
     interimTranscript,
     connectionState,
     isAgentConnected,
+    agentName,
     participantCount,
     error,
+    roomName,
+    onRoomNameChange,
     onConnect,
     onDisconnect,
     onClear,
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
+    const [copied, setCopied] = useState(false);
 
     // Auto-scroll to bottom when new transcripts arrive
     useEffect(() => {
@@ -66,7 +74,10 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
     const getStatusText = () => {
         switch (connectionState) {
             case ConnectionState.CONNECTED:
-                return isAgentConnected ? 'Connected + Agent' : 'Connected (Waiting for Agent)';
+                if (isAgentConnected && agentName) {
+                    return `✅ Agent: ${agentName}`;
+                }
+                return isAgentConnected ? 'Connected + Agent' : 'Waiting for Agent...';
             case ConnectionState.CONNECTING:
                 return 'Connecting...';
             case ConnectionState.ERROR:
@@ -85,6 +96,12 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                         <Radio size={16} className="text-purple-400" />
                         LiveKit (WebRTC)
                     </h2>
+                    {/* Room Name Badge */}
+                    {isConnected && (
+                        <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-purple-800/50 text-xs text-purple-300 font-mono">
+                            🏠 {roomName}
+                        </div>
+                    )}
                     {/* Status Badge */}
                     <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-slate-800/50 text-xs text-slate-400">
                         <span className={`w-2 h-2 rounded-full ${getStatusColor()}`}></span>
@@ -100,6 +117,16 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                 </div>
 
                 <div className="flex items-center gap-2">
+                    {/* Room Name Input (only when disconnected) */}
+                    {!isActive && (
+                        <input
+                            type="text"
+                            value={roomName}
+                            onChange={(e) => onRoomNameChange(e.target.value)}
+                            placeholder="Room name"
+                            className="w-40 px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
+                        />
+                    )}
                     {/* Connect/Disconnect Button */}
                     {isActive ? (
                         <button
@@ -112,7 +139,8 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                     ) : (
                         <button
                             onClick={onConnect}
-                            className="text-xs flex items-center gap-1 text-slate-300 hover:text-purple-400 transition px-3 py-1.5 rounded bg-purple-900/30 hover:bg-purple-900/50"
+                            disabled={!roomName.trim()}
+                            className="text-xs flex items-center gap-1 text-slate-300 hover:text-purple-400 transition px-3 py-1.5 rounded bg-purple-900/30 hover:bg-purple-900/50 disabled:opacity-50 disabled:cursor-not-allowed"
                             aria-label="Connect to LiveKit"
                         >
                             <Play size={14} fill="currentColor" /> Connect
@@ -137,9 +165,29 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
 
             {/* Agent Status Banner */}
             {isConnected && !isAgentConnected && (
-                <div className="px-4 py-2 bg-yellow-900/30 border-b border-yellow-700/30 text-yellow-300 text-xs flex items-center gap-2">
-                    <span className="animate-spin">⏳</span>
-                    Waiting for ASR Agent to connect... Start agent at backend: POST /livekit/agent/start
+                <div className="px-4 py-3 bg-yellow-900/30 border-b border-yellow-700/30 text-yellow-300 text-xs">
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className="animate-spin">⏳</span>
+                        <span>Waiting for ASR Agent... Start agent with:</span>
+                    </div>
+                    <div className="flex items-center gap-2 bg-slate-900/50 rounded p-2 font-mono text-[10px] text-slate-300">
+                        <code className="flex-1 overflow-x-auto whitespace-nowrap">
+                            curl -X POST localhost:3000/livekit/agent/start -H "Content-Type: application/json" -d '{`{"roomName":"${roomName}","provider":"google"}`}'
+                        </code>
+                        <button
+                            onClick={() => {
+                                navigator.clipboard.writeText(
+                                    `curl -X POST localhost:3000/livekit/agent/start -H "Content-Type: application/json" -d '{"roomName":"${roomName}","provider":"google"}'`
+                                );
+                                setCopied(true);
+                                setTimeout(() => setCopied(false), 2000);
+                            }}
+                            className="p-1 hover:bg-slate-700 rounded transition"
+                            title="Copy command"
+                        >
+                            {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -172,15 +220,31 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                     </div>
                 ) : (
                     <div className="space-y-2">
-                        {transcripts.map((segment, index) => (
-                            <div
-                                key={segment.id}
-                                className="text-slate-100 leading-relaxed p-2 rounded-lg hover:bg-purple-700/20 transition-colors border-l-2 border-purple-500/50"
-                            >
-                                <span className="text-xs text-purple-400 mr-2">#{index + 1}</span>
-                                <span className="text-base">{segment.text}</span>
-                            </div>
-                        ))}
+                        {transcripts.map((segment, index) => {
+                            // Provider-specific colors
+                            const providerColors: Record<string, string> = {
+                                google: 'text-blue-400 bg-blue-900/30',
+                                azure: 'text-cyan-400 bg-cyan-900/30',
+                            };
+                            const providerColor = segment.provider 
+                                ? providerColors[segment.provider] || 'text-purple-400 bg-purple-900/30'
+                                : 'text-purple-400 bg-purple-900/30';
+                            
+                            return (
+                                <div
+                                    key={segment.id}
+                                    className="text-slate-100 leading-relaxed p-2 rounded-lg hover:bg-purple-700/20 transition-colors border-l-2 border-purple-500/50"
+                                >
+                                    <span className="text-xs text-purple-400 mr-2">#{index + 1}</span>
+                                    {segment.provider && (
+                                        <span className={`text-[10px] px-1.5 py-0.5 rounded mr-2 ${providerColor}`}>
+                                            {segment.provider.toUpperCase()}
+                                        </span>
+                                    )}
+                                    <span className="text-base">{segment.text}</span>
+                                </div>
+                            );
+                        })}
 
                         {/* Interim transcript */}
                         {interimTranscript && (

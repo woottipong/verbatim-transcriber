@@ -40,6 +40,8 @@ export interface UseLiveKitReturn {
     disconnect: () => void;
     clearTranscripts: () => void;
     isAgentConnected: boolean;
+    agentIdentity: string | null;  // Agent identity/name
+    currentRoomName: string;  // Current room name for display
 }
 
 export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
@@ -59,6 +61,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const [localParticipant, setLocalParticipant] = useState<LocalParticipant | null>(null);
     const [participants, setParticipants] = useState<RemoteParticipant[]>([]);
     const [isAgentConnected, setIsAgentConnected] = useState(false);
+    const [agentIdentity, setAgentIdentity] = useState<string | null>(null);
 
     // Refs
     const roomRef = useRef<Room | null>(null);
@@ -109,6 +112,8 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                     text: message.text,
                     isFinal: true,
                     timestamp: message.timestamp || Date.now(),
+                    provider: message.provider,
+                    speaker: message.speaker,
                 };
                 setTranscripts(prev => [...prev, segment]);
                 setInterimTranscript('');
@@ -129,7 +134,8 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         // Check if it's the agent
         if (participant.identity.startsWith('agent-') || participant.identity === 'asr-agent') {
             setIsAgentConnected(true);
-            console.log('[LiveKit] 🤖 Agent connected!');
+            setAgentIdentity(participant.identity);
+            console.log('[LiveKit] 🤖 Agent connected:', participant.identity);
         }
     }, []);
 
@@ -140,6 +146,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
 
         if (participant.identity.startsWith('agent-') || participant.identity === 'asr-agent') {
             setIsAgentConnected(false);
+            setAgentIdentity(null);
             console.log('[LiveKit] 🤖 Agent disconnected');
         }
     }, []);
@@ -236,6 +243,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             setLocalParticipant(null);
             setParticipants([]);
             setIsAgentConnected(false);
+            setAgentIdentity(null);
             setConnectionState(ConnectionState.DISCONNECTED);
         }
     }, []);
@@ -273,5 +281,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         disconnect,
         clearTranscripts,
         isAgentConnected,
+        agentIdentity,
+        currentRoomName: roomName,
     };
 }

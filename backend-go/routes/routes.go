@@ -36,6 +36,24 @@ func SetupRoutes(app *fiber.App, cfg *config.Config) {
 		})
 		log.Println("✅ [LiveKit] Token service enabled at POST /livekit/token")
 
+		// Room listing endpoints
+		app.Get("/livekit/rooms", func(c *fiber.Ctx) error {
+			return handlers.HandleListRooms(c, cfg)
+		})
+		app.Get("/livekit/rooms/detailed", func(c *fiber.Ctx) error {
+			return handlers.HandleGetRoomsDetailed(c, cfg)
+		})
+		app.Get("/livekit/rooms/:name", func(c *fiber.Ctx) error {
+			return handlers.HandleGetRoom(c, cfg)
+		})
+		app.Delete("/livekit/rooms/:name", func(c *fiber.Ctx) error {
+			return handlers.HandleDeleteRoom(c, cfg)
+		})
+		app.Delete("/livekit/rooms/:room/participants/:identity", func(c *fiber.Ctx) error {
+			return handlers.HandleRemoveParticipant(c, cfg)
+		})
+		log.Println("✅ [LiveKit] Room management enabled at /livekit/rooms/*")
+
 		// LiveKit Agent endpoints (requires ASR provider)
 		if cfg.HasGoogleKey() || cfg.HasAzureKey() {
 			app.Post("/livekit/agent/start", func(c *fiber.Ctx) error {

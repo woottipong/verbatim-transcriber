@@ -104,6 +104,8 @@ export interface TranscriptSegment {
   text: string;
   isFinal: boolean;
   timestamp: number;
+  provider?: string;   // ASR provider: "google", "azure"
+  speaker?: string;    // Speaker identity: "user-123"
 }
 
 /**

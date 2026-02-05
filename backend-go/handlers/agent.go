@@ -18,6 +18,7 @@ var (
 // AgentStartRequest represents the request to start agent
 type AgentStartRequest struct {
 	RoomName string `json:"roomName"`
+	Provider string `json:"provider"` // "google" or "azure" (optional, auto-detect if empty)
 }
 
 // HandleAgentStart starts the LiveKit ASR agent
@@ -45,8 +46,8 @@ func HandleAgentStart(c *fiber.Ctx, cfg *config.Config) error {
 		req.RoomName = "transcription-room" // default room
 	}
 
-	// Create and start agent
-	agentInstance = agent.New(cfg)
+	// Create and start agent with provider preference
+	agentInstance = agent.New(cfg, req.Provider)
 
 	go func() {
 		ctx := context.Background()
@@ -58,9 +59,15 @@ func HandleAgentStart(c *fiber.Ctx, cfg *config.Config) error {
 		}
 	}()
 
+	providerInfo := req.Provider
+	if providerInfo == "" {
+		providerInfo = "auto (google > azure)"
+	}
+
 	return c.JSON(fiber.Map{
 		"status":   "starting",
 		"roomName": req.RoomName,
+		"provider": providerInfo,
 		"message":  "Agent is connecting to room",
 	})
 }

@@ -29,18 +29,21 @@ type TranscriptMessage struct {
 
 // Agent handles audio transcription in a LiveKit room
 type Agent struct {
-	config      *config.Config
-	room        *lksdk.Room
-	asrProvider asr.Provider
-	mu          sync.Mutex
-	isRunning   bool
-	cancel      context.CancelFunc
+	config            *config.Config
+	room              *lksdk.Room
+	asrProvider       asr.Provider
+	mu                sync.Mutex
+	isRunning         bool
+	cancel            context.CancelFunc
+	preferredProvider string // "google", "azure", or "" for auto
 }
 
 // New creates a new LiveKit ASR Agent
-func New(cfg *config.Config) *Agent {
+// provider can be "google", "azure", or "" for auto-detect
+func New(cfg *config.Config, provider string) *Agent {
 	return &Agent{
-		config: cfg,
+		config:            cfg,
+		preferredProvider: provider,
 	}
 }
 
@@ -92,13 +95,26 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 	}
 
 	// Connect to room
+	// Generate identity with provider name for frontend display
+	identity := fmt.Sprintf("agent-%s", a.preferredProvider)
+	if a.preferredProvider == "" {
+		// Auto-detect: will be determined later, use generic identity
+		if a.config.HasGoogleKey() {
+			identity = "agent-google"
+		} else if a.config.HasAzureKey() {
+			identity = "agent-azure"
+		} else {
+			identity = "agent-unknown"
+		}
+	}
+
 	room, err := lksdk.ConnectToRoom(
 		a.config.LiveKitURL,
 		lksdk.ConnectInfo{
 			APIKey:              a.config.LiveKitAPIKey,
 			APISecret:           a.config.LiveKitAPISecret,
 			RoomName:            roomName,
-			ParticipantIdentity: "asr-agent",
+			ParticipantIdentity: identity,
 		},
 		roomCallback,
 	)
@@ -151,30 +167,63 @@ func (a *Agent) IsRunning() bool {
 }
 
 func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote, participant *lksdk.RemoteParticipant) {
-	// Determine which ASR provider to use
+	// Determine which ASR provider to use based on preference
 	var provider asr.Provider
 	var err error
+	var needsResample bool // Azure needs 16kHz, WebRTC sends 48kHz
 
-	// Try Google first, then Azure
-	if a.config.HasGoogleKey() {
-		provider, err = asr.NewGoogleProvider(ctx, asr.GoogleConfig{
-			CredentialsFile: a.config.GoogleApplicationCredentials,
-			APIKey:          a.config.GoogleAPIKey,
-			SampleRate:      48000, // WebRTC typically uses 48kHz
-		})
-		if err != nil {
-			log.Printf("⚠️ [Agent] Failed to init Google provider: %v", err)
+	// Check preferred provider first
+	switch a.preferredProvider {
+	case "azure":
+		if a.config.HasAzureKey() {
+			provider, err = asr.NewAzureProvider(ctx, asr.AzureConfig{
+				SubscriptionKey: a.config.AzureSubscriptionKey,
+				Region:          a.config.AzureRegion,
+				SampleRate:      16000, // Azure uses 16kHz
+			})
+			needsResample = true
+			if err != nil {
+				log.Printf("⚠️ [Agent] Failed to init Azure provider: %v", err)
+			}
+		} else {
+			log.Println("⚠️ [Agent] Azure requested but no API key configured")
 		}
-	}
-
-	if provider == nil && a.config.HasAzureKey() {
-		provider, err = asr.NewAzureProvider(ctx, asr.AzureConfig{
-			SubscriptionKey: a.config.AzureSubscriptionKey,
-			Region:          a.config.AzureRegion,
-			SampleRate:      16000, // Azure prefers 16kHz
-		})
-		if err != nil {
-			log.Printf("⚠️ [Agent] Failed to init Azure provider: %v", err)
+	case "google":
+		if a.config.HasGoogleKey() {
+			provider, err = asr.NewGoogleProvider(ctx, asr.GoogleConfig{
+				CredentialsFile: a.config.GoogleApplicationCredentials,
+				APIKey:          a.config.GoogleAPIKey,
+				SampleRate:      48000, // Google can handle 48kHz
+			})
+			if err != nil {
+				log.Printf("⚠️ [Agent] Failed to init Google provider: %v", err)
+			}
+		} else {
+			log.Println("⚠️ [Agent] Google requested but no API key configured")
+		}
+	default:
+		// Auto-detect: try Google first, then Azure
+		if a.config.HasGoogleKey() {
+			provider, err = asr.NewGoogleProvider(ctx, asr.GoogleConfig{
+				CredentialsFile: a.config.GoogleApplicationCredentials,
+				APIKey:          a.config.GoogleAPIKey,
+				SampleRate:      48000,
+			})
+			if err != nil {
+				log.Printf("⚠️ [Agent] Failed to init Google provider: %v", err)
+				provider = nil
+			}
+		}
+		if provider == nil && a.config.HasAzureKey() {
+			provider, err = asr.NewAzureProvider(ctx, asr.AzureConfig{
+				SubscriptionKey: a.config.AzureSubscriptionKey,
+				Region:          a.config.AzureRegion,
+				SampleRate:      16000,
+			})
+			needsResample = true
+			if err != nil {
+				log.Printf("⚠️ [Agent] Failed to init Azure provider: %v", err)
+			}
 		}
 	}
 
@@ -183,7 +232,7 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		return
 	}
 
-	log.Printf("🎯 [Agent] Using %s for transcription", provider.Name())
+	log.Printf("🎯 [Agent] Using %s for transcription (resample: %v)", provider.Name(), needsResample)
 
 	a.mu.Lock()
 	a.asrProvider = provider
@@ -249,15 +298,31 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 			continue
 		}
 
-		if packetCount%100 == 1 {
-			log.Printf("🔊 [Agent] Decoded %d samples (%d bytes PCM)", samplesDecoded, samplesDecoded*2)
-		}
+		var pcmBytes []byte
 
-		// Convert int16 PCM to bytes (Little Endian) for ASR
-		pcmBytes := make([]byte, samplesDecoded*2)
-		for i := 0; i < samplesDecoded; i++ {
-			pcmBytes[i*2] = byte(pcmBuffer[i])
-			pcmBytes[i*2+1] = byte(pcmBuffer[i] >> 8)
+		if needsResample {
+			// Resample from 48kHz to 16kHz (3:1 decimation)
+			resampledSamples := samplesDecoded / 3
+			pcmBytes = make([]byte, resampledSamples*2)
+			for i := 0; i < resampledSamples; i++ {
+				// Simple decimation: take every 3rd sample
+				sample := pcmBuffer[i*3]
+				pcmBytes[i*2] = byte(sample)
+				pcmBytes[i*2+1] = byte(sample >> 8)
+			}
+			if packetCount%100 == 1 {
+				log.Printf("🔊 [Agent] Resampled %d → %d samples for Azure", samplesDecoded, resampledSamples)
+			}
+		} else {
+			// No resampling needed (Google uses 48kHz)
+			pcmBytes = make([]byte, samplesDecoded*2)
+			for i := 0; i < samplesDecoded; i++ {
+				pcmBytes[i*2] = byte(pcmBuffer[i])
+				pcmBytes[i*2+1] = byte(pcmBuffer[i] >> 8)
+			}
+			if packetCount%100 == 1 {
+				log.Printf("🔊 [Agent] Decoded %d samples (%d bytes PCM)", samplesDecoded, samplesDecoded*2)
+			}
 		}
 
 		// Send PCM to ASR provider
