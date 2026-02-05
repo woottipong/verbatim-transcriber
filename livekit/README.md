@@ -442,8 +442,7 @@ curl -H "Origin: http://localhost:5173" \
 
 - **Main README:** `../README.md` - Project overview
 - **Implementation Plan:** `../backend-go/docs/LIVEKIT_IMPLEMENTATION_PLAN.md` - Detailed plan
-- **Setup Guide:** `../LIVEKIT_SETUP.md` - Quick setup steps
-- **Implementation Summary:** `../LIVEKIT_SUMMARY.md` - Summary of implementation
+- **Quick Start Script:** `../start-livekit.sh` - One-command startup
 
 ### Component Documentation
 
