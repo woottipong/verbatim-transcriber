@@ -5,7 +5,7 @@ import (
 	"log"
 
 	"thai-transcriber-backend/config"
-	"thai-transcriber-backend/routes"
+	"thai-transcriber-backend/internal/delivery"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -36,7 +36,7 @@ func main() {
 	app.Use(logger.New())
 
 	// Routes
-	routes.SetupRoutes(app, cfg)
+	delivery.SetupRoutes(app, cfg)
 
 	// Print startup info
 	printStartupInfo(cfg)

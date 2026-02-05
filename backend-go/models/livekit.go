@@ -1,0 +1,33 @@
+package models
+
+// TokenRequest represents the request body for LiveKit token generation.
+type TokenRequest struct {
+	Identity string `json:"identity"`
+	RoomName string `json:"roomName"`
+	// Optional: specify participant permissions
+	CanPublish     *bool `json:"canPublish,omitempty"`
+	CanSubscribe   *bool `json:"canSubscribe,omitempty"`
+	CanPublishData *bool `json:"canPublishData,omitempty"`
+}
+
+// TokenResponse represents the response with token and connection info.
+type TokenResponse struct {
+	Token string `json:"token"`
+	WsURL string `json:"wsUrl"`
+}
+
+// RoomInfo represents LiveKit room information.
+type RoomInfo struct {
+	Name            string            `json:"name"`
+	NumParticipants int               `json:"numParticipants"`
+	Participants    []ParticipantInfo `json:"participants,omitempty"`
+	CreationTime    int64             `json:"creationTime"`
+}
+
+// ParticipantInfo represents a participant in a LiveKit room.
+type ParticipantInfo struct {
+	Identity string `json:"identity"`
+	Name     string `json:"name"`
+	IsAgent  bool   `json:"isAgent"`
+	State    string `json:"state"`
+}
