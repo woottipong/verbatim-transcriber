@@ -1,101 +1,205 @@
-# 📋 Project Summary - Real-time Thai Transcription
+# Thai Verbatim Transcriber
 
-Last Updated: February 2, 2026
+Real-time Thai Speech-to-Text ด้วย Multi-provider ASR Comparison
 
-## 🎯 Overview
-Real-time Thai speech-to-text web application comparing **Deepgram Nova-2** vs **Gemini 2.0 Flash** side-by-side for verbatim transcription accuracy.
+## Overview
 
-## 🏗️ Current Architecture
+Web application สำหรับถอดความเสียงพูดภาษาไทยแบบ real-time โดยสามารถเปรียบเทียบผลลัพธ์จาก ASR providers หลายตัวพร้อมกัน
 
-### Project Structure
+**2 โหมดการทำงาน:**
+
+1. **WebSocket Mode** - เชื่อมต่อตรงกับ ASR ผ่าน Backend
+2. **LiveKit Mode** - ใช้ WebRTC + Agent สำหรับ room-based transcription
+
+## Features
+
+| Feature             | Description                                      |
+| ------------------- | ------------------------------------------------ |
+| Multi-Provider ASR  | Google Cloud STT, Azure Speech, Gemini 2.0 Flash |
+| Real-time Streaming | WebSocket + LiveKit WebRTC                       |
+| Thai Optimized      | ปรับแต่งสำหรับภาษาไทย verbatim transcription         |
+| Side-by-Side        | เปรียบเทียบผลลัพธ์จาก providers พร้อมกัน               |
+| LiveKit Integration | Room-based transcription with agent              |
+| Viewer Mode         | ดู transcript + ฟังเสียง real-time                  |
+
+---
+
+## Mode 1: WebSocket ASR
+
+**ใช้เมื่อ:** ต้องการ transcribe เสียงของตัวเองโดยตรง (simple, low latency)
+
+### Flow
+
+```
+    Browser                      Go Backend                    ASR API
+       │                             │                            │
+       │  1. Connect WebSocket       │                            │
+       │  ws://localhost:3000/google │                            │
+       │ ─────────────────────────►  │                            │
+       │                             │                            │
+       │  2. { type: "connected" }   │                            │
+       │  ◄───────────────────────── │                            │
+       │                             │                            │
+       │  3. Send Binary Audio       │                            │
+       │  (PCM 48kHz)                │                            │
+       │ ─────────────────────────►  │  4. Forward to ASR         │
+       │                             │ ─────────────────────────► │
+       │                             │                            │
+       │                             │  5. Transcript Result      │
+       │                             │ ◄───────────────────────── │
+       │  6. JSON Response           │                            │
+       │  { type: "transcript",      │                            │
+       │    text: "สวัสดี",            │                            │
+       │    is_final: true }         │                            │
+       │  ◄───────────────────────── │                            │
+       │                             │                            │
+       ▼                             ▼                            ▼
+```
+
+### Endpoints
+
+| Endpoint  | Provider         | Audio Format | Mode      |
+| --------- | ---------------- | ------------ | --------- |
+| `/google` | Google Cloud STT | 48kHz PCM    | Streaming |
+| `/azure`  | Azure Speech     | 16kHz WAV    | Batch     |
+| `/gemini` | Gemini 2.0 Flash | 16kHz WAV    | Batch     |
+
+---
+
+## Mode 2: LiveKit (WebRTC)
+
+**ใช้เมื่อ:** ต้องการ room-based, หลายคน join ดูพร้อมกัน, หรือต้องการ Viewer mode
+
+### Flow
+
+```
+  Publisher                LiveKit Server              Go Agent                ASR
+      │                          │                         │                    │
+      │  1. Join Room            │                         │                    │
+      │  (WebRTC)                │                         │                    │
+      │ ────────────────────────►│                         │                    │
+      │                          │                         │                    │
+      │  2. Publish Audio Track  │  3. Agent Join Room     │                    │
+      │ ────────────────────────►│◄─────────────────────── │                    │
+      │                          │                         │                    │
+      │                          │  4. Audio Stream (Opus) │                    │
+      │                          │ ───────────────────────►│                    │
+      │                          │                         │                    │
+      │                          │                         │  5. Send to ASR    │
+      │                          │                         │ ──────────────────►│
+      │                          │                         │                    │
+      │                          │                         │  6. Transcript     │
+      │                          │                         │◄────────────────── │
+      │                          │  7. Data Channel        │                    │
+      │  8. Receive Transcript   │◄─────────────────────── │                    │
+      │◄──────────────────────── │                         │                    │
+      │                          │                         │                    │
+      ▼                          ▼                         ▼                    ▼
+
+
+  Viewer                   LiveKit Server
+      │                          │
+      │  1. Join Room            │
+      │  (Subscribe Only)        │
+      │ ────────────────────────►│
+      │                          │
+      │  2. Receive Audio        │
+      │  (from Publisher)        │
+      │◄──────────────────────── │
+      │                          │
+      │  3. Receive Transcript   │
+      │  (from Agent)            │
+      │◄──────────────────────── │
+      │                          │
+      │  🔊 Play Audio           │
+      │  📝 Show Transcript      │
+      │                          │
+      ▼                          ▼
+```
+
+### ขั้นตอน
+
+**Publisher:**
+
+1. Join room ด้วย `useLiveKit()` hook
+2. Publish audio track ไปยัง LiveKit Server
+3. รอรับ transcript ผ่าน Data Channel
+
+**Agent (Backend):**
+
+1. Join room เดียวกัน
+2. Subscribe audio จาก Publisher
+3. ส่ง audio ไป ASR
+4. Broadcast transcript กลับ
+
+**Viewer:**
+
+1. Join room ด้วย `useRoomViewer()` (subscribe only)
+2. ได้ยินเสียงจาก Publisher
+3. เห็น transcript real-time
+
+### ข้อดีของ LiveKit Mode
+
+- หลายคนดูพร้อมกันได้ (Viewer mode)
+- Audio + Transcript sync
+- Room management (create/delete/list)
+- WebRTC = better audio quality
+- Multi-speaker support (future)
+
+---
+
+## Project Structure
+
 ```
 thai-verbatim-transcriber/
+├── frontend/                 # React 19 + TypeScript + Vite
+│   ├── hooks/                # useGoogle, useAzure, useLiveKit, useRoomViewer
+│   ├── components/           # UI components
+│   └── lib/                  # Utilities
 │
-├── frontend/                   # React 19 + TypeScript + Vite
-│   ├── .env                    # Environment config (gitignored)
-│   ├── .env.example            # Environment template
-│   ├── vite-env.d.ts           # TypeScript env declarations
-│   ├── package.json            # Frontend dependencies
-│   ├── App.tsx, index.tsx
-│   ├── components/, hooks/, lib/
-│   ├── public/                 # VAD WASM files
-│   └── metadata.json
+├── backend-go/               # Go + Fiber (Clean Architecture)
+│   ├── internal/
+│   │   ├── domain/           # Core interfaces
+│   │   ├── delivery/         # Handlers + Routes
+│   │   ├── infrastructure/   # ASR implementations
+│   │   └── pkg/audio/        # Audio utilities
+│   └── config/               # Configuration
 │
-├── backend-go/                 # Go + Fiber WebSocket server
-│   ├── .env                    # API keys (gitignored)
-│   ├── .env.example            # Environment template
-│   ├── main.go
-│   ├── config/, handlers/, routes/, utils/
-│   └── go.mod
-│
-├── run.sh                      # Quick start (both servers)
-├── start.sh                    # Full setup + start
-└── README.md                   # Main documentation
+└── start.sh                  # Quick start script
 ```
 
-## 🔧 Key Technologies
+## Quick Start
 
-### Frontend
-- **React 19** - UI framework
-- **TypeScript** - Type safety
-- **Vite 6** - Build tool & dev server
-- **Tailwind CSS** - Styling
-- **Web Audio API** - Audio processing (48kHz/16kHz)
-- **WebSocket** - Real-time communication
-- **Silero VAD** - Voice Activity Detection (optional)
-- **Environment Variables** - `VITE_BACKEND_URL` for backend config
+### Prerequisites
 
-### Backend
-- **Go 1.22+** - High-performance server
-- **Fiber** - Web framework (Express-like)
-- **Gorilla WebSocket** - WebSocket handling
-- **Deepgram SDK** - Nova-2 streaming ASR
-- **Gemini SDK** - 2.0 Flash batch ASR
-- **Environment Variables** - `DEEPGRAM_API_KEY`, `GEMINI_API_KEY`
+- Node.js 18+
+- Go 1.22+
+- API Keys (Google/Azure/Gemini - อย่างน้อย 1 provider)
 
-## 📡 Communication Flow
+### 1. Clone & Setup
 
-```
-Microphone → ScriptProcessorNode → WebSocket Client
-                                        ↓
-                            ws://localhost:3000/{provider}
-                                        ↓
-                                  Go WebSocket Server
-                                  /     ↓      \
-                          Deepgram   Fiber    Gemini
-                          (48kHz)   Router    (16kHz)
-                              ↓                  ↓
-                         Real-time          Batch (~2s)
-                         Streaming          Processing
-                              ↓                  ↓
-                         WebSocket ← JSON ← WebSocket
-                              ↓                  ↓
-                         React UI          React UI
-```
-
-## 🔑 Environment Configuration
-
-### Frontend (.env)
 ```bash
-VITE_BACKEND_URL=ws://localhost:3000  # Backend WebSocket URL
+git clone https://github.com/woottipong/verbatim-transcriber.git
+cd thai-verbatim-transcriber
+
+# Backend
+cd backend-go
+cp .env.example .env
+# Edit .env - add API keys
+
+# Frontend
+cd ../frontend
+cp .env.example .env
+npm install
 ```
 
-### Backend (.env)
-```bash
-DEEPGRAM_API_KEY=your_key_here
-GEMINI_API_KEY=your_key_here
-PORT=3000
-```
+### 2. Start
 
-## 🚀 Deployment
-
-### Quick Start
 ```bash
-./run.sh  # Starts both frontend & backend
-```
+# Option 1: Quick start script
+./start.sh
 
-### Manual Start
-```bash
+# Option 2: Manual
 # Terminal 1 - Backend
 cd backend-go && go run main.go
 
@@ -103,120 +207,61 @@ cd backend-go && go run main.go
 cd frontend && npm run dev
 ```
 
-### Production Build
-```bash
-# Frontend
-cd frontend && npm run build
-# Output: dist/
+### 3. Open Browser
 
-# Backend
-cd backend-go && go build -o transcriber-backend
-# Output: transcriber-backend executable
+- **Main App:** http://localhost:5173
+- **Viewer:** http://localhost:5173#viewer
+- **Admin:** http://localhost:5173#admin
+
+## ASR Providers Comparison
+
+| Provider         | Mode      | Sample Rate | Format | Latency | Thai Quality |
+| ---------------- | --------- | ----------- | ------ | ------- | ------------ |
+| Google Cloud STT | Streaming | 48 kHz      | PCM    | ~300ms  | ⭐⭐⭐⭐⭐        |
+| Azure Speech     | Batch     | 16 kHz      | WAV    | ~1-2s   | ⭐⭐⭐⭐         |
+| Gemini 2.0 Flash | Batch     | 16 kHz      | WAV    | ~2-3s   | ⭐⭐⭐⭐         |
+
+## Environment Variables
+
+### Backend (`backend-go/.env`)
+
+```bash
+# Server
+PORT=3000
+
+# ASR Providers (configure what you have)
+GEMINI_API_KEY=your_key
+GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
+AZURE_SUBSCRIPTION_KEY=your_key
+AZURE_REGION=southeastasia
+
+# LiveKit (optional)
+LIVEKIT_API_KEY=your_key
+LIVEKIT_API_SECRET=your_secret
+LIVEKIT_URL=ws://localhost:7880
 ```
 
-## 🎤 Audio Processing
+### Frontend (`frontend/.env`)
 
-| Provider | Sample Rate | Format    | Mode      | Latency |
-| -------- | ----------- | --------- | --------- | ------- |
-| Deepgram | 48,000 Hz   | PCM Int16 | Streaming | ~200ms  |
-| Gemini   | 16,000 Hz   | WAV       | Batch     | ~2-3s   |
-
-**Audio Pipeline:**
-1. Microphone → 48kHz capture
-2. ScriptProcessorNode (4096 buffer)
-3. **Deepgram:** Direct PCM stream
-4. **Gemini:** Downsample → 64KB batches → WAV conversion
-
-## 🔧 Key Features
-
-### Implemented ✅
-- Dual ASR comparison (Deepgram + Gemini)
-- Real-time audio streaming
-- Voice Activity Detection (Silero VAD)
-- Audio visualization (waveform)
-- Connection state management
-- Error handling & recovery
-- Interim results preview
-- Device selection (microphone)
-- Settings persistence (localStorage)
-- Environment-based configuration
-
-### Architecture Highlights
-- **Modular Backend:** Provider-based handlers (easy to add new ASR)
-- **Custom React Hooks:** useDeepgram, useGemini, useVAD
-- **Standalone Frontend:** Can be deployed separately with env config
-- **Type Safety:** Full TypeScript coverage
-- **Performance:** Go backend for high concurrency
-
-## 📝 Recent Changes
-
-### Migration to Modular Structure (Feb 2, 2026)
-1. **Frontend Separation**
-   - Moved all frontend code to `frontend/` folder
-   - Added environment variable support (`VITE_BACKEND_URL`)
-   - Created `vite-env.d.ts` for TypeScript env types
-   - Frontend can now be deployed standalone
-
-2. **Environment Management**
-   - Backend env files moved to `backend-go/`
-   - Frontend env files in `frontend/`
-   - Each module has its own `.env.example`
-
-3. **Removed from Root**
-   - `package.json` (no longer needed)
-   - `node_modules/` (moved to frontend/)
-   - `package-lock.json`
-   - All config files (distributed to modules)
-
-## 🧪 Testing
-
-### Frontend
 ```bash
-cd frontend
-npm run build  # Test build
-npm run preview  # Test production build
+VITE_BACKEND_URL=ws://localhost:3000
+VITE_LIVEKIT_URL=ws://localhost:7880
 ```
 
-### Backend
-```bash
-cd backend-go
-go test ./...  # Run tests (if available)
-go run main.go  # Manual testing
-```
+## Documentation
 
-## 📚 Documentation
+| Document                               | Description                          |
+| -------------------------------------- | ------------------------------------ |
+| [Frontend README](frontend/README.md)  | React app details, hooks, components |
+| [Backend README](backend-go/README.md) | Go server, handlers, API endpoints   |
+| [Backend Docs](backend-go/docs/)       | Implementation details, flows        |
 
-- [Main README](README.md) - Project overview & setup
-- [Frontend README](frontend/README.md) - Frontend-specific docs
-- [Backend README](backend-go/README.md) - Backend-specific docs (if exists)
+## Tech Stack
 
-## 🎯 Future Enhancements
+**Frontend:** React 19, TypeScript, Vite 6, Tailwind CSS, LiveKit Client SDK
 
-- [ ] Add unit tests (frontend & backend)
-- [ ] Docker Compose setup
-- [ ] CI/CD pipeline
-- [ ] Additional ASR providers (Google Speech-to-Text)
-- [ ] Export transcripts (TXT, JSON, SRT)
-- [ ] Real-time translation
-- [ ] Multi-language support
-- [ ] Performance monitoring
-- [ ] WebRTC for better audio quality
+**Backend:** Go 1.22+, Fiber v2, gRPC (Google STT), LiveKit Server SDK
 
-## 🔗 External Services
+## License
 
-| Service    | Usage                    | Docs                                   |
-| ---------- | ------------------------ | -------------------------------------- |
-| Deepgram   | Speech-to-Text API       | https://developers.deepgram.com        |
-| Gemini     | Multimodal AI API        | https://ai.google.dev                  |
-| Silero VAD | Voice Activity Detection | https://github.com/snakers4/silero-vad |
-
-## 👥 Development
-
-**Agent Mode:** `fullstack-agent`  
-**Languages:** Thai & English  
-**Stack Expertise:** React, TypeScript, Go, WebSocket, ASR APIs
-
----
-
-**ความพร้อม:** Production-ready for deployment  
-**ใช้งานได้:** ทั้ง development และ production
+MIT
