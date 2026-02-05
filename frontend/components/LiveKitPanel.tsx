@@ -26,6 +26,7 @@ interface LiveKitPanelProps {
     onConnect: () => void;
     onDisconnect: () => void;
     onClear: () => void;
+    roomPlaceholder?: string;
 }
 
 const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
@@ -41,6 +42,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
     onConnect,
     onDisconnect,
     onClear,
+    roomPlaceholder = 'Room name',
 }) => {
     const scrollRef = useRef<HTMLDivElement>(null);
     const [copied, setCopied] = useState(false);
@@ -123,7 +125,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                             type="text"
                             value={roomName}
                             onChange={(e) => onRoomNameChange(e.target.value)}
-                            placeholder="Room name"
+                            placeholder={roomPlaceholder}
                             className="w-40 px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
                         />
                     )}
@@ -226,10 +228,10 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                                 google: 'text-blue-400 bg-blue-900/30',
                                 azure: 'text-cyan-400 bg-cyan-900/30',
                             };
-                            const providerColor = segment.provider 
+                            const providerColor = segment.provider
                                 ? providerColors[segment.provider] || 'text-purple-400 bg-purple-900/30'
                                 : 'text-purple-400 bg-purple-900/30';
-                            
+
                             return (
                                 <div
                                     key={segment.id}

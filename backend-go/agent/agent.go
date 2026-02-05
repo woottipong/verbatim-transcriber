@@ -36,6 +36,7 @@ type Agent struct {
 	isRunning         bool
 	cancel            context.CancelFunc
 	preferredProvider string // "google", "azure", or "" for auto
+	roomName          string // store room name for status
 }
 
 // New creates a new LiveKit ASR Agent
@@ -47,6 +48,18 @@ func New(cfg *config.Config, provider string) *Agent {
 	}
 }
 
+// GetProvider returns the provider name
+func (a *Agent) GetProvider() string {
+	return a.preferredProvider
+}
+
+// GetRoom returns the room name
+func (a *Agent) GetRoom() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.roomName
+}
+
 // Start connects to the LiveKit room and begins processing audio
 func (a *Agent) Start(ctx context.Context, roomName string) error {
 	a.mu.Lock()
@@ -55,6 +68,7 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 		return fmt.Errorf("agent already running")
 	}
 	a.isRunning = true
+	a.roomName = roomName
 	a.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -373,9 +387,11 @@ func (a *Agent) handleTranscriptionResults(provider asr.Provider, participant *l
 
 func (a *Agent) publishTranscript(data []byte) error {
 	if a.room == nil || a.room.LocalParticipant == nil {
+		log.Println("⚠️ [Agent] Cannot publish - room or local participant is nil")
 		return nil
 	}
 
+	log.Printf("📤 [Agent] Publishing transcript via Data Channel (%d bytes)", len(data))
 	// Publish to all participants via reliable data channel
 	return a.room.LocalParticipant.PublishData(data, lksdk.WithDataPublishReliable(true))
 }

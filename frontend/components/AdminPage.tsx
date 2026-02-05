@@ -42,11 +42,16 @@ interface DetailedRoom {
     participants: ParticipantInfo[];
 }
 
-interface AgentStatus {
-    isRunning: boolean;
-    room: string;
+interface RunningAgent {
+    key: string;
+    running: boolean;
     provider: string;
-    startedAt?: number;
+    room: string;
+}
+
+interface AgentStatus {
+    count: number;
+    agents: RunningAgent[];
 }
 
 interface AdminPageProps {
@@ -163,8 +168,15 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
 
         try {
             const response = await fetch(
-                `${httpBackendUrl}/livekit/agent/start?room=${encodeURIComponent(agentRoom)}&provider=${agentProvider}`,
-                { method: 'POST' }
+                `${httpBackendUrl}/livekit/agent/start`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        roomName: agentRoom,
+                        provider: agentProvider
+                    })
+                }
             );
             if (!response.ok) {
                 const data = await response.json();
@@ -181,13 +193,15 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     };
 
     // Stop agent
-    const stopAgent = async () => {
+    const stopAgent = async (roomName: string, provider: string) => {
         setIsStoppingAgent(true);
         setError(null);
 
         try {
             const response = await fetch(`${httpBackendUrl}/livekit/agent/stop`, {
                 method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ roomName, provider })
             });
             if (!response.ok) {
                 const data = await response.json();
@@ -401,114 +415,116 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
 
                     {/* Right: Agent Control */}
                     <div className="space-y-4">
-                        {/* Agent Status */}
+                        {/* Running Agents */}
+                        {agentStatus && agentStatus.count > 0 && (
+                            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-4">
+                                <h2 className="text-sm font-semibold text-white flex items-center gap-2 mb-4">
+                                    <Bot size={14} className="text-green-400" />
+                                    Active Agents ({agentStatus.count})
+                                </h2>
+                                <div className="space-y-2">
+                                    {agentStatus.agents.map(agent => (
+                                        <div key={agent.key} className="flex items-center justify-between p-2 bg-slate-700/30 rounded-lg">
+                                            <div className="flex items-center gap-2">
+                                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                                                <span className="text-sm text-white">{agent.room}</span>
+                                                <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase border ${getProviderColor(agent.provider)}`}>
+                                                    {agent.provider}
+                                                </span>
+                                            </div>
+                                            <button
+                                                onClick={() => stopAgent(agent.room, agent.provider)}
+                                                disabled={isStoppingAgent}
+                                                className="p-1.5 text-red-400 hover:bg-red-500/20 rounded-lg transition disabled:opacity-50"
+                                                title="Remove Agent"
+                                            >
+                                                <UserMinus size={14} />
+                                            </button>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Add Agent Form - Always visible */}
                         <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-4">
                             <h2 className="text-sm font-semibold text-white flex items-center gap-2 mb-4">
                                 <Bot size={14} className="text-purple-400" />
-                                ASR Agent
+                                Add Agent to Room
                             </h2>
 
-                            {agentStatus?.isRunning ? (
-                                <div className="space-y-3">
-                                    <div className="flex items-center gap-2">
-                                        <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
-                                        <span className="text-sm text-green-400 font-medium">Running</span>
-                                    </div>
-                                    <div className="space-y-2 text-sm">
-                                        <div className="flex justify-between">
-                                            <span className="text-slate-400">Room:</span>
-                                            <span className="text-white font-medium">{agentStatus.room}</span>
-                                        </div>
-                                        <div className="flex justify-between">
-                                            <span className="text-slate-400">Provider:</span>
-                                            <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase border ${getProviderColor(agentStatus.provider)}`}>
-                                                {agentStatus.provider}
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <button
-                                        onClick={stopAgent}
-                                        disabled={isStoppingAgent}
-                                        className="w-full mt-2 flex items-center justify-center gap-2 px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 font-medium rounded-lg border border-red-500/30 transition disabled:opacity-50"
-                                    >
-                                        {isStoppingAgent ? (
-                                            <RefreshCw size={14} className="animate-spin" />
-                                        ) : (
-                                            <Square size={14} />
-                                        )}
-                                        Stop Agent
-                                    </button>
-                                </div>
-                            ) : (
-                                <div className="space-y-3">
-                                    <div className="flex items-center gap-2">
-                                        <span className="w-2 h-2 bg-slate-500 rounded-full" />
-                                        <span className="text-sm text-slate-400">Not Running</span>
-                                    </div>
-
-                                    {/* Start Agent Form */}
-                                    <div className="space-y-3 pt-2 border-t border-slate-700/50">
-                                        <div>
-                                            <label className="block text-xs text-slate-400 mb-1">Room Name</label>
-                                            <input
-                                                type="text"
-                                                value={agentRoom}
-                                                onChange={(e) => setAgentRoom(e.target.value)}
-                                                placeholder="thai-transcription"
-                                                className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
-                                            />
-                                        </div>
-                                        <div>
-                                            <label className="block text-xs text-slate-400 mb-1">Provider</label>
-                                            <select
-                                                value={agentProvider}
-                                                onChange={(e) => setAgentProvider(e.target.value as 'google' | 'azure')}
-                                                className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 rounded-lg text-sm text-white focus:outline-none focus:border-purple-500/50"
-                                            >
-                                                <option value="google">Google Cloud STT</option>
-                                                <option value="azure">Azure Speech</option>
-                                            </select>
-                                        </div>
-                                        <button
-                                            onClick={startAgent}
-                                            disabled={!agentRoom || isStartingAgent}
-                                            className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 font-medium rounded-lg border border-purple-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                            <div className="space-y-3">
+                                <div>
+                                    <label className="block text-xs text-slate-400 mb-1">Select Room</label>
+                                    {rooms.length > 0 ? (
+                                        <select
+                                            value={agentRoom}
+                                            onChange={(e) => setAgentRoom(e.target.value)}
+                                            className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 rounded-lg text-sm text-white focus:outline-none focus:border-purple-500/50"
                                         >
-                                            {isStartingAgent ? (
-                                                <RefreshCw size={14} className="animate-spin" />
-                                            ) : (
-                                                <Play size={14} />
-                                            )}
-                                            Start Agent
-                                        </button>
-                                    </div>
+                                            <option value="">-- Select a room --</option>
+                                            {rooms.map(room => (
+                                                <option key={room.name} value={room.name}>
+                                                    {room.name} ({room.numParticipants} users)
+                                                </option>
+                                            ))}
+                                        </select>
+                                    ) : (
+                                        <input
+                                            type="text"
+                                            value={agentRoom}
+                                            onChange={(e) => setAgentRoom(e.target.value)}
+                                            placeholder="Enter room name..."
+                                            className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
+                                        />
+                                    )}
                                 </div>
-                            )}
-                        </div>
-
-                        {/* Quick Actions */}
-                        <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-4">
-                            <h2 className="text-sm font-semibold text-white mb-3">Quick Actions</h2>
-                            <div className="space-y-2">
-                                {rooms.map(room => (
-                                    <button
-                                        key={room.name}
-                                        onClick={() => {
-                                            setAgentRoom(room.name);
-                                        }}
-                                        disabled={agentStatus?.isRunning}
-                                        className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:text-white hover:bg-slate-700/50 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                <div>
+                                    <label className="block text-xs text-slate-400 mb-1">Provider</label>
+                                    <select
+                                        value={agentProvider}
+                                        onChange={(e) => setAgentProvider(e.target.value as 'google' | 'azure')}
+                                        className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 rounded-lg text-sm text-white focus:outline-none focus:border-purple-500/50"
                                     >
-                                        Start agent in "{room.name}"
-                                    </button>
-                                ))}
-                                {rooms.length === 0 && (
-                                    <p className="text-sm text-slate-500 text-center py-2">
-                                        No rooms available
-                                    </p>
-                                )}
+                                        <option value="google">Google Cloud STT</option>
+                                        <option value="azure">Azure Speech</option>
+                                    </select>
+                                </div>
+                                <button
+                                    onClick={startAgent}
+                                    disabled={!agentRoom || isStartingAgent}
+                                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 font-medium rounded-lg border border-purple-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                >
+                                    {isStartingAgent ? (
+                                        <RefreshCw size={14} className="animate-spin" />
+                                    ) : (
+                                        <Bot size={14} />
+                                    )}
+                                    Inject Agent
+                                </button>
                             </div>
                         </div>
+
+                        {/* Quick Inject */}
+                        {rooms.length > 0 && (
+                            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-4">
+                                <h2 className="text-sm font-semibold text-white mb-3">Quick Inject</h2>
+                                <div className="space-y-2">
+                                    {rooms.map(room => (
+                                        <button
+                                            key={room.name}
+                                            onClick={() => {
+                                                setAgentRoom(room.name);
+                                            }}
+                                            className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:text-purple-400 hover:bg-purple-500/10 rounded-lg transition flex items-center gap-2"
+                                        >
+                                            <Bot size={14} />
+                                            Add agent to "{room.name}"
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </div>
             </main>

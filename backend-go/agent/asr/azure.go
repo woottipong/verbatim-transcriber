@@ -26,6 +26,8 @@ type AzureProvider struct {
 	requestID       string
 	isRunning       bool
 	sampleRate      int
+	audioBuffer     []byte // Buffer to accumulate audio chunks
+	bufferThreshold int    // Send when buffer reaches this size
 }
 
 type AzureConfig struct {
@@ -47,6 +49,8 @@ func NewAzureProvider(ctx context.Context, cfg AzureConfig) (*AzureProvider, err
 		region:          cfg.Region,
 		connectionID:    strings.ReplaceAll(uuid.New().String(), "-", ""),
 		sampleRate:      sampleRate,
+		audioBuffer:     make([]byte, 0),
+		bufferThreshold: 32000, // ~1 second of 16kHz 16-bit audio
 	}, nil
 }
 
@@ -74,12 +78,17 @@ func (a *AzureProvider) Start(ctx context.Context) error {
 		a.region,
 	)
 
+	log.Printf("🔗 [Azure Agent] Connecting to: %s", wsURL)
+
 	dialer := websocket.Dialer{}
-	conn, _, err := dialer.Dial(wsURL, map[string][]string{
+	conn, resp, err := dialer.Dial(wsURL, map[string][]string{
 		"Ocp-Apim-Subscription-Key": {a.subscriptionKey},
 		"X-ConnectionId":            {a.connectionID},
 	})
 	if err != nil {
+		if resp != nil {
+			log.Printf("❌ [Azure Agent] Response status: %d", resp.StatusCode)
+		}
 		return fmt.Errorf("websocket dial failed: %v", err)
 	}
 
@@ -89,11 +98,13 @@ func (a *AzureProvider) Start(ctx context.Context) error {
 		conn.Close()
 		return fmt.Errorf("failed to send speech config: %v", err)
 	}
+	log.Println("📝 [Azure Agent] Speech config sent")
 
 	if err := a.sendAudioConfig(); err != nil {
 		conn.Close()
 		return fmt.Errorf("failed to send audio config: %v", err)
 	}
+	log.Println("🎵 [Azure Agent] Audio config sent")
 
 	a.isRunning = true
 	go a.receiveResponses()
@@ -192,6 +203,7 @@ func (a *AzureProvider) receiveResponses() {
 		}
 
 		if msgType == websocket.TextMessage {
+			log.Printf("📨 [Azure Agent] Received message: %s", string(message[:min(200, len(message))]))
 			a.parseTextMessage(string(message))
 		}
 	}
@@ -200,26 +212,32 @@ func (a *AzureProvider) receiveResponses() {
 func (a *AzureProvider) parseTextMessage(message string) {
 	parts := strings.SplitN(message, "\r\n\r\n", 2)
 	if len(parts) < 2 {
+		log.Printf("⚠️ [Azure Agent] Invalid message format (no body)")
 		return
 	}
 
 	headers := parts[0]
 	body := parts[1]
 
-	if strings.Contains(headers, "Path: speech.hypothesis") {
+	log.Printf("📋 [Azure Agent] Headers: %s", headers)
+	log.Printf("📋 [Azure Agent] Body: %s", body[:min(500, len(body))])
+
+	if strings.Contains(headers, "Path:speech.hypothesis") {
 		var hypothesis struct {
 			Text string `json:"Text"`
 		}
 		if err := json.Unmarshal([]byte(body), &hypothesis); err == nil && hypothesis.Text != "" {
+			log.Printf("💭 [Azure Agent] Interim: %s", hypothesis.Text)
 			select {
 			case a.results <- TranscriptResult{
 				Text:    hypothesis.Text,
 				IsFinal: false,
 			}:
 			default:
+				log.Println("⚠️ [Azure Agent] Results channel full, dropping interim")
 			}
 		}
-	} else if strings.Contains(headers, "Path: speech.phrase") {
+	} else if strings.Contains(headers, "Path:speech.phrase") {
 		var phrase struct {
 			RecognitionStatus string `json:"RecognitionStatus"`
 			DisplayText       string `json:"DisplayText"`
@@ -229,6 +247,7 @@ func (a *AzureProvider) parseTextMessage(message string) {
 			} `json:"NBest"`
 		}
 		if err := json.Unmarshal([]byte(body), &phrase); err == nil {
+			log.Printf("📝 [Azure Agent] Phrase status: %s", phrase.RecognitionStatus)
 			if phrase.RecognitionStatus == "Success" {
 				text := phrase.DisplayText
 				confidence := 0.0
@@ -237,6 +256,7 @@ func (a *AzureProvider) parseTextMessage(message string) {
 					confidence = phrase.NBest[0].Confidence
 				}
 				if text != "" {
+					log.Printf("✅ [Azure Agent] Final: %s (conf: %.2f)", text, confidence)
 					select {
 					case a.results <- TranscriptResult{
 						Text:       text,
@@ -244,6 +264,7 @@ func (a *AzureProvider) parseTextMessage(message string) {
 						Confidence: confidence,
 					}:
 					default:
+						log.Println("⚠️ [Azure Agent] Results channel full, dropping final")
 					}
 				}
 			}
@@ -259,6 +280,15 @@ func (a *AzureProvider) SendAudio(data []byte) error {
 		return nil
 	}
 
+	// Accumulate audio in buffer
+	a.audioBuffer = append(a.audioBuffer, data...)
+
+	// Only send when buffer reaches threshold
+	if len(a.audioBuffer) < a.bufferThreshold {
+		return nil
+	}
+
+	// Send buffered audio
 	headerText := fmt.Sprintf("Path: audio\r\nX-RequestId: %s\r\nX-Timestamp: %s\r\nContent-Type: audio/x-wav\r\n",
 		a.requestID, a.getTimestamp())
 	headerLen := uint16(len(headerText))
@@ -266,7 +296,12 @@ func (a *AzureProvider) SendAudio(data []byte) error {
 	var buf bytes.Buffer
 	binary.Write(&buf, binary.BigEndian, headerLen)
 	buf.WriteString(headerText)
-	buf.Write(data)
+	buf.Write(a.audioBuffer)
+
+	log.Printf("📤 [Azure Agent] Sending %d bytes of audio", len(a.audioBuffer))
+
+	// Clear buffer after sending
+	a.audioBuffer = a.audioBuffer[:0]
 
 	return a.conn.WriteMessage(websocket.BinaryMessage, buf.Bytes())
 }

@@ -79,17 +79,22 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
         viewer.transcripts.forEach(t => {
             if (t.provider) providers.add(t.provider);
         });
-        return Array.from(providers).sort();
+        const result = Array.from(providers).sort();
+        console.log('[Viewer Filter] Available providers:', result, 'Agents:', viewer.agents, 'Transcripts count:', viewer.transcripts.length);
+        return result;
     }, [viewer.agents, viewer.transcripts]);
 
     // Filter transcripts by selected providers
     const filteredTranscripts = useMemo(() => {
+        console.log('[Viewer Filter] Selected providers:', Array.from(selectedProviders), 'Total transcripts:', viewer.transcripts.length);
         if (selectedProviders.size === 0) {
             return viewer.transcripts; // Show all if no filter
         }
-        return viewer.transcripts.filter(t =>
+        const filtered = viewer.transcripts.filter(t =>
             t.provider && selectedProviders.has(t.provider)
         );
+        console.log('[Viewer Filter] Filtered count:', filtered.length);
+        return filtered;
     }, [viewer.transcripts, selectedProviders]);
 
     // Toggle provider filter
