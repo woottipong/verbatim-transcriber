@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Mic, Power, Loader2 } from 'lucide-react';
 import { TranscriptionRoom } from './components/LiveKitRoom';
-import { LiveTranscript } from './components/LiveTranscript';
+import LiveTranscript from './components/LiveTranscript';
 
 interface TokenResponse {
   token: string;
@@ -23,6 +23,7 @@ export default function LiveKitTest() {
   const [isConnected, setIsConnected] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [roomName, setRoomName] = useState('transcription-room');
+  const [transcripts, setTranscripts] = useState<TranscriptMessage[]>([]);
 
   const handleGetToken = async () => {
     setIsLoading(true);
@@ -52,6 +53,20 @@ export default function LiveKitTest() {
     setToken(null);
     setWsUrl('');
     setIsConnected(false);
+    setTranscripts([]);
+  };
+
+  const handleTranscript = (msg: TranscriptMessage) => {
+    setTranscripts((prev) => {
+      if (msg.isFinal) {
+        return [...prev, msg];
+      }
+      const lastIndex = prev.length - 1;
+      if (lastIndex >= 0 && !prev[lastIndex].isFinal) {
+        return [...prev.slice(0, lastIndex), msg];
+      }
+      return [...prev, msg];
+    });
   };
 
   return (
@@ -137,7 +152,16 @@ export default function LiveKitTest() {
           </div>
 
           <div className="lg:col-span-2">
-            <LiveTranscript isConnected={isConnected} />
+            {token ? (
+              <LiveTranscript transcripts={transcripts} />
+            ) : (
+              <div className="bg-slate-900 rounded-lg p-8 flex flex-col items-center justify-center h-[500px]">
+                <Mic className="w-16 h-16 text-slate-600 mb-4" />
+                <p className="text-slate-400 text-center">
+                  Click "Start Session" to begin transcription
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -145,9 +169,7 @@ export default function LiveKitTest() {
           <TranscriptionRoom
             token={token}
             serverUrl={wsUrl}
-            onTranscript={(msg: TranscriptMessage) => {
-              console.log('Received transcript:', msg);
-            }}
+            onTranscript={handleTranscript}
             onConnected={() => setIsConnected(true)}
             onDisconnected={() => setIsConnected(false)}
           />
