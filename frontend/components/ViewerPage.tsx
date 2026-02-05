@@ -8,7 +8,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Users, Radio, Filter, Trash2, X, Bot, Eye } from 'lucide-react';
+import { RefreshCw, Users, Radio, Trash2, X, Bot, Eye } from 'lucide-react';
 import { useRoomViewer, AgentInfo } from '../hooks/useRoomViewer';
 import { ConnectionState, TranscriptSegment } from '../types';
 import ConnectionBadge from './ConnectionBadge';
@@ -30,9 +30,8 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
     const [isLoadingRooms, setIsLoadingRooms] = useState(false);
     const [roomsError, setRoomsError] = useState<string | null>(null);
 
-    // Provider filter
-    const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
-    const [showFilterMenu, setShowFilterMenu] = useState(false);
+    // Provider filter - simple select: 'all' or specific provider name
+    const [filterProvider, setFilterProvider] = useState<string>('all');
 
     // Convert backend URL to HTTP
     const httpBackendUrl = backendUrl.replace('ws://', 'http://').replace('wss://', 'https://');
@@ -84,31 +83,16 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
         return result;
     }, [viewer.agents, viewer.transcripts]);
 
-    // Filter transcripts by selected providers
+    // Filter transcripts by selected provider
     const filteredTranscripts = useMemo(() => {
-        console.log('[Viewer Filter] Selected providers:', Array.from(selectedProviders), 'Total transcripts:', viewer.transcripts.length);
-        if (selectedProviders.size === 0) {
-            return viewer.transcripts; // Show all if no filter
+        console.log('[Viewer Filter] Filter provider:', filterProvider, 'Total transcripts:', viewer.transcripts.length);
+        if (filterProvider === 'all') {
+            return viewer.transcripts; // Show all
         }
-        const filtered = viewer.transcripts.filter(t =>
-            t.provider && selectedProviders.has(t.provider)
-        );
+        const filtered = viewer.transcripts.filter(t => t.provider === filterProvider);
         console.log('[Viewer Filter] Filtered count:', filtered.length);
         return filtered;
-    }, [viewer.transcripts, selectedProviders]);
-
-    // Toggle provider filter
-    const toggleProvider = (provider: string) => {
-        setSelectedProviders(prev => {
-            const next = new Set(prev);
-            if (next.has(provider)) {
-                next.delete(provider);
-            } else {
-                next.add(provider);
-            }
-            return next;
-        });
-    };
+    }, [viewer.transcripts, filterProvider]);
 
     // Provider color mapping
     const getProviderColor = (provider: string) => {
@@ -263,51 +247,20 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
 
                                 <div className="flex items-center gap-2">
                                     {/* Provider Filter */}
+                                    {/* Provider Filter - Simple Select */}
                                     {availableProviders.length > 0 && (
-                                        <div className="relative">
-                                            <button
-                                                onClick={() => setShowFilterMenu(!showFilterMenu)}
-                                                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border transition ${selectedProviders.size > 0
-                                                    ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
-                                                    : 'bg-slate-700/50 border-slate-600/50 text-slate-300 hover:bg-slate-700'
-                                                    }`}
-                                            >
-                                                <Filter size={12} />
-                                                Filter
-                                                {selectedProviders.size > 0 && (
-                                                    <span className="ml-1 px-1.5 bg-emerald-500 text-white rounded text-[10px]">
-                                                        {selectedProviders.size}
-                                                    </span>
-                                                )}
-                                            </button>
-
-                                            {showFilterMenu && (
-                                                <div className="absolute right-0 mt-2 w-40 bg-slate-800 border border-slate-700 rounded-lg shadow-xl z-10">
-                                                    <div className="p-2 space-y-1">
-                                                        {availableProviders.map(provider => (
-                                                            <button
-                                                                key={provider}
-                                                                onClick={() => toggleProvider(provider)}
-                                                                className={`w-full text-left px-3 py-2 text-sm rounded-lg transition ${selectedProviders.has(provider)
-                                                                    ? 'bg-emerald-500/20 text-emerald-400'
-                                                                    : 'text-slate-300 hover:bg-slate-700'
-                                                                    }`}
-                                                            >
-                                                                {provider}
-                                                            </button>
-                                                        ))}
-                                                        {selectedProviders.size > 0 && (
-                                                            <button
-                                                                onClick={() => setSelectedProviders(new Set())}
-                                                                className="w-full text-left px-3 py-2 text-sm text-slate-400 hover:text-white rounded-lg transition"
-                                                            >
-                                                                Clear all
-                                                            </button>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            )}
-                                        </div>
+                                        <select
+                                            value={filterProvider}
+                                            onChange={(e) => setFilterProvider(e.target.value)}
+                                            className="px-3 py-1.5 text-xs font-medium bg-slate-700/50 border border-slate-600/50 rounded-lg text-white focus:outline-none focus:border-emerald-500/50"
+                                        >
+                                            <option value="all">All Providers</option>
+                                            {availableProviders.map(provider => (
+                                                <option key={provider} value={provider}>
+                                                    {provider}
+                                                </option>
+                                            ))}
+                                        </select>
                                     )}
 
                                     {/* Clear Button */}
@@ -365,7 +318,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                             const provider = agent?.provider || 'unknown';
 
                                             // Skip if filtered out
-                                            if (selectedProviders.size > 0 && !selectedProviders.has(provider)) {
+                                            if (filterProvider !== 'all' && provider !== filterProvider) {
                                                 return null;
                                             }
 
@@ -397,14 +350,6 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                     </div>
                 </div>
             </main>
-
-            {/* Click outside to close filter menu */}
-            {showFilterMenu && (
-                <div
-                    className="fixed inset-0 z-0"
-                    onClick={() => setShowFilterMenu(false)}
-                />
-            )}
         </div>
     );
 }
