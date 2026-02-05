@@ -353,16 +353,16 @@ func parseAzureTextMessage(conn *websocket.Conn, message []byte) {
 		}
 
 	case "turn.start":
-		log.Printf("🎤 [Azure] Turn started\n")
+		// Turn started (silence log)
 
 	case "turn.end":
-		log.Printf("🔇 [Azure] Turn ended\n")
+		// Turn ended (silence log)
 
 	case "speech.startDetected":
-		log.Printf("🗣️ [Azure] Speech detected\n")
+		// Speech detected (silence log)
 
 	case "speech.endDetected":
-		log.Printf("🔕 [Azure] Speech ended\n")
+		// Speech ended (silence log)
 	}
 }
 
@@ -399,9 +399,9 @@ func parseAzureBinaryMessage(conn *websocket.Conn, message []byte) {
 
 	switch path {
 	case "turn.start":
-		log.Printf("🎤 [Azure] Turn started (binary)\n")
+		// Turn started (silence log)
 	case "turn.end":
-		log.Printf("🔇 [Azure] Turn ended (binary)\n")
+		// Turn ended (silence log)
 	}
 }
 

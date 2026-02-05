@@ -1,3 +1,9 @@
+// Package agent provides a LiveKit room agent that captures audio from
+// participants and performs real-time speech-to-text transcription.
+//
+// The agent connects to a LiveKit room, subscribes to audio tracks,
+// decodes Opus audio, and sends it to ASR providers (Google or Azure)
+// for transcription. Results are published back to the room via Data Channel.
 package agent
 
 import (
@@ -273,8 +279,6 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 	// PCM buffer for decoded audio (max 120ms frame at 48kHz mono = 5760 samples)
 	pcmBuffer := make([]int16, 5760)
 
-	log.Println("🎧 [Agent] Starting audio processing loop...")
-
 	packetCount := 0
 	for {
 		select {
@@ -297,9 +301,6 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		}
 
 		packetCount++
-		if packetCount%100 == 1 {
-			log.Printf("📦 [Agent] Packet #%d, Opus size: %d bytes", packetCount, len(opusData))
-		}
 
 		// Decode Opus to PCM int16
 		samplesDecoded, err := opusDecoder.Decode(opusData, pcmBuffer)
@@ -324,18 +325,12 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 				pcmBytes[i*2] = byte(sample)
 				pcmBytes[i*2+1] = byte(sample >> 8)
 			}
-			if packetCount%100 == 1 {
-				log.Printf("🔊 [Agent] Resampled %d → %d samples for Azure", samplesDecoded, resampledSamples)
-			}
 		} else {
 			// No resampling needed (Google uses 48kHz)
 			pcmBytes = make([]byte, samplesDecoded*2)
 			for i := 0; i < samplesDecoded; i++ {
 				pcmBytes[i*2] = byte(pcmBuffer[i])
 				pcmBytes[i*2+1] = byte(pcmBuffer[i] >> 8)
-			}
-			if packetCount%100 == 1 {
-				log.Printf("🔊 [Agent] Decoded %d samples (%d bytes PCM)", samplesDecoded, samplesDecoded*2)
 			}
 		}
 
@@ -371,11 +366,9 @@ func (a *Agent) handleTranscriptionResults(provider asr.Provider, participant *l
 			continue
 		}
 
-		// Log transcript
+		// Log final transcripts only
 		if result.IsFinal {
-			log.Printf("📝 [%s] Final: %s", participant.Identity(), result.Text)
-		} else {
-			log.Printf("💭 [%s] Interim: %s", participant.Identity(), result.Text)
+			log.Printf("📝 [%s] %s", participant.Identity(), result.Text)
 		}
 
 		// Publish via Data Channel to all participants
@@ -391,7 +384,6 @@ func (a *Agent) publishTranscript(data []byte) error {
 		return nil
 	}
 
-	log.Printf("📤 [Agent] Publishing transcript via Data Channel (%d bytes)", len(data))
 	// Publish to all participants via reliable data channel
 	return a.room.LocalParticipant.PublishData(data, lksdk.WithDataPublishReliable(true))
 }

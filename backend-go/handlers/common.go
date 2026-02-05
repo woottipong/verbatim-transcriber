@@ -1,3 +1,9 @@
+// Package handlers provides HTTP and WebSocket handlers for the backend API.
+//
+// This package contains:
+//   - Traditional ASR handlers (Google, Azure) for direct WebSocket streaming
+//   - LiveKit-related handlers for room management and agent control
+//   - Common utilities for WebSocket communication and logging
 package handlers
 
 import (
@@ -7,11 +13,12 @@ import (
 	websocketFiber "github.com/gofiber/websocket/v2"
 )
 
-// Common message types
+// Message represents a control message from the frontend.
+// Used to start/stop transcription sessions.
 type Message struct {
-	Type       string `json:"type"`
-	APIKey     string `json:"apiKey,omitempty"`
-	SampleRate int    `json:"sampleRate,omitempty"` // Sample rate from frontend audio context
+	Type       string `json:"type"`                 // "start" or "stop"
+	APIKey     string `json:"apiKey,omitempty"`     // Optional API key override
+	SampleRate int    `json:"sampleRate,omitempty"` // Audio sample rate from frontend
 }
 
 type TranscriptResponse struct {

@@ -98,13 +98,11 @@ func (a *AzureProvider) Start(ctx context.Context) error {
 		conn.Close()
 		return fmt.Errorf("failed to send speech config: %v", err)
 	}
-	log.Println("📝 [Azure Agent] Speech config sent")
 
 	if err := a.sendAudioConfig(); err != nil {
 		conn.Close()
 		return fmt.Errorf("failed to send audio config: %v", err)
 	}
-	log.Println("🎵 [Azure Agent] Audio config sent")
 
 	a.isRunning = true
 	go a.receiveResponses()
@@ -203,7 +201,6 @@ func (a *AzureProvider) receiveResponses() {
 		}
 
 		if msgType == websocket.TextMessage {
-			log.Printf("📨 [Azure Agent] Received message: %s", string(message[:min(200, len(message))]))
 			a.parseTextMessage(string(message))
 		}
 	}
@@ -219,15 +216,11 @@ func (a *AzureProvider) parseTextMessage(message string) {
 	headers := parts[0]
 	body := parts[1]
 
-	log.Printf("📋 [Azure Agent] Headers: %s", headers)
-	log.Printf("📋 [Azure Agent] Body: %s", body[:min(500, len(body))])
-
 	if strings.Contains(headers, "Path:speech.hypothesis") {
 		var hypothesis struct {
 			Text string `json:"Text"`
 		}
 		if err := json.Unmarshal([]byte(body), &hypothesis); err == nil && hypothesis.Text != "" {
-			log.Printf("💭 [Azure Agent] Interim: %s", hypothesis.Text)
 			select {
 			case a.results <- TranscriptResult{
 				Text:    hypothesis.Text,
@@ -247,7 +240,6 @@ func (a *AzureProvider) parseTextMessage(message string) {
 			} `json:"NBest"`
 		}
 		if err := json.Unmarshal([]byte(body), &phrase); err == nil {
-			log.Printf("📝 [Azure Agent] Phrase status: %s", phrase.RecognitionStatus)
 			if phrase.RecognitionStatus == "Success" {
 				text := phrase.DisplayText
 				confidence := 0.0
@@ -297,8 +289,6 @@ func (a *AzureProvider) SendAudio(data []byte) error {
 	binary.Write(&buf, binary.BigEndian, headerLen)
 	buf.WriteString(headerText)
 	buf.Write(a.audioBuffer)
-
-	log.Printf("📤 [Azure Agent] Sending %d bytes of audio", len(a.audioBuffer))
 
 	// Clear buffer after sending
 	a.audioBuffer = a.audioBuffer[:0]
