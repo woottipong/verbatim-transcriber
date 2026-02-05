@@ -1,0 +1,43 @@
+# LiveKit Server for Thai Transcription Development
+# Usage: docker-compose up -d
+version: '3.8'
+
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: livekit-server
+    ports:
+      - "7880:7880"       # HTTP / WebSocket
+      - "7881:7881"       # WebRTC TCP
+      - "7882:7882/udp"   # WebRTC UDP
+      - "50000-50100:50000-50100/udp"  # WebRTC UDP range
+    environment:
+      - LIVEKIT_KEYS=devkey:secret
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    command: --dev --bind 0.0.0.0 --config /etc/livekit.yaml
+    restart: unless-stopped
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:7880"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  redis:
+    image: redis:alpine
+    container_name: livekit-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  redis-data:

@@ -1,0 +1,51 @@
+# LiveKit Server Configuration
+# For Thai Verbatim Transcription System
+
+# Server port
+port: 7880
+
+# RTC (WebRTC) configuration
+rtc:
+  # Port range for WebRTC UDP
+  port_range_start: 50000
+  port_range_end: 60000
+  # Use external IP for NAT traversal (set to true in production)
+  use_external_ip: false
+  # TCP port for WebRTC (fallback when UDP blocked)
+  tcp_port: 7881
+
+# API Keys (use environment variables in production)
+# Format: api_key: api_secret
+keys:
+  devkey: secret
+
+# Logging configuration
+logging:
+  level: info
+  # Options: debug, info, warn, error
+  json: false
+
+# Redis configuration (for multi-node deployment)
+redis:
+  address: redis:6379
+
+# Room configuration
+room:
+  # Maximum participants per room
+  max_participants: 50
+  # Empty room timeout (seconds)
+  empty_timeout: 300
+  # Maximum metadata size (bytes)
+  max_metadata_size: 65536
+
+# Audio configuration optimized for Thai speech
+audio:
+  # Active speaker detection
+  active_speaker_update_interval: 300ms
+  
+# TURN server (for NAT traversal in production)
+# turn:
+#   enabled: true
+#   domain: your-domain.com
+#   tls_port: 5349
+#   udp_port: 3478
