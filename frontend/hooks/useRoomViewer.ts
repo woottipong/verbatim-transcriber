@@ -2,10 +2,20 @@
  * useRoomViewer Hook
  * Connects to a LiveKit room as a viewer (no microphone publishing)
  * For watching transcriptions from ASR agents in real-time
+ * Supports audio playback from room participants
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Room, RoomEvent, ConnectionState as LKConnectionState, DataPacket_Kind, RemoteParticipant, RemoteTrackPublication } from 'livekit-client';
+import {
+    Room,
+    RoomEvent,
+    ConnectionState as LKConnectionState,
+    DataPacket_Kind,
+    RemoteParticipant,
+    RemoteTrackPublication,
+    RemoteTrack,
+    Track,
+} from 'livekit-client';
 import { ConnectionState, TranscriptSegment } from '../types';
 
 // Transcript Message from Agent
@@ -41,6 +51,10 @@ export interface UseRoomViewerReturn {
     connect: (roomName: string) => Promise<void>;
     disconnect: () => void;
     clearTranscripts: () => void;
+    // Audio playback
+    isAudioMuted: boolean;
+    toggleAudioMute: () => void;
+    audioParticipants: string[];  // Participants with audio tracks
 }
 
 export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerReturn {
@@ -55,9 +69,14 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     const [currentRoomName, setCurrentRoomName] = useState<string | null>(null);
     const [agents, setAgents] = useState<AgentInfo[]>([]);
 
+    // Audio playback state
+    const [isAudioMuted, setIsAudioMuted] = useState(false);
+    const [audioParticipants, setAudioParticipants] = useState<string[]>([]);
+
     // Refs
     const roomRef = useRef<Room | null>(null);
     const segmentIdRef = useRef(0);
+    const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
 
     // Check if participant is an agent
     const isAgent = useCallback((identity: string): boolean => {
@@ -98,6 +117,69 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         const data = await response.json();
         return data.token;
     }, [tokenEndpoint]);
+
+    // Handle audio track subscription
+    const handleTrackSubscribed = useCallback((
+        track: RemoteTrack,
+        publication: RemoteTrackPublication,
+        participant: RemoteParticipant
+    ) => {
+        if (track.kind === Track.Kind.Audio) {
+            console.log('[Viewer] 🔊 Audio track subscribed from:', participant.identity);
+
+            // Create audio element for playback
+            const audioElement = document.createElement('audio');
+            audioElement.autoplay = true;
+            audioElement.muted = isAudioMuted;
+            track.attach(audioElement);
+
+            // Store reference
+            audioElementsRef.current.set(participant.identity, audioElement);
+
+            // Update audio participants list
+            setAudioParticipants(prev => {
+                if (!prev.includes(participant.identity)) {
+                    return [...prev, participant.identity];
+                }
+                return prev;
+            });
+        }
+    }, [isAudioMuted]);
+
+    // Handle audio track unsubscription
+    const handleTrackUnsubscribed = useCallback((
+        track: RemoteTrack,
+        publication: RemoteTrackPublication,
+        participant: RemoteParticipant
+    ) => {
+        if (track.kind === Track.Kind.Audio) {
+            console.log('[Viewer] 🔇 Audio track unsubscribed from:', participant.identity);
+
+            // Remove and cleanup audio element
+            const audioElement = audioElementsRef.current.get(participant.identity);
+            if (audioElement) {
+                track.detach(audioElement);
+                audioElement.remove();
+                audioElementsRef.current.delete(participant.identity);
+            }
+
+            // Update audio participants list
+            setAudioParticipants(prev => prev.filter(id => id !== participant.identity));
+        }
+    }, []);
+
+    // Toggle audio mute for all participants
+    const toggleAudioMute = useCallback(() => {
+        const newMuted = !isAudioMuted;
+        setIsAudioMuted(newMuted);
+
+        // Update all audio elements
+        audioElementsRef.current.forEach((audioElement) => {
+            audioElement.muted = newMuted;
+        });
+
+        console.log('[Viewer] 🔊 Audio', newMuted ? 'muted' : 'unmuted');
+    }, [isAudioMuted]);
 
     // Handle incoming transcript data from Agent
     const handleDataReceived = useCallback((
@@ -234,6 +316,10 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             newRoom.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
             newRoom.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
 
+            // Audio track events for playback
+            newRoom.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
+            newRoom.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
+
             // Connect (viewer - no local tracks)
             await newRoom.connect(import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880', token, {
                 autoSubscribe: true,
@@ -262,7 +348,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             setError(err instanceof Error ? err.message : 'Connection failed');
             setConnectionState(ConnectionState.ERROR);
         }
-    }, [fetchToken, handleDataReceived, handleParticipantConnected, handleParticipantDisconnected, isAgent, getProviderFromIdentity]);
+    }, [fetchToken, handleDataReceived, handleParticipantConnected, handleParticipantDisconnected, handleTrackSubscribed, handleTrackUnsubscribed, isAgent, getProviderFromIdentity]);
 
     // Disconnect from room
     const disconnect = useCallback(() => {
@@ -274,6 +360,14 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             setAgents([]);
             setCurrentRoomName(null);
             setConnectionState(ConnectionState.DISCONNECTED);
+
+            // Clean up audio elements
+            audioElementsRef.current.forEach((audioElement) => {
+                audioElement.pause();
+                audioElement.remove();
+            });
+            audioElementsRef.current.clear();
+            setAudioParticipants([]);
         }
     }, []);
 
@@ -290,6 +384,12 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             if (roomRef.current) {
                 roomRef.current.disconnect();
             }
+            // Clean up audio elements
+            audioElementsRef.current.forEach((audioElement) => {
+                audioElement.pause();
+                audioElement.remove();
+            });
+            audioElementsRef.current.clear();
         };
     }, []);
 
@@ -304,5 +404,9 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         connect,
         disconnect,
         clearTranscripts,
+        // Audio playback
+        isAudioMuted,
+        toggleAudioMute,
+        audioParticipants,
     };
 }

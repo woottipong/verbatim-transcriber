@@ -8,7 +8,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { RefreshCw, Users, Radio, Trash2, X, Bot, Eye } from 'lucide-react';
+import { RefreshCw, Users, Radio, Trash2, X, Bot, Eye, Volume2, VolumeX } from 'lucide-react';
 import { useRoomViewer, AgentInfo } from '../hooks/useRoomViewer';
 import { ConnectionState, TranscriptSegment } from '../types';
 import ConnectionBadge from './ConnectionBadge';
@@ -129,12 +129,27 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                         </div>
                     </div>
 
-                    {/* Connection Status */}
+                    {/* Connection Status & Audio Control */}
                     {viewer.currentRoomName && (
                         <div className="flex items-center gap-3">
                             <span className="text-sm text-slate-400">
                                 Room: <span className="text-white font-medium">{viewer.currentRoomName}</span>
                             </span>
+
+                            {/* Audio Mute Button */}
+                            {viewer.audioParticipants.length > 0 && (
+                                <button
+                                    onClick={viewer.toggleAudioMute}
+                                    className={`p-2 rounded-lg transition ${viewer.isAudioMuted
+                                        ? 'text-red-400 hover:text-red-300 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30'
+                                        : 'text-emerald-400 hover:text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30'
+                                        }`}
+                                    title={viewer.isAudioMuted ? 'Unmute audio' : 'Mute audio'}
+                                >
+                                    {viewer.isAudioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                                </button>
+                            )}
+
                             <ConnectionBadge state={viewer.connectionState} />
                         </div>
                     )}
@@ -226,6 +241,47 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                             </div>
                                         ))}
                                     </div>
+                                )}
+                            </div>
+                        )}
+
+                        {/* Audio Playback Card */}
+                        {viewer.connectionState === ConnectionState.CONNECTED && viewer.audioParticipants.length > 0 && (
+                            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-4">
+                                <div className="flex items-center justify-between mb-3">
+                                    <h2 className="text-sm font-semibold text-white flex items-center gap-2">
+                                        {viewer.isAudioMuted ? (
+                                            <VolumeX size={14} className="text-red-400" />
+                                        ) : (
+                                            <Volume2 size={14} className="text-emerald-400" />
+                                        )}
+                                        Audio
+                                    </h2>
+                                    <button
+                                        onClick={viewer.toggleAudioMute}
+                                        className={`px-2 py-1 text-xs font-medium rounded transition ${viewer.isAudioMuted
+                                            ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
+                                            : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                                            }`}
+                                    >
+                                        {viewer.isAudioMuted ? 'Unmute' : 'Mute'}
+                                    </button>
+                                </div>
+
+                                <div className="space-y-1">
+                                    {viewer.audioParticipants.map(participant => (
+                                        <div
+                                            key={participant}
+                                            className="flex items-center gap-2 text-xs text-slate-300"
+                                        >
+                                            <span className={`w-2 h-2 rounded-full ${viewer.isAudioMuted ? 'bg-slate-500' : 'bg-emerald-500 animate-pulse'}`} />
+                                            <span className="truncate">{participant}</span>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                {!viewer.isAudioMuted && (
+                                    <p className="text-xs text-emerald-400 mt-2">🔊 Listening to room audio</p>
                                 )}
                             </div>
                         )}

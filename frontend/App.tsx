@@ -32,7 +32,6 @@ const getInitialConfig = (): AppConfig => {
 
   return {
     ...parsedConfig,
-    apiKey: import.meta.env.VITE_DEEPGRAM_API_KEY || parsedConfig.apiKey,
     backendUrl: import.meta.env.VITE_BACKEND_URL || parsedConfig.backendUrl,
   };
 };
