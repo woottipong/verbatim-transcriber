@@ -42,13 +42,13 @@ tools:
 ┌───────────────────────────────────────────────────────────────┐
 │         Backend (Go + Fiber - Clean Architecture)             │
 │  ┌─────────────────────────────────────────────────────────┐  │
-│  │  internal/delivery/  (WebSocket Handlers)               │  │
-│  │    /google    /azure    /providers                     │  │
+│  │  internal/delivery/handler/  (Unified ASR Handler)      │  │
+│  │    HandleASR(conn, cfg, "Google" | "Azure")            │  │
 │  └──────┬────────────┬──────────────────────┘      │
 │         │            │                                     │
 │  ┌──────▼────┐ ┌──▼────┐                                     │
-│  │  Google   │ │ Azure │                                     │
-│  │  Handler  │ │Handler│ (Pure Go)                             │
+│  │  Google   │ │ Azure │  infrastructure/asr/                  │
+│  │ Provider  │ │Provider│ (Pure Go)                             │
 │  │   gRPC    │ │  WS   │                                     │
 │  └──────┬────┘ └───┬───┘                                     │
 └─────────┼────────────┼─────────────────────────────┘
@@ -124,33 +124,37 @@ tools:
 ```
 thai-verbatim-transcriber/
 ├── frontend/                    # React frontend
-│   ├── src/
-│   │   ├── App.tsx             # Main app (multi-panel layout)
-│   │   ├── types.ts            # TypeScript interfaces
-│   │   ├── index.tsx           # React entry point
-│   │   ├── index.css           # Tailwind CSS
-│   │   ├── hooks/
-│   │   │   ├── useGoogle.ts         # Google WebSocket hook
-│   │   │   ├── useAzure.ts          # Azure WebSocket hook
-│   │   │   ├── useLiveKit.ts        # LiveKit Publisher
-│   │   │   ├── useRoomViewer.ts     # LiveKit Viewer
-│   │   │   ├── useVAD.ts            # Voice Activity Detection
-│   │   │   └── useAudioVisualizer.ts
-│   │   ├── components/
-│   │   │   ├── ConnectionBadge.tsx
-│   │   │   ├── RecordButton.tsx
-│   │   │   ├── TranscriptPanel.tsx
-│   │   │   ├── ViewerPage.tsx
-│   │   │   └── Visualizer.tsx
-│   │   └── lib/
-│   │       ├── constants.ts    # Environment variables (VITE_BACKEND_URL)
-│   │       └── utils.ts
+│   ├── App.tsx                 # Main app (multi-panel layout)
+│   ├── types.ts                # TypeScript interfaces
+│   ├── index.tsx               # React entry point
+│   ├── index.css               # Tailwind CSS
+│   ├── hooks/
+│   │   ├── useGoogle.ts         # Google WebSocket hook
+│   │   ├── useAzure.ts          # Azure WebSocket hook
+│   │   ├── useLiveKit.ts        # LiveKit Publisher
+│   │   ├── useRoomViewer.ts     # LiveKit Viewer (future)
+│   │   ├── useVAD.ts            # Voice Activity Detection
+│   │   ├── useAudioDevices.ts   # Audio device selection
+│   │   └── useAudioVisualizer.ts
+│   ├── components/
+│   │   ├── ConnectionBadge.tsx
+│   │   ├── ErrorBanner.tsx
+│   │   ├── RecordButton.tsx
+│   │   ├── SettingsModal.tsx
+│   │   ├── TranscriptPanel.tsx
+│   │   ├── VADInfoBadge.tsx
+│   │   └── Visualizer.tsx
+│   ├── lib/
+│   │   ├── api.ts              # Backend API calls
+│   │   ├── audio.ts            # Audio utilities (PCM, WAV, mic)
+│   │   ├── constants.ts        # Environment variables (VITE_BACKEND_URL)
+│   │   └── utils.ts            # Thai text cleanup, helpers
 │   ├── public/
 │   │   └── *.wasm, *.onnx      # VAD model files
 │   ├── package.json
 │   └── vite.config.ts
 │
-└── backend-go/                  # Go backend (Clean Architecture, Pure Go)
+└── backend-go/                  # Go backend (Clean Architecture)
     ├── main.go                 # Entry point
     ├── go.mod                  # Go dependencies
     ├── .env                    # Environment variables
@@ -158,21 +162,22 @@ thai-verbatim-transcriber/
     │   └── config.go           # Configuration management
     ├── internal/
     │   ├── domain/             # Core interfaces & entities
+    │   │   └── domain.go       # ASRProvider interface, TranscriptResult
     │   ├── delivery/           # HTTP/WS handlers + routes
-    │   │   ├── google.go       # Google STT handler
-    │   │   ├── azure.go        # Azure handler
-    │   │   ├── livekit.go      # LiveKit routes
-    │   │   └── routes.go       # Route setup
+    │   │   ├── routes.go       # Route setup
+    │   │   └── handler/
+    │   │       ├── asr.go      # Unified ASR handler (Google/Azure)
+    │   │       ├── agent.go    # Agent Start/Stop/Status
+    │   │       ├── common.go   # Shared response functions
+    │   │       └── livekit.go  # LiveKit token/room handlers
     │   ├── infrastructure/     # ASR implementations
+    │   │   ├── asr/
+    │   │   │   ├── google.go   # Google Cloud STT provider (gRPC)
+    │   │   │   └── azure.go    # Azure Speech provider (WebSocket)
+    │   │   └── agent/
+    │   │       └── agent.go    # LiveKit Agent (WebRTC → ASR)
     │   └── pkg/audio/          # Audio utilities
     └── docs/                   # Technical documentation
-│       └── utils/
-│           ├── audio.ts        # PCM→WAV conversion
-│           └── thai.ts         # Thai text cleanup functions
-│
-└── public/
-    ├── vad.config.js           # VAD WASM configuration
-    └── *.wasm, *.onnx          # VAD model files (not in git)
 ```
 
 ## Key Technical Details
@@ -184,7 +189,7 @@ thai-verbatim-transcriber/
 Microphone (48kHz)
     │
     ▼
-ScriptProcessorNode (buffer: 4096)
+ScriptProcessorNode (buffer: 1024 for Google, 512 for Azure)
     │
     ├──► Google: Raw PCM Int16 @ 48kHz → gRPC Streaming
     │
@@ -210,7 +215,7 @@ Microphone → WebRTC (Opus) → LiveKit Server → Agent → ASR
 | **Thai Quality** | Excellent | Good |
 ### Critical Rules
 
-1. **Pure Go Backend**: All providers are pure Go - no native dependencies (CGO_ENABLED=0)
+1. **Pure Go for WebSocket ASR**: ASR providers are pure Go (CGO_ENABLED=0). LiveKit Agent requires CGO_ENABLED=1 for Opus decode (hraban/opus).
 2. **Clean Architecture**: Follow domain → delivery → infrastructure pattern
 3. **Dynamic Providers**: Endpoints only enabled if API keys are configured
 4. **Audio**: Convert to correct sample rate per provider (48kHz for Google, 16kHz for Azure)
@@ -244,9 +249,9 @@ Microphone → WebRTC (Opus) → LiveKit Server → Agent → ASR
 ## Development Workflows
 
 ### Task: Add New ASR Provider (Go):**
-1. Create `internal/delivery/newprovider.go` implementing handler function
+1. Create ASR provider in `internal/infrastructure/asr/newprovider.go` implementing `domain.ASRProvider` interface
 2. Add config in `config/config.go`
-3. Add conditional route in `internal/delivery/routes.go`
+3. Add conditional route in `internal/delivery/routes.go` calling `handler.HandleASR(conn, cfg, "NewProvider")`
 4. Follow Clean Architecture patterns
 5. Use consistent error handling and logging
 
@@ -260,7 +265,7 @@ Microphone → WebRTC (Opus) → LiveKit Server → Agent → ASR
 
 **Backend Best Practices:**
 1. Follow Clean Architecture - separate concerns by layer
-2. Keep all code pure Go - no CGO dependencies
+2. Keep WebSocket ASR code pure Go - no CGO dependencies (LiveKit Agent uses CGO for Opus)
 3. Use consistent error handling patterns
 4. Check provider availability before enabling routes
 5. Maintain uniform logging format with provider prefixes
@@ -298,7 +303,7 @@ curl http://localhost:3000/providers
 ## Code Quality
 
 ### Backend (Go)
-- [ ] Pure Go implementation (no CGO dependencies)
+- [ ] Pure Go implementation for WebSocket ASR (LiveKit Agent uses CGO for Opus)
 - [ ] Clean Architecture layers respected
 - [ ] Error handling consistent across handlers
 - [ ] Logging format uniform with provider prefixes

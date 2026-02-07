@@ -57,7 +57,7 @@ case "speech.phrase":         // ✅ Final result (VAD ตัดสินใจ�
 ### Built-in VAD + Configurable
 
 ```go
-// internal/delivery/handler/google.go
+// internal/infrastructure/asr/google.go
 StreamingConfig: &speechpb.StreamingRecognitionConfig{
     Config:         &speechpb.RecognitionConfig{...},
     InterimResults: true,

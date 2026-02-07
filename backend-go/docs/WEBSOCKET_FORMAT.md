@@ -93,10 +93,10 @@ func sendTranscript(conn *websocketFiber.Conn, text string, isFinal bool, confid
 
 ### Provider Handler Status
 
-| Provider | Handler                               | Protocol       | Uses sendTranscript() |
-| -------- | ------------------------------------- | -------------- | --------------------- |
-| Google   | `internal/delivery/handler/google.go` | gRPC Streaming | ✅                     |
-| Azure    | `internal/delivery/handler/azure.go`  | WebSocket      | ✅                     |
+| Provider | Handler                            | Protocol       | Uses sendTranscript() |
+| -------- | ---------------------------------- | -------------- | --------------------- |
+| Google   | `internal/delivery/handler/asr.go` | gRPC Streaming | ✅                     |
+| Azure    | `internal/delivery/handler/asr.go` | WebSocket      | ✅                     |
 
 ---
 

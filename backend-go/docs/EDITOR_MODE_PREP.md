@@ -12,15 +12,15 @@
 
 ### Background: ระบบมี 2 โหมดที่ใช้คนละ Protocol
 
-|                    | WebSocket Mode                   | LiveKit Mode                          |
-| ------------------ | -------------------------------- | ------------------------------------- |
-| **ใช้เมื่อ**          | Transcribe ตรง ผ่าน Backend       | Room-based, หลายคน join               |
-| **Backend struct** | `models.TranscriptResponse`      | `agent.TranscriptMessage`             |
-| **ส่งผ่าน**          | WebSocket `conn.WriteJSON()`     | LiveKit Data Channel `PublishData()`  |
-| **JSON field**     | `"isFinal"` (camelCase)          | `"isFinal"` (camelCase)               |
-| **Handler**        | `delivery/handler/google.go` ฯลฯ | `infrastructure/agent/agent.go`       |
-| **Frontend type**  | `ASRResponse` (types.ts)         | `LiveKitTranscriptMessage` (types.ts) |
-| **Frontend hook**  | `useGoogle`, `useAzure`          | `useLiveKit`, `useRoomViewer`         |
+|                    | WebSocket Mode               | LiveKit Mode                          |
+| ------------------ | ---------------------------- | ------------------------------------- |
+| **ใช้เมื่อ**          | Transcribe ตรง ผ่าน Backend   | Room-based, หลายคน join               |
+| **Backend struct** | `models.TranscriptResponse`  | `agent.TranscriptMessage`             |
+| **ส่งผ่าน**          | WebSocket `conn.WriteJSON()` | LiveKit Data Channel `PublishData()`  |
+| **JSON field**     | `"isFinal"` (camelCase)      | `"isFinal"` (camelCase)               |
+| **Handler**        | `delivery/handler/asr.go`    | `infrastructure/agent/agent.go`       |
+| **Frontend type**  | `ASRResponse` (types.ts)     | `LiveKitTranscriptMessage` (types.ts) |
+| **Frontend hook**  | `useGoogle`, `useAzure`      | `useLiveKit`, `useRoomViewer`         |
 
 > Editor Mode ทำงานบน **LiveKit Mode เท่านั้น** — Task ทั้งหมดที่เกี่ยวกับ Agent/Data Channel จึงเป็นเรื่องของ LiveKit Mode
 

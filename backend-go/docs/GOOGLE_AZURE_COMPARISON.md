@@ -9,32 +9,37 @@
 ### Google Cloud STT
 
 ```go
-// internal/delivery/handler/google.go
+// internal/infrastructure/asr/google.go
 RecognitionConfig{
     Model:                      "latest_long",
     LanguageCode:               "th-TH",
     SampleRateHertz:            48000,
     UseEnhanced:                true,
-    EnableAutomaticPunctuation: true,
+    EnableAutomaticPunctuation: false,  // configurable via config.go
+    AudioChannelCount:          1,
+    ProfanityFilter:            false,
 }
 ```
 
 - `SingleUtterance: false` — Stream ต่อเนื่อง
 - `ProfanityFilter: false` — Verbatim
+- `EnableAutomaticPunctuation: false` — ลด latency (ไม่รอจบประโยค)
 - Dynamic sample rate — รับจาก frontend audioContext
 
 ### Azure Speech Service
 
 ```go
-// internal/delivery/handler/azure.go
+// internal/infrastructure/asr/azure.go
 AzureConfig{
-    Language:                   "th-TH",
-    SampleRate:                 16000,
-    SegmentationSilenceTimeout: 500,
+    Language:                      "th-TH",
+    SampleRate:                    16000,
+    SegmentationSilenceTimeout:    300,   // configurable via config.go
+    SegmentationMaxSilenceDuration: 500,  // configurable via config.go
 }
 ```
 
-- `segmentationSilenceTimeoutMs: 500` — ตัดประโยคเร็วขึ้น
+- `segmentationSilenceTimeoutMs: 300` — ตัดประโยคเร็วขึ้น
+- `segmentationMaximumSilenceDurationMs: 500` — จำกัดความเงียบสูงสุด
 
 ---
 
@@ -132,7 +137,7 @@ Backend:  🎤 [Google] Using sample rate from frontend: 48000 Hz
 
 ### Azure: ช้า
 
-**แก้:** ลด `SegmentationSilenceTimeout` (ค่าปัจจุบัน 500ms)
+**แก้:** ลด `SegmentationSilenceTimeout` (ค่าปัจจุบัน 300ms) และ `SegmentationMaxSilenceDuration` (ค่าปัจจุบัน 500ms) — configurable ใน `config/config.go`
 
 ### Sample Rate Mismatch
 

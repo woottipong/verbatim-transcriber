@@ -4,11 +4,11 @@
 
 Google Cloud Speech-to-Text มีข้อจำกัด **5 นาทีต่อ streaming session** หลังจากนั้น stream จะถูกปิดอัตโนมัติ
 
-| Limit                  | Value                                 |
-| ---------------------- | ------------------------------------- |
-| Max streaming duration | **5 minutes (300 seconds)**           |
-| Error after timeout    | `DEADLINE_EXCEEDED` หรือ stream closes |
-| Affected handler       | `internal/delivery/handler/google.go` |
+| Limit                  | Value                                                                        |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| Max streaming duration | **5 minutes (300 seconds)**                                                  |
+| Error after timeout    | `DEADLINE_EXCEEDED` หรือ stream closes                                        |
+| Affected handler       | `internal/delivery/handler/asr.go` + `internal/infrastructure/asr/google.go` |
 
 ### ผลกระทบ
 
@@ -133,5 +133,5 @@ if streamDuration > 4*time.Minute && !isSpeaking {
 
 ## Implementation Notes
 
-- แก้ไขที่: `internal/delivery/handler/google.go`
+- แก้ไขที่: `internal/infrastructure/asr/google.go`
 - Dependencies ที่อาจต้องเพิ่ม: Ring buffer, VAD state tracking

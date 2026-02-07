@@ -77,7 +77,8 @@ StreamingRecognizeRequest {
       language_code: "th-TH"
       model: "latest_long"
       use_enhanced: true
-      enable_automatic_punctuation: true
+      enable_automatic_punctuation: false
+      audio_channel_count: 1
     }
     interim_results: true
   }
@@ -247,4 +248,5 @@ go func() {
 
 ## Handler Location
 
-`internal/delivery/handler/google.go`
+- WebSocket handler: `internal/delivery/handler/asr.go` (unified `HandleASR(conn, cfg, "Google")`)
+- ASR provider: `internal/infrastructure/asr/google.go`
