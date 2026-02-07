@@ -219,7 +219,8 @@ go func() {
 ### 5-Minute Streaming Limit
 
 - Google Cloud STT มี hard limit 5 นาทีต่อ streaming session
-- หลังจากนั้น stream จะถูกปิดอัตโนมัติ
+- **แก้ไขแล้ว**: `GoogleProvider` auto-reconnect อัตโนมัติ (รอ isFinal ตอน >4 นาที → reconnect, force ที่ 4:50, replay 1s buffer)
+- ผู้ใช้ไม่ต้องทำอะไร — seamless
 - **ดูรายละเอียด:** [ISSUE_GOOGLE_5MIN_LIMIT.md](ISSUE_GOOGLE_5MIN_LIMIT.md)
 
 ---
@@ -236,17 +237,17 @@ go func() {
 
 ## Performance
 
-| Metric                 | Value                        |
-| ---------------------- | ---------------------------- |
-| Latency (interim)      | ~300-500ms                   |
-| Latency (final)        | ~500-1000ms after speech end |
-| Recommended chunk size | 100-250ms of audio           |
-| Max streaming duration | **5 minutes** (hard limit)   |
-| Reconnect overhead     | ~200-500ms                   |
+| Metric                 | Value                          |
+| ---------------------- | ------------------------------ |
+| Latency (interim)      | ~300-500ms                     |
+| Latency (final)        | ~500-1000ms after speech end   |
+| Recommended chunk size | 100-250ms of audio             |
+| Max streaming duration | **5 minutes** (auto-reconnect) |
+| Reconnect overhead     | ~200-500ms                     |
 
 ---
 
 ## Handler Location
 
 - WebSocket handler: `internal/delivery/handler/asr.go` (unified `HandleASR(conn, cfg, "Google")`)
-- ASR provider: `internal/infrastructure/asr/google.go`
+- ASR provider: `internal/infrastructure/asr/google.go` (auto-reconnect รองรับ 5-min limit)

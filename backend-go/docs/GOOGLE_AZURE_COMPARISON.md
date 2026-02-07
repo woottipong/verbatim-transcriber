@@ -59,7 +59,7 @@ AzureConfig{
 | Mode            | Streaming (gRPC)   | WebSocket Streaming |
 | Sample Rate     | 48 kHz             | 16 kHz              |
 | Interim Results | ✅                  | ✅                   |
-| Streaming Limit | ⚠️ 5 minutes        | ไม่จำกัด               |
+| Streaming Limit | ✅ Auto-reconnect   | ไม่จำกัด               |
 | Thai Quality    | ⭐⭐⭐⭐⭐              | ⭐⭐⭐⭐                |
 | Latency         | ~300ms             | ~1-2s               |
 | Implementation  | Pure Go (gRPC SDK) | Pure Go (WebSocket) |
@@ -69,7 +69,7 @@ AzureConfig{
 **Google:**
 - ✅ เร็ว, confidence สูงสม่ำเสมอ (0.94-0.95)
 - ✅ Real-time streaming, interim results
-- ❌ **5-minute limit** — ต้อง restart session
+- ✅ **5-minute limit** — auto-reconnect อัตโนมัติ (ผู้ใช้ไม่รู้ตัว)
 
 **Azure:**
 - ✅ **No time limit**
