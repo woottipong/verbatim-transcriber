@@ -1,41 +1,96 @@
-# Google Cloud STT vs Azure Speech Service - การเปรียบเทียบ
+# Google Cloud STT vs Azure Speech Service
 
-> สรุปการตั้งค่าและเปรียบเทียบ Google Cloud Speech-to-Text และ Azure Speech Service สำหรับ Thai Verbatim Transcription
+> เปรียบเทียบ Google Cloud Speech-to-Text และ Azure Speech Service สำหรับ Thai Verbatim Transcription
 
 ---
 
-## ⚙️ Configuration ปัจจุบัน
+## Configuration ปัจจุบัน
 
 ### Google Cloud STT
+
 ```go
-GoogleConfig: GoogleConfig{
-    Model:        "latest_long",  // Best for continuous speech
-    LanguageCode: "th-TH",
-    SampleRate:   48000,          // Dynamic from frontend
-    UseEnhanced:  true,
+// internal/delivery/handler/google.go
+RecognitionConfig{
+    Model:                      "latest_long",
+    LanguageCode:               "th-TH",
+    SampleRateHertz:            48000,
+    UseEnhanced:                true,
+    EnableAutomaticPunctuation: true,
 }
 ```
 
-**Settings:**
-- `SingleUtterance: false` - Stream ต่อเนื่อง
-- `EnableAutomaticPunctuation: true`
-- `ProfanityFilter: false` - Verbatim
-- Dynamic sample rate - รับจาก frontend audioContext
+- `SingleUtterance: false` — Stream ต่อเนื่อง
+- `ProfanityFilter: false` — Verbatim
+- Dynamic sample rate — รับจาก frontend audioContext
 
 ### Azure Speech Service
+
 ```go
-AzureConfig: AzureConfig{
+// internal/delivery/handler/azure.go
+AzureConfig{
     Language:                   "th-TH",
     SampleRate:                 16000,
-    SegmentationSilenceTimeout: 500,  // ลดจาก 1000ms → 500ms
+    SegmentationSilenceTimeout: 500,
 }
 ```
 
-**Settings:**
-- `segmentationSilenceTimeoutMs: 500` - ตัดประโยคเร็วขึ้น
-- `enableInterimResults: true`
+- `segmentationSilenceTimeoutMs: 500` — ตัดประโยคเร็วขึ้น
 
-### Google Models ที่ใช้ได้
+---
+
+## Provider Comparison
+
+### ผลการทดสอบ (Thai Speech, 32 วินาที)
+
+| Provider   | Final Count | ความยาว       | Confidence    | Latency    |
+| ---------- | ----------- | ------------- | ------------- | ---------- |
+| **Google** | 13 ครั้ง      | สั้น (5-15 คำ)   | **0.94-0.95** | ~200-500ms |
+| **Azure**  | 7 ครั้ง       | ยาว (15-25 คำ) | 0.21-0.98     | ~1-3s      |
+
+### Feature Comparison
+
+| Feature         | Google             | Azure          | Gemini         |
+| --------------- | ------------------ | -------------- | -------------- |
+| Mode            | Streaming (gRPC)   | Batch (REST)   | Batch (REST)   |
+| Sample Rate     | 48 kHz             | 16 kHz         | 16 kHz         |
+| Interim Results | ✅                  | ❌              | ❌              |
+| Streaming Limit | ⚠️ 5 minutes        | ไม่จำกัด          | ไม่จำกัด          |
+| Thai Quality    | ⭐⭐⭐⭐⭐              | ⭐⭐⭐⭐           | ⭐⭐⭐⭐           |
+| Latency         | ~300ms             | ~1-2s          | ~2-3s          |
+| Implementation  | Pure Go (gRPC SDK) | Pure Go (REST) | Pure Go (REST) |
+
+### จุดแข็ง / จุดอ่อน
+
+**Google:**
+- ✅ เร็ว, confidence สูงสม่ำเสมอ (0.94-0.95)
+- ✅ Real-time streaming, interim results
+- ❌ **5-minute limit** — ต้อง restart session
+
+**Azure:**
+- ✅ **No time limit**
+- ✅ รวมประโยคยาว, context ดี
+- ❌ ช้ากว่า Google (2-3 เท่า), confidence แปรปรวน
+
+**Gemini:**
+- ✅ ราคาถูก, ไม่มี time limit
+- ✅ Good Thai quality
+- ❌ Batch mode only (~2-3s latency), no interim results
+
+---
+
+## คำแนะนำ
+
+| การใช้งาน                  | แนะนำ         | เหตุผล                |
+| ------------------------- | ------------ | -------------------- |
+| **Live Transcription**    | **Google** ✅ | เร็ว, แม่นยำ, real-time |
+| **Long Sessions (>5min)** | **Azure**    | ไม่มี time limit       |
+| **Cost-effective**        | **Gemini**   | ราคาถูก, คุณภาพดี       |
+
+**Best Practice:** ใช้ side-by-side comparison เพื่อ redundancy และให้ผู้ใช้เลือก
+
+---
+
+## Google Models ที่รองรับ
 
 | Model                | Best For                       | Thai Support |
 | -------------------- | ------------------------------ | ------------ |
@@ -44,61 +99,16 @@ AzureConfig: AzureConfig{
 | `command_and_search` | Voice commands                 | ✅ ดี          |
 | `default`            | General purpose                | ✅ พอใช้       |
 
-**❌ ห้าม:** `chirp` (ต้องใช้ Vertex AI)
+**❌ ห้ามใช้:** `chirp` (ต้องใช้ Vertex AI)
 
 ---
 
-## 📊 การเปรียบเทียบ
-
-### ผลการทดสอบ (Thai Speech, 32 วินาที)
-
-| Provider   | Final Count | ความยาว       | Confidence    | Latency    |
-| ---------- | ----------- | ------------- | ------------- | ---------- |
-| **Google** | 13 ครั้ง      | สั้น (5-15 คำ)   | **0.94-0.95** | ~200-500ms |
-| **Azure**  | 7 ครั้ง       | ยาว (15-25 คำ) | 0.21-0.98     | ~1-3 sec   |
-
-### ✅ Google: จุดแข็ง/จุดอ่อน
-
-**จุดแข็ง:**
-- ⚡ เร็ว, confidence สูงสม่ำเสมอ (0.94-0.95)
-- 🎯 Real-time, user experience ดี
-
-**จุดอ่อน:**
-- ⏱️ **5-minute limit** - ต้อง restart
-- 🔪 ตัดประโยคบ่อย
-
-### ⚖️ Azure: จุดแข็ง/จุดอ่อน
-
-**จุดแข็ง:**
-- ♾️ **No time limit**
-- 📖 รวมประโยคยาว, context ดี
-
-**จุดอ่อน:**
-- 🐢 ช้ากว่า Google (2-3 เท่า)
-- ⚠️ Confidence แปรปรวนสูง (0.21-0.98)
-
----
-
-## 💡 คำแนะนำ
-
-| การใช้งาน                  | แนะนำ         | เหตุผล                |
-| ------------------------- | ------------ | -------------------- |
-| **Live Transcription**    | **Google** ✅ | เร็ว, แม่นยำ, real-time |
-| **Long Sessions (>5min)** | **Azure**    | ไม่มี time limit       |
-| **Meeting Minutes**       | **Azure**    | Context preservation |
-
-### Best Practice
-**ใช้ทั้ง 2 แบบ side-by-side** (ตามที่ implement) เพื่อ redundancy และให้ผู้ใช้เลือก
-
----
-
-## 🔄 Sample Rate Management
+## Sample Rate Management
 
 **ปัญหา:** เสียงเพี้ยน หรือแปลไม่ออก → Sample rate ไม่ตรงกัน
 
 **วิธีแก้:** Frontend ส่งค่าจริงจาก audioContext → Backend ใช้ค่านั้น
 
-**ตรวจสอบ:**
 ```
 Frontend: [Google] Audio context sample rate: 48000Hz
 Backend:  🎤 [Google] Using sample rate from frontend: 48000 Hz
@@ -108,43 +118,38 @@ Backend:  🎤 [Google] Using sample rate from frontend: 48000 Hz
 
 ---
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Google: EOF Error
+
 ```
 ❌ [Google] Failed to send audio: EOF
 ```
-**สาเหตุ:** 5-minute limit / Network issue
-**แก้:** กด Stop → Start ใหม่
+
+**สาเหตุ:** 5-minute limit / Network issue → กด Stop แล้ว Start ใหม่
 
 ### Google: Invalid Model
+
 ```
 ❌ Invalid recognition 'config': Incorrect model specified
 ```
-**แก้:** ใช้ `latest_long`, `latest_short`, `command_and_search`, `default`, `video` เท่านั้น
+
+**แก้:** ใช้ `latest_long`, `latest_short`, `command_and_search`, `default` เท่านั้น
 
 ### Azure: ช้า
-**แก้:** ลด `SegmentationSilenceTimeout: 300` (จาก 500ms)
+
+**แก้:** ลด `SegmentationSilenceTimeout` (ค่าปัจจุบัน 500ms)
 
 ### Sample Rate Mismatch
-**แก้:** ตรวจสอบค่าตรงกันระหว่าง frontend และ backend
+
+**แก้:** ตรวจสอบค่าตรงกันระหว่าง frontend และ backend logs
 
 ---
 
-## 🎯 สรุป
+## Related Documentation
 
-### Google (latest_long + Enhanced)
-- **เหมาะสำหรับ:** Real-time transcription, live events
-- **จุดเด่น:** เร็ว แม่นยำ สม่ำเสมอ
-- **ข้อจำกัด:** 5-minute limit
-- **Cost:** ~$0.024/minute
-
-### Azure Speech Service
-- **เหมาะสำหรับ:** Long recordings, meeting transcription
-- **จุดเด่น:** No time limit, context preservation
-- **ข้อจำกัด:** ช้ากว่า, confidence แปรปรวน
-- **Cost:** ~$1/hour
-
----
-
-*เอกสารสร้างจากการปรับปรุง Thai Verbatim Transcriber (Feb 2026)*
+| Document                                                 | Description            |
+| -------------------------------------------------------- | ---------------------- |
+| [GOOGLE_GRPC_FLOW.md](GOOGLE_GRPC_FLOW.md)               | Google gRPC data flow  |
+| [AZURE_WEBSOCKET_FLOW.md](AZURE_WEBSOCKET_FLOW.md)       | Azure protocol details |
+| [ISSUE_GOOGLE_5MIN_LIMIT.md](ISSUE_GOOGLE_5MIN_LIMIT.md) | 5-min limit solutions  |

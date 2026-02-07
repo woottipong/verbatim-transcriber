@@ -251,11 +251,18 @@ VITE_LIVEKIT_URL=ws://localhost:7880
 
 ## Documentation
 
-| Document                               | Description                          |
-| -------------------------------------- | ------------------------------------ |
-| [Frontend README](frontend/README.md)  | React app details, hooks, components |
-| [Backend README](backend-go/README.md) | Go server, handlers, API endpoints   |
-| [Backend Docs](backend-go/docs/)       | Implementation details, flows        |
+| Document                                                          | Description                          |
+| ----------------------------------------------------------------- | ------------------------------------ |
+| [Frontend README](frontend/README.md)                             | React app details, hooks, components |
+| [Backend README](backend-go/README.md)                            | Go server, handlers, API endpoints   |
+| **Backend Docs:**                                                 |                                      |
+| [WebSocket Format](backend-go/docs/WEBSOCKET_FORMAT.md)           | Message format specification         |
+| [Google gRPC Flow](backend-go/docs/GOOGLE_GRPC_FLOW.md)           | Google STT data flow                 |
+| [Azure WebSocket Flow](backend-go/docs/AZURE_WEBSOCKET_FLOW.md)   | Azure protocol details               |
+| [LiveKit Flow](backend-go/docs/LIVEKIT_FLOW.md)                   | LiveKit WebRTC architecture & flow   |
+| [Provider Comparison](backend-go/docs/GOOGLE_AZURE_COMPARISON.md) | Google vs Azure vs Gemini            |
+| [Google 5-Min Limit](backend-go/docs/ISSUE_GOOGLE_5MIN_LIMIT.md)  | Streaming limit & solutions          |
+| [VAD Configuration](backend-go/docs/VAD_CONFIGURATION.md)         | Voice Activity Detection             |
 
 ## Tech Stack
 

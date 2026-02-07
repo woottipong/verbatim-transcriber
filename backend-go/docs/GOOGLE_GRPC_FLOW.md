@@ -1,85 +1,73 @@
-# Google Cloud Speech-to-Text - Data Flow
+# Google Cloud Speech-to-Text - gRPC Data Flow
 
-## 📊 ภาพรวม Architecture
-
-```
-┌─────────────┐     WebSocket      ┌─────────────┐       gRPC         ┌─────────────┐
-│   Browser   │ ◄──────────────► │  Go Backend │ ◄──────────────► │   Google    │
-│  (Frontend) │    JSON + PCM     │   (Fiber)   │    Protobuf        │ Speech STT  │
-└─────────────┘                   └─────────────┘                   └─────────────┘
-```
-
-## 🔄 Connection Flow
+## Architecture
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                              CONNECTION SEQUENCE                                  │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Frontend                    Backend                         Google              │
-│     │                           │                              │                 │
-│     │──── WS Connect ──────────►│                              │                 │
-│     │◄─── {"type":"connected"} ─│                              │                 │
-│     │                           │                              │                 │
-│     │──── {"type":"start"} ────►│                              │                 │
-│     │                           │──── gRPC NewClient() ───────►│                 │
-│     │                           │◄─── Client OK ───────────────│                 │
-│     │                           │                              │                 │
-│     │                           │──── StreamingRecognize() ───►│                 │
-│     │                           │◄─── Stream OK ───────────────│                 │
-│     │                           │                              │                 │
-│     │                           │──── StreamingConfig ────────►│                 │
-│     │                           │     (RecognitionConfig)      │                 │
-│     │                           │                              │                 │
-│     │◄─── {"type":"started"} ──│                              │                 │
-│     │                           │                              │                 │
-└──────────────────────────────────────────────────────────────────────────────────┘
+Browser (Frontend)  ◄── WebSocket (JSON + PCM) ──►  Go Backend (Fiber)  ◄── gRPC (Protobuf) ──►  Google Speech STT
 ```
 
-## 🎤 Audio Streaming Flow
+---
+
+## Connection Flow
 
 ```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                              AUDIO STREAMING                                     │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Frontend                    Backend                         Google              │
-│     │                           │                              │                 │
-│     │──── Binary (PCM) ────────►│                              │                 │
-│     │                           │──── AudioContent (Proto) ───►│                 │
-│     │                           │                              │                 │
-│     │                           │◄─── StreamingResponse ───────│  (interim)      │
-│     │◄─── {"isFinal":false}  ───│     IsFinal: false           │                 │
-│     │                           │                              │                 │
-│     │──── Binary (PCM) ────────►│                              │                 │
-│     │                           │──── AudioContent (Proto) ───►│                 │
-│     │                           │                              │                 │
-│     │                           │◄─── StreamingResponse ───────│  (final)        │
-│     │◄─── {"isFinal":true}  ────│     IsFinal: true            │                 │
-│     │                           │                              │                 │
-└──────────────────────────────────────────────────────────────────────────────────┘
+Frontend                    Backend                         Google
+   │                           │                              │
+   │──── WS Connect ──────────►│                              │
+   │◄─── {"type":"connected"} ─│                              │
+   │                           │                              │
+   │──── {"type":"start"} ────►│                              │
+   │                           │──── gRPC NewClient() ───────►│
+   │                           │◄─── Client OK ───────────────│
+   │                           │                              │
+   │                           │──── StreamingRecognize() ───►│
+   │                           │◄─── Stream OK ───────────────│
+   │                           │                              │
+   │                           │──── StreamingConfig ────────►│
+   │                           │     (RecognitionConfig)      │
+   │                           │                              │
+   │◄─── {"type":"started"} ──│                              │
+   │                           │                              │
 ```
 
-## 📦 Message Formats
+## Audio Streaming Flow
 
-### 1. Frontend → Backend (Simple)
+```
+Frontend                    Backend                         Google
+   │                           │                              │
+   │──── Binary (PCM) ────────►│                              │
+   │                           │──── AudioContent (Proto) ───►│
+   │                           │                              │
+   │                           │◄─── StreamingResponse ───────│  (interim)
+   │◄─── {"isFinal":false}  ───│     IsFinal: false           │
+   │                           │                              │
+   │──── Binary (PCM) ────────►│                              │
+   │                           │──── AudioContent (Proto) ───►│
+   │                           │                              │
+   │                           │◄─── StreamingResponse ───────│  (final)
+   │◄─── {"isFinal":true}  ────│     IsFinal: true            │
+   │                           │                              │
+```
 
-**Control Message (Text):**
+---
+
+## Message Formats
+
+### 1. Frontend → Backend
+
+**Control (JSON):**
+
 ```json
 {"type": "start"}
 {"type": "stop"}
 ```
 
-**Audio Data (Binary):**
-```
-[PCM 16-bit signed, 48kHz, mono]
-```
-
----
+**Audio (Binary):** PCM 16-bit signed, 48kHz, mono
 
 ### 2. Backend → Google (gRPC/Protobuf)
 
 **StreamingConfig (First message):**
+
 ```protobuf
 StreamingRecognizeRequest {
   streaming_config: StreamingRecognitionConfig {
@@ -87,8 +75,9 @@ StreamingRecognizeRequest {
       encoding: LINEAR16
       sample_rate_hertz: 48000
       language_code: "th-TH"
-      model: "default"
-      use_enhanced: false
+      model: "latest_long"
+      use_enhanced: true
+      enable_automatic_punctuation: true
     }
     interim_results: true
   }
@@ -96,17 +85,15 @@ StreamingRecognizeRequest {
 ```
 
 **AudioContent (Subsequent messages):**
+
 ```protobuf
 StreamingRecognizeRequest {
   audio_content: bytes  // Raw PCM audio data
 }
 ```
 
----
-
 ### 3. Google → Backend (gRPC Response)
 
-**StreamingRecognizeResponse:**
 ```protobuf
 StreamingRecognizeResponse {
   results: [
@@ -124,8 +111,6 @@ StreamingRecognizeResponse {
 }
 ```
 
----
-
 ### 4. Backend → Frontend (Standardized JSON)
 
 ```json
@@ -135,74 +120,63 @@ StreamingRecognizeResponse {
   "isFinal": true,
   "channel": {
     "alternatives": [
-      {"transcript": "สวัสดีครับ", "confidence": 0.95}
+      { "transcript": "สวัสดีครับ", "confidence": 0.95 }
     ]
   }
 }
 ```
 
-## 🎯 Recognition Timeline
+---
+
+## Recognition Timeline
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│                     RECOGNITION TIMELINE                        │
-├────────────────────────────────────────────────────────────────┤
-│                                                                │
-│  Stream Created ──►  StreamingRecognize() called               │
-│         │                                                      │
-│         ▼                                                      │
-│  Config Sent ──►  StreamingConfig message                      │
-│         │                                                      │
-│         ▼                                                      │
-│  Audio Streaming ──►  AudioContent messages (continuous)       │
-│         │                                                      │
-│         ▼                                                      │
-│  Interim Results ──►  StreamingResponse (IsFinal: false)       │
-│         │            "สวัส..."  (stability: 0.5)                │
-│         │            "สวัสดี..." (stability: 0.7)                │
-│         │            "สวัสดีครับ" (stability: 0.9)                │
-│         ▼                                                      │
-│  Final Result ──►  StreamingResponse (IsFinal: true)           │
-│         │          "สวัสดีครับ" (confidence: 0.95)                │
-│         ▼                                                      │
-│  Continue... ──►  Next utterance begins                        │
-│                                                                │
-└────────────────────────────────────────────────────────────────┘
+Stream Created ──►  StreamingRecognize() called
+       │
+       ▼
+Config Sent ──►  StreamingConfig message
+       │
+       ▼
+Audio Streaming ──►  AudioContent messages (continuous)
+       │
+       ▼
+Interim Results ──►  StreamingResponse (IsFinal: false)
+       │            "สวัส..."  (stability: 0.5)
+       │            "สวัสดี..." (stability: 0.7)
+       │            "สวัสดีครับ" (stability: 0.9)
+       ▼
+Final Result ──►  StreamingResponse (IsFinal: true)
+       │          "สวัสดีครับ" (confidence: 0.95)
+       ▼
+Continue... ──►  Next utterance begins
 ```
 
-## 🔊 Audio Format Requirements
+---
 
-| Parameter   | Value         | Notes                       |
-| ----------- | ------------- | --------------------------- |
-| Format      | LINEAR16      | Linear PCM, uncompressed    |
-| Sample Rate | 48,000 Hz     | Default config (adjustable) |
-| Bit Depth   | 16-bit        | Signed integer              |
-| Channels    | 1 (Mono)      | Single channel              |
-| Byte Order  | Little Endian | For PCM samples             |
+## Audio Format Requirements
 
-### Supported Encodings
+| Parameter   | Value         | Notes                         |
+| ----------- | ------------- | ----------------------------- |
+| Format      | LINEAR16      | Linear PCM, uncompressed      |
+| Sample Rate | 48,000 Hz     | Matches frontend AudioContext |
+| Bit Depth   | 16-bit        | Signed integer                |
+| Channels    | 1 (Mono)      | Single channel                |
+| Byte Order  | Little Endian | For PCM samples               |
 
-| Encoding  | Description          | Use Case                       |
-| --------- | -------------------- | ------------------------------ |
-| LINEAR16  | Raw PCM              | Best quality, larger bandwidth |
-| FLAC      | Lossless compression | Good quality, smaller size     |
-| OGG_OPUS  | Lossy compression    | Streaming, bandwidth limited   |
-| WEBM_OPUS | WebM container       | Browser native                 |
+---
 
-## 🔑 Key Implementation Points
+## Key Implementation Points
 
 ### 1. Client & Stream Creation
-```go
-// Create client (once per session)
-client, err := speech.NewClient(ctx, option.WithAPIKey(apiKey))
 
-// Create bidirectional stream
+```go
+client, err := speech.NewClient(ctx, option.WithCredentialsFile(credPath))
 stream, err := client.StreamingRecognize(ctx)
 ```
 
 ### 2. Send Config First
+
 ```go
-// MUST send config before any audio
 err = stream.Send(&speechpb.StreamingRecognizeRequest{
     StreamingRequest: &speechpb.StreamingRecognizeRequest_StreamingConfig{
         StreamingConfig: &speechpb.StreamingRecognitionConfig{
@@ -214,8 +188,8 @@ err = stream.Send(&speechpb.StreamingRecognizeRequest{
 ```
 
 ### 3. Stream Audio
+
 ```go
-// Send audio chunks
 err := stream.Send(&speechpb.StreamingRecognizeRequest{
     StreamingRequest: &speechpb.StreamingRecognizeRequest_AudioContent{
         AudioContent: audioData,
@@ -224,6 +198,7 @@ err := stream.Send(&speechpb.StreamingRecognizeRequest{
 ```
 
 ### 4. Receive Responses (Goroutine)
+
 ```go
 go func() {
     for {
@@ -236,46 +211,19 @@ go func() {
 }()
 ```
 
-## ⚠️ Limitations & Considerations
+---
+
+## Limitations
 
 ### 5-Minute Streaming Limit
 
-```
-┌────────────────────────────────────────────────────────────────┐
-│                     STREAMING LIMIT                             │
-├────────────────────────────────────────────────────────────────┤
-│                                                                │
-│  0:00 ─────────────────────────────────────────────── 5:00     │
-│    │                                                    │      │
-│    └── Stream active ──────────────────────────────────┘      │
-│                                                    │           │
-│                                              Stream ends       │
-│                                              (must reconnect)  │
-│                                                                │
-└────────────────────────────────────────────────────────────────┘
-```
+- Google Cloud STT มี hard limit 5 นาทีต่อ streaming session
+- หลังจากนั้น stream จะถูกปิดอัตโนมัติ
+- **ดูรายละเอียด:** [ISSUE_GOOGLE_5MIN_LIMIT.md](ISSUE_GOOGLE_5MIN_LIMIT.md)
 
-**Workaround:**
-```go
-// Track stream duration
-if time.Since(streamStart) > 4*time.Minute {
-    // Close and reconnect before 5-minute limit
-    stream.CloseSend()
-    stream, _ = client.StreamingRecognize(ctx)
-    // Re-send config...
-}
-```
+---
 
-### Single Utterance Mode
-
-```go
-// If enabled, stream closes after first final result
-StreamingConfig: &speechpb.StreamingRecognitionConfig{
-    SingleUtterance: true,  // Stream ends after first silence
-}
-```
-
-## 📊 Response Fields
+## Response Fields
 
 | Field                                 | Type     | Description              |
 | ------------------------------------- | -------- | ------------------------ |
@@ -285,7 +233,7 @@ StreamingConfig: &speechpb.StreamingRecognitionConfig{
 | `results[].stability`                 | float    | Interim result stability |
 | `results[].result_end_time`           | Duration | End time of result       |
 
-## 📈 Performance Characteristics
+## Performance
 
 | Metric                 | Value                        |
 | ---------------------- | ---------------------------- |
@@ -295,13 +243,8 @@ StreamingConfig: &speechpb.StreamingRecognitionConfig{
 | Max streaming duration | **5 minutes** (hard limit)   |
 | Reconnect overhead     | ~200-500ms                   |
 
-## 🔄 Comparison with Azure
+---
 
-| Feature          | Google        | Azure                    |
-| ---------------- | ------------- | ------------------------ |
-| Protocol         | gRPC/Protobuf | WebSocket/Binary         |
-| Streaming limit  | 5 minutes     | No limit                 |
-| Interim results  | ✅             | ✅                        |
-| VAD config       | Limited       | Limited                  |
-| Setup complexity | Simple (SDK)  | Medium (custom protocol) |
-| Thai support     | ✅ th-TH       | ✅ th-TH                  |
+## Handler Location
+
+`internal/delivery/handler/google.go`
