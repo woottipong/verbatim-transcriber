@@ -9,6 +9,7 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
 import { Room, RoomEvent, ConnectionState as LKConnectionState, DataPacket_Kind, LocalParticipant, RemoteParticipant } from 'livekit-client';
 import { ConnectionState, TranscriptSegment } from '../types';
+import { cleanThaiText } from '../lib/audio';
 
 // LiveKit Transcript Message from Agent (via Data Channel)
 export interface LiveKitTranscriptMessage {
@@ -97,19 +98,14 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             const decoder = new TextDecoder();
             const message: LiveKitTranscriptMessage = JSON.parse(decoder.decode(payload));
 
-            console.log('[LiveKit] 📝 Transcript received:', {
-                text: message.text,
-                isFinal: message.isFinal,
-                provider: message.provider,
-                from: participant?.identity || 'unknown',
-            });
-
             if (message.isFinal && message.text.trim()) {
                 // Final transcript - add to list
+                const text = cleanThaiText(message.text);
+                if (!text) return;
                 segmentIdRef.current++;
                 const segment: TranscriptSegment = {
                     id: `lk-${segmentIdRef.current}`,
-                    text: message.text,
+                    text,
                     isFinal: true,
                     timestamp: message.timestamp || Date.now(),
                     provider: message.provider,
@@ -119,7 +115,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 setInterimTranscript('');
             } else if (!message.isFinal && message.text.trim()) {
                 // Interim transcript
-                setInterimTranscript(message.text);
+                setInterimTranscript(cleanThaiText(message.text));
             }
         } catch (err) {
             console.error('[LiveKit] Failed to parse transcript data:', err);
@@ -166,8 +162,10 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 adaptiveStream: true,
                 dynacast: true,
                 audioCaptureDefaults: {
-                    echoCancellation: true,
-                    noiseSuppression: true,
+                    // สำหรับ verbatim transcription: ปิด browser audio processing
+                    // ให้ ASR model (Google/Azure) จัดการ noise เอง
+                    echoCancellation: false,
+                    noiseSuppression: false,
                     autoGainControl: true,
                     sampleRate: 48000,
                     channelCount: 1,
