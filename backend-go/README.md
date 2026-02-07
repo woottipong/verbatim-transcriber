@@ -4,14 +4,14 @@ Go backend สำหรับ Real-time Thai Speech-to-Text ด้วย Fiber +
 
 ## Overview
 
-| Feature       | Description                                           |
-| ------------- | ----------------------------------------------------- |
-| Framework     | Go + Fiber v2 (High-performance)                      |
-| Protocol      | WebSocket real-time streaming                         |
-| ASR Providers | Gemini, Google Cloud STT, Azure Speech                |
-| Language      | Thai (th-TH) verbatim transcription                   |
-| Architecture  | Clean Architecture (domain, delivery, infrastructure) |
-| Dependencies  | Pure Go - No CGO required                             |
+| Feature       | Description                                                           |
+| ------------- | --------------------------------------------------------------------- |
+| Framework     | Go + Fiber v2 (High-performance)                                      |
+| Protocol      | WebSocket real-time streaming                                         |
+| ASR Providers | Gemini, Google Cloud STT, Azure Speech                                |
+| Language      | Thai (th-TH) verbatim transcription                                   |
+| Architecture  | Clean Architecture (domain, delivery, infrastructure)                 |
+| Dependencies  | Pure Go (WebSocket ASR), CGO required for LiveKit Agent (Opus decode) |
 
 ## Architecture
 
@@ -176,3 +176,4 @@ curl http://localhost:3000/providers
 | [google/generative-ai-go](https://github.com/google/generative-ai-go) | Gemini API          |
 | [cloud.google.com/go/speech](https://cloud.google.com/go/speech)      | Google Cloud STT    |
 | [livekit/server-sdk-go](https://github.com/livekit/server-sdk-go)     | LiveKit integration |
+| [hraban/opus](https://github.com/hraban/opus)                         | Opus decode (CGO)   |

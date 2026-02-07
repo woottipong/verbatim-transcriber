@@ -158,12 +158,13 @@ thai-verbatim-transcriber/
 │   └── lib/                  # Utilities
 │
 ├── backend-go/               # Go + Fiber (Clean Architecture)
-│   ├── internal/
-│   │   ├── domain/           # Core interfaces
-│   │   ├── delivery/         # Handlers + Routes
-│   │   ├── infrastructure/   # ASR implementations
-│   │   └── pkg/audio/        # Audio utilities
-│   └── config/               # Configuration
+│   ├── config/               # Configuration
+│   ├── models/               # Request/Response DTOs
+│   └── internal/
+│       ├── domain/           # Core interfaces
+│       ├── delivery/         # Handlers + Routes
+│       ├── infrastructure/   # ASR + LiveKit Agent
+│       └── pkg/audio/        # Audio utilities
 │
 └── start.sh                  # Quick start script
 ```
