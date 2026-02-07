@@ -118,7 +118,7 @@ vadConfig: {
 
 ### Audio Quality Tips
 
-- ✅ ใช้ sample rate ที่ถูกต้อง (48kHz สำหรับ Google, 16kHz สำหรับ Azure/Gemini)
+- ✅ ใช้ sample rate ที่ถูกต้อง (48kHz สำหรับ Google, 16kHz สำหรับ Azure)
 - ✅ ส่ง audio ต่อเนื่อง ไม่ต้องรอ VAD ถ้าไม่จำเป็น
 - ❌ อย่าส่ง chunk เล็กเกินไป (< 100ms)
 - ❌ อย่าส่ง chunk ใหญ่เกินไป (> 500ms)

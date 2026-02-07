@@ -13,14 +13,14 @@ Web application สำหรับถอดความเสียงพูด�
 
 ## Features
 
-| Feature             | Description                                      |
-| ------------------- | ------------------------------------------------ |
-| Multi-Provider ASR  | Google Cloud STT, Azure Speech, Gemini 2.0 Flash |
-| Real-time Streaming | WebSocket + LiveKit WebRTC                       |
-| Thai Optimized      | ปรับแต่งสำหรับภาษาไทย verbatim transcription         |
-| Side-by-Side        | เปรียบเทียบผลลัพธ์จาก providers พร้อมกัน               |
-| LiveKit Integration | Room-based transcription with agent              |
-| Viewer Mode         | ดู transcript + ฟังเสียง real-time                  |
+| Feature             | Description                              |
+| ------------------- | ---------------------------------------- |
+| Multi-Provider ASR  | Google Cloud STT, Azure Speech           |
+| Real-time Streaming | WebSocket + LiveKit WebRTC               |
+| Thai Optimized      | ปรับแต่งสำหรับภาษาไทย verbatim transcription |
+| Side-by-Side        | เปรียบเทียบผลลัพธ์จาก providers พร้อมกัน       |
+| LiveKit Integration | Room-based transcription with agent      |
+| Viewer Mode         | ดู transcript + ฟังเสียง real-time          |
 
 ---
 
@@ -50,7 +50,7 @@ Web application สำหรับถอดความเสียงพูด�
        │  6. JSON Response           │                            │
        │  { type: "transcript",      │                            │
        │    text: "สวัสดี",            │                            │
-       │    is_final: true }         │                            │
+       │    isFinal: true }          │                            │
        │  ◄───────────────────────── │                            │
        │                             │                            │
        ▼                             ▼                            ▼
@@ -62,7 +62,6 @@ Web application สำหรับถอดความเสียงพูด�
 | --------- | ---------------- | ------------ | --------- |
 | `/google` | Google Cloud STT | 48kHz PCM    | Streaming |
 | `/azure`  | Azure Speech     | 16kHz WAV    | Batch     |
-| `/gemini` | Gemini 2.0 Flash | 16kHz WAV    | Batch     |
 
 ---
 
@@ -175,7 +174,7 @@ thai-verbatim-transcriber/
 
 - Node.js 18+
 - Go 1.22+
-- API Keys (Google/Azure/Gemini - อย่างน้อย 1 provider)
+- API Keys (Google/Azure - อย่างน้อย 1 provider)
 
 ### 1. Clone & Setup
 
@@ -220,7 +219,6 @@ cd frontend && npm run dev
 | ---------------- | --------- | ----------- | ------ | ------- | ------------ |
 | Google Cloud STT | Streaming | 48 kHz      | PCM    | ~300ms  | ⭐⭐⭐⭐⭐        |
 | Azure Speech     | Batch     | 16 kHz      | WAV    | ~1-2s   | ⭐⭐⭐⭐         |
-| Gemini 2.0 Flash | Batch     | 16 kHz      | WAV    | ~2-3s   | ⭐⭐⭐⭐         |
 
 ## Environment Variables
 
@@ -231,7 +229,6 @@ cd frontend && npm run dev
 PORT=3000
 
 # ASR Providers (configure what you have)
-GEMINI_API_KEY=your_key
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
 AZURE_SUBSCRIPTION_KEY=your_key
 AZURE_REGION=southeastasia
@@ -260,7 +257,7 @@ VITE_LIVEKIT_URL=ws://localhost:7880
 | [Google gRPC Flow](backend-go/docs/GOOGLE_GRPC_FLOW.md)           | Google STT data flow                 |
 | [Azure WebSocket Flow](backend-go/docs/AZURE_WEBSOCKET_FLOW.md)   | Azure protocol details               |
 | [LiveKit Flow](backend-go/docs/LIVEKIT_FLOW.md)                   | LiveKit WebRTC architecture & flow   |
-| [Provider Comparison](backend-go/docs/GOOGLE_AZURE_COMPARISON.md) | Google vs Azure vs Gemini            |
+| [Provider Comparison](backend-go/docs/GOOGLE_AZURE_COMPARISON.md) | Google vs Azure                      |
 | [Google 5-Min Limit](backend-go/docs/ISSUE_GOOGLE_5MIN_LIMIT.md)  | Streaming limit & solutions          |
 | [VAD Configuration](backend-go/docs/VAD_CONFIGURATION.md)         | Voice Activity Detection             |
 

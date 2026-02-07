@@ -53,7 +53,6 @@ frontend/
 ├── hooks/
 │   ├── useGoogle.ts            # Google Cloud STT WebSocket
 │   ├── useAzure.ts             # Azure Speech WebSocket
-│   ├── useGemini.ts            # Gemini WebSocket
 │   ├── useLiveKit.ts           # LiveKit WebRTC room
 │   ├── useVAD.ts               # Voice Activity Detection
 │   ├── useAudioVisualizer.ts   # Waveform visualization
@@ -89,7 +88,6 @@ frontend/
 | --------- | ---------------- | ----------- |
 | `/google` | Google Cloud STT | 48 kHz      |
 | `/azure`  | Azure Speech     | 16 kHz      |
-| `/gemini` | Gemini 2.0 Flash | 16 kHz      |
 
 ### LiveKit Endpoints
 | Method | Path             | Description      |
@@ -109,7 +107,7 @@ ws.send(audioBuffer);  // Int16Array binary
 {
   "type": "transcript",
   "transcript": "สวัสดีครับ",
-  "is_final": true
+  "isFinal": true
 }
 ```
 
@@ -118,12 +116,11 @@ ws.send(audioBuffer);  // Int16Array binary
 ### Multi-Provider ASR
 - Google Cloud STT (streaming)
 - Azure Speech (batch)
-- Gemini 2.0 Flash (batch)
 - LiveKit WebRTC (real-time agent)
 
 ### Audio Processing
 - **Google:** 48kHz Linear16 PCM
-- **Azure/Gemini:** 16kHz WAV
+- **Azure:** 16kHz WAV
 - Real-time sample rate conversion
 
 ### Voice Activity Detection (VAD)

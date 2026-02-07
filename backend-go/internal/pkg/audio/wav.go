@@ -4,8 +4,8 @@
 //   - PCM to WAV (with configurable sample rate, channels, bit depth)
 //
 // Common audio formats used in this project:
-//   - Deepgram/Google: 48kHz, mono, 16-bit PCM
-//   - Azure/Gemini: 16kHz, mono, 16-bit PCM
+//   - Google: 48kHz, mono, 16-bit PCM
+//   - Azure: 16kHz, mono, 16-bit PCM
 package audio
 
 import (
@@ -16,8 +16,8 @@ import (
 // Common audio format constants
 const (
 	// Sample rates
-	SampleRate48kHz = 48000 // Used by Deepgram, Google
-	SampleRate16kHz = 16000 // Used by Azure, Gemini
+	SampleRate48kHz = 48000 // Used by Google
+	SampleRate16kHz = 16000 // Used by Azure
 
 	// Channels
 	Mono   = 1
@@ -86,7 +86,7 @@ func PCMToWAV(pcmData []byte, sampleRate, channels, bitsPerSample int) []byte {
 }
 
 // PCMToWAV16kMono is a convenience function for 16kHz mono audio.
-// This is the format used by Azure Speech and Gemini.
+// This is the format used by Azure Speech.
 func PCMToWAV16kMono(pcmData []byte) []byte {
 	return PCMToWAV(pcmData, SampleRate16kHz, Mono, BitsPerSample16)
 }

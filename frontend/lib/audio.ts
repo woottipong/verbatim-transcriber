@@ -236,25 +236,3 @@ export function cleanThaiText(text: string): string {
         .replace(/\s+/g, ' ')
         .trim();
 }
-
-/**
- * Gemini-specific text cleaner
- */
-export function cleanGeminiText(text: string): string {
-    if (!text) return '';
-
-    return text
-        // Remove common greeting hallucinations
-        .replace(/^(สวัสดีค่ะ|สวัสดีครับ|สวัสดี)[\s,]*/gi, '')
-        .replace(/[\s,]*(สวัสดีค่ะ|สวัสดีครับ)[\s,]*/gi, ' ')
-        // Remove timestamps
-        .replace(/\[?\(?\d{1,2}:\d{2}(:\d{2})?\)?\]?/g, '')
-        // Remove markdown
-        .replace(/```[\s\S]*?```/g, '')
-        .replace(/`/g, '')
-        // Remove periods after Thai text
-        .replace(/([\u0E00-\u0E7F])\./g, '$1')
-        // Normalize whitespace
-        .replace(/\s+/g, ' ')
-        .trim();
-}

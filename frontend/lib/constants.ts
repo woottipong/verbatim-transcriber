@@ -18,12 +18,6 @@ export const ASR_PROVIDERS = {
         supported: true,
         languages: ['th-TH', 'en-US'],
     },
-    [ASRProvider.GEMINI]: {
-        name: 'Gemini 2.0 Flash',
-        description: 'Multimodal AI with audio understanding (Batch)',
-        supported: true,
-        languages: ['th', 'en', 'multilingual'],
-    },
     [ASRProvider.AZURE]: {
         name: 'Azure Speech',
         description: 'Azure Speech Services (Batch)',
@@ -43,17 +37,6 @@ export const GOOGLE_CONFIG = {
 // Azure Speech Configuration
 export const AZURE_CONFIG = {
     LANGUAGE_CODE: 'th-TH',
-    SAMPLE_RATE: 16000,
-} as const;
-
-// Gemini Configuration
-export const GEMINI_CONFIG = {
-    MODEL: 'gemini-2.0-flash',
-    TEMPERATURE: 0,
-    TOP_P: 1,
-    TOP_K: 1,
-    MAX_OUTPUT_TOKENS: 512,
-    BATCH_SIZE_BYTES: 64000, // ~2 seconds of audio
     SAMPLE_RATE: 16000,
 } as const;
 

@@ -8,7 +8,7 @@ Go backend สำหรับ Real-time Thai Speech-to-Text ด้วย Fiber +
 | ------------- | --------------------------------------------------------------------- |
 | Framework     | Go + Fiber v2 (High-performance)                                      |
 | Protocol      | WebSocket real-time streaming                                         |
-| ASR Providers | Gemini, Google Cloud STT, Azure Speech                                |
+| ASR Providers | Google Cloud STT, Azure Speech                                        |
 | Language      | Thai (th-TH) verbatim transcription                                   |
 | Architecture  | Clean Architecture (domain, delivery, infrastructure)                 |
 | Dependencies  | Pure Go (WebSocket ASR), CGO required for LiveKit Agent (Opus decode) |
@@ -49,7 +49,7 @@ go run main.go
 
 Startup logs จะแสดง providers ที่เปิดใช้งาน:
 ```
-✅ Enabled ASR providers: [Gemini Google]
+✅ Enabled ASR providers: [Google]
 ⚠️  [Azure] Disabled - AZURE_SUBSCRIPTION_KEY or AZURE_REGION not configured
 ```
 
@@ -65,7 +65,6 @@ go build -o transcriber-backend
 | Provider   | Mode      | Sample Rate | Format    | Latency |
 | ---------- | --------- | ----------- | --------- | ------- |
 | **Google** | Streaming | 48 kHz      | PCM Int16 | ~300ms  |
-| **Gemini** | Batch     | 16 kHz      | WAV       | ~2-3s   |
 | **Azure**  | Batch     | 16 kHz      | WAV       | ~1-2s   |
 
 ## API Endpoints
@@ -83,7 +82,6 @@ Endpoints เปิดใช้งานตาม API keys ที่ configure:
 
 | Path      | Required Config                           |
 | --------- | ----------------------------------------- |
-| `/gemini` | `GEMINI_API_KEY`                          |
 | `/google` | `GOOGLE_APPLICATION_CREDENTIALS`          |
 | `/azure`  | `AZURE_SUBSCRIPTION_KEY` + `AZURE_REGION` |
 
@@ -121,7 +119,7 @@ Endpoints เปิดใช้งานตาม API keys ที่ configure:
 {
   "type": "transcript",
   "transcript": "สวัสดีครับ",
-  "is_final": true,
+  "isFinal": true,
   "channel": {
     "alternatives": [{
       "transcript": "สวัสดีครับ",
@@ -141,7 +139,6 @@ HOST=0.0.0.0
 PORT=3000
 
 # ASR Providers (optional - enable only what you need)
-GEMINI_API_KEY=your_key
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
 AZURE_SUBSCRIPTION_KEY=your_key
 AZURE_REGION=southeastasia
@@ -160,7 +157,6 @@ curl http://localhost:3000/providers
 
 ```json
 {
-  "gemini": true,
   "google": true,
   "azure": false,
   "livekit": true
@@ -169,11 +165,10 @@ curl http://localhost:3000/providers
 
 ## Dependencies
 
-| Package                                                               | Purpose             |
-| --------------------------------------------------------------------- | ------------------- |
-| [gofiber/fiber](https://github.com/gofiber/fiber)                     | Web framework       |
-| [gofiber/websocket](https://github.com/gofiber/websocket)             | WebSocket support   |
-| [google/generative-ai-go](https://github.com/google/generative-ai-go) | Gemini API          |
-| [cloud.google.com/go/speech](https://cloud.google.com/go/speech)      | Google Cloud STT    |
-| [livekit/server-sdk-go](https://github.com/livekit/server-sdk-go)     | LiveKit integration |
-| [hraban/opus](https://github.com/hraban/opus)                         | Opus decode (CGO)   |
+| Package                                                           | Purpose             |
+| ----------------------------------------------------------------- | ------------------- |
+| [gofiber/fiber](https://github.com/gofiber/fiber)                 | Web framework       |
+| [gofiber/websocket](https://github.com/gofiber/websocket)         | WebSocket support   |
+| [cloud.google.com/go/speech](https://cloud.google.com/go/speech)  | Google Cloud STT    |
+| [livekit/server-sdk-go](https://github.com/livekit/server-sdk-go) | LiveKit integration |
+| [hraban/opus](https://github.com/hraban/opus)                     | Opus decode (CGO)   |

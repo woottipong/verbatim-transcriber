@@ -11,7 +11,6 @@
  */
 export enum ASRProvider {
   GOOGLE = 'google',
-  GEMINI = 'gemini',
   AZURE = 'azure',
 }
 
@@ -22,10 +21,6 @@ export interface ProviderConfig {
   google?: {
     model?: string;        // 'default', 'command_and_search', 'phone_call', 'video'
     useEnhanced?: boolean; // Enhanced model (paid)
-  };
-  gemini?: {
-    model?: string;        // 'gemini-2.0-flash', 'gemini-1.5-pro'
-    temperature?: number;  // 0-1
   };
   azure?: {
     region?: string;       // Azure region (e.g., 'southeastasia')
@@ -72,7 +67,7 @@ export interface TranscriptSegment {
   text: string;
   isFinal: boolean;
   timestamp: number;
-  provider?: string;   // ASR provider: "google", "azure", "gemini"
+  provider?: string;   // ASR provider: "google", "azure"
   speaker?: string;    // Speaker identity: "user-123"
 }
 

@@ -12,15 +12,15 @@
 
 ### Background: ระบบมี 2 โหมดที่ใช้คนละ Protocol
 
-|                    | WebSocket Mode                       | LiveKit Mode                          |
-| ------------------ | ------------------------------------ | ------------------------------------- |
-| **ใช้เมื่อ**          | Transcribe ตรง ผ่าน Backend           | Room-based, หลายคน join               |
-| **Backend struct** | `models.TranscriptResponse`          | `agent.TranscriptMessage`             |
-| **ส่งผ่าน**          | WebSocket `conn.WriteJSON()`         | LiveKit Data Channel `PublishData()`  |
-| **JSON field**     | `"isFinal"` (camelCase)              | `"isFinal"` (camelCase)               |
-| **Handler**        | `delivery/handler/google.go` ฯลฯ     | `infrastructure/agent/agent.go`       |
-| **Frontend type**  | `ASRResponse` (types.ts)             | `LiveKitTranscriptMessage` (types.ts) |
-| **Frontend hook**  | `useGoogle`, `useAzure`, `useGemini` | `useLiveKit`, `useRoomViewer`         |
+|                    | WebSocket Mode                   | LiveKit Mode                          |
+| ------------------ | -------------------------------- | ------------------------------------- |
+| **ใช้เมื่อ**          | Transcribe ตรง ผ่าน Backend       | Room-based, หลายคน join               |
+| **Backend struct** | `models.TranscriptResponse`      | `agent.TranscriptMessage`             |
+| **ส่งผ่าน**          | WebSocket `conn.WriteJSON()`     | LiveKit Data Channel `PublishData()`  |
+| **JSON field**     | `"isFinal"` (camelCase)          | `"isFinal"` (camelCase)               |
+| **Handler**        | `delivery/handler/google.go` ฯลฯ | `infrastructure/agent/agent.go`       |
+| **Frontend type**  | `ASRResponse` (types.ts)         | `LiveKitTranscriptMessage` (types.ts) |
+| **Frontend hook**  | `useGoogle`, `useAzure`          | `useLiveKit`, `useRoomViewer`         |
 
 > Editor Mode ทำงานบน **LiveKit Mode เท่านั้น** — Task ทั้งหมดที่เกี่ยวกับ Agent/Data Channel จึงเป็นเรื่องของ LiveKit Mode
 
@@ -80,7 +80,7 @@ type TranscriptMessage struct {
 | 2   | `hooks/useLiveKit.ts` L14    | `LiveKitTranscriptMessage` | `isFinal` ✅     | LiveKit |
 | 3   | `hooks/useRoomViewer.ts` L22 | `TranscriptMessage`        | `isFinal` ✅     | LiveKit |
 
-> WebSocket hooks (`useGoogle`, `useAzure`, `useGemini`) ไม่มีปัญหานี้ — ไม่ได้ใช้ type จาก `types.ts` เลย
+> WebSocket hooks (`useGoogle`, `useAzure`) ไม่มีปัญหานี้ — ไม่ได้ใช้ type จาก `types.ts` เลย
 
 **แก้ไข**:
 - แก้ `types.ts` ให้ `isFinal` ถูก + เพิ่ม field ที่หายไป (`type`, `speaker`)
@@ -177,7 +177,7 @@ func (a *Agent) publishTranscript(data []byte, destinationIdentities ...string) 
 
 **ปัจจุบัน**: LiveKit hooks ทั้ง `useLiveKit.ts` และ `useRoomViewer.ts` ไม่เช็ค `message.type` — ถือว่าทุก Data Channel message เป็น transcript
 
-> WebSocket hooks (`useGoogle`, `useAzure`, `useGemini`) มี `switch (data.type)` อยู่แล้ว — ไม่ต้องแก้
+> WebSocket hooks (`useGoogle`, `useAzure`) มี `switch (data.type)` อยู่แล้ว — ไม่ต้องแก้
 
 ```typescript
 // useLiveKit.ts (ปัจจุบัน — ไม่เช็ค type)

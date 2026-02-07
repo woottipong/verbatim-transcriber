@@ -68,7 +68,7 @@ Browser (Frontend)  ◄──── Standardized JSON + Binary Audio ───�
 **Audio Data (Binary):**
 
 - PCM 16-bit signed, mono, Little Endian
-- Sample rate ขึ้นกับ provider (48kHz สำหรับ Google, 16kHz สำหรับ Azure/Gemini)
+- Sample rate ขึ้นกับ provider (48kHz สำหรับ Google, 16kHz สำหรับ Azure)
 
 ---
 
@@ -96,18 +96,16 @@ func sendTranscript(conn *websocketFiber.Conn, text string, isFinal bool, confid
 | Provider | Handler                               | Protocol       | Uses sendTranscript() |
 | -------- | ------------------------------------- | -------------- | --------------------- |
 | Google   | `internal/delivery/handler/google.go` | gRPC Streaming | ✅                     |
-| Azure    | `internal/delivery/handler/azure.go`  | REST Batch     | ✅                     |
-| Gemini   | `internal/delivery/handler/gemini.go` | REST Batch     | ✅                     |
+| Azure    | `internal/delivery/handler/azure.go`  | WebSocket      | ✅                     |
 
 ---
 
 ## Audio Format Requirements
 
-| Provider | Sample Rate | Format       | Encoding             |
-| -------- | ----------- | ------------ | -------------------- |
-| Google   | 48,000 Hz   | Linear16 PCM | Int16                |
-| Gemini   | 16,000 Hz   | WAV          | PCM → WAV conversion |
-| Azure    | 16,000 Hz   | WAV          | PCM + RIFF header    |
+| Provider | Sample Rate | Format       | Encoding          |
+| -------- | ----------- | ------------ | ----------------- |
+| Google   | 48,000 Hz   | Linear16 PCM | Int16             |
+| Azure    | 16,000 Hz   | WAV          | PCM + RIFF header |
 
 ---
 
@@ -115,8 +113,7 @@ func sendTranscript(conn *websocketFiber.Conn, text string, isFinal bool, confid
 
 ```
 Google:    Frontend ──► Backend (WebSocket) ──► Google gRPC (Streaming)
-Gemini:    Frontend ──► Backend (WebSocket) ──► Gemini REST API (Batch)
-Azure:     Frontend ──► Backend (WebSocket) ──► Azure REST API (Batch)
+Azure:     Frontend ─► Backend (WebSocket) ─► Azure WebSocket (Streaming)
 ```
 
 ---

@@ -99,7 +99,6 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
         switch (provider.toLowerCase()) {
             case 'google': return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
             case 'azure': return 'text-cyan-400 bg-cyan-500/20 border-cyan-500/30';
-            case 'gemini': return 'text-purple-400 bg-purple-500/20 border-purple-500/30';
             default: return 'text-slate-400 bg-slate-500/20 border-slate-500/30';
         }
     };

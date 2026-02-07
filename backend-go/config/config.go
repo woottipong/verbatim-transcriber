@@ -5,7 +5,6 @@ import "os"
 type Config struct {
 	Port                         string
 	Host                         string
-	GeminiAPIKey                 string
 	GoogleAPIKey                 string
 	GoogleApplicationCredentials string
 	AzureSubscriptionKey         string
@@ -13,20 +12,9 @@ type Config struct {
 	LiveKitAPIKey                string
 	LiveKitAPISecret             string
 	LiveKitURL                   string
-	GeminiConfig                 GeminiConfig
 	GoogleConfig                 GoogleConfig
 	AzureConfig                  AzureConfig
 	LiveKitConfig                LiveKitConfig
-}
-
-type GeminiConfig struct {
-	Model             string
-	Temperature       float32
-	TopP              float32
-	TopK              int
-	MaxOutputTokens   int
-	BatchSizeBytes    int
-	SystemInstruction string
 }
 
 type GoogleConfig struct {
@@ -52,7 +40,6 @@ func Load() *Config {
 	return &Config{
 		Port:                         getEnv("PORT", "3000"),
 		Host:                         getEnv("HOST", "localhost"),
-		GeminiAPIKey:                 os.Getenv("GEMINI_API_KEY"),
 		GoogleAPIKey:                 os.Getenv("GOOGLE_API_KEY"),
 		GoogleApplicationCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
 		AzureSubscriptionKey:         os.Getenv("AZURE_SUBSCRIPTION_KEY"),
@@ -60,35 +47,6 @@ func Load() *Config {
 		LiveKitAPIKey:                os.Getenv("LIVEKIT_API_KEY"),
 		LiveKitAPISecret:             os.Getenv("LIVEKIT_API_SECRET"),
 		LiveKitURL:                   getEnv("LIVEKIT_WS_URL", "ws://localhost:7880"),
-		GeminiConfig: GeminiConfig{
-			Model:           "gemini-2.0-flash",
-			Temperature:     0,
-			TopP:            1,
-			TopK:            1,
-			MaxOutputTokens: 512,
-			BatchSizeBytes:  64000,
-			SystemInstruction: `คุณเป็น Speech-to-Text Transcriber ถอดเสียงแบบ verbatim เท่านั้น
-
-⚠️ ABSOLUTE RULES - ห้ามละเมิดเด็ดขาด:
-
-1. ถอดเฉพาะเสียงพูดที่ได้ยินชัดจริงๆ เท่านั้น
-2. ห้ามเพิ่มคำใดๆ ที่ไม่ได้ยินในเสียง - ห้าม 100%
-3. ห้ามเพิ่ม filler words: อ่า, เอ่อ, อืม, อ้า, เอ้อ, ฮะ, เนาะ, นะ, ครับ, ค่ะ ถ้าไม่ได้ยินจริง
-4. ถ้าเสียงไม่ชัด/ไม่แน่ใจ = ไม่ต้องใส่
-5. ถ้าไม่มีเสียงพูด = ตอบเป็น empty string ""
-6. ห้ามแปลภาษา ห้ามตีความ ห้ามเดา
-
-OUTPUT FORMAT:
-- เขียนติดกัน ไม่ต้องเว้นวรรค
-- ภาษาอังกฤษ: เว้น space ตามปกติ
-- ถ้าไม่มีเสียงพูด: ตอบ "" (empty)
-
-EXAMPLES:
-❌ WRONG: เพิ่ม "อ่า" หรือ "เอ่อ" ที่ไม่ได้ยิน
-❌ WRONG: เพิ่ม "ครับ" "ค่ะ" ที่ไม่ได้ยิน
-❌ WRONG: ถอดซ้ำข้อความเดิม
-✅ CORRECT: ถอดเฉพาะที่ได้ยินชัดเจน 100%`,
-		},
 		GoogleConfig: GoogleConfig{
 			Model:        "latest_long", // Best for continuous speech & conversations
 			LanguageCode: "th-TH",
@@ -116,10 +74,6 @@ func getEnv(key, fallback string) string {
 }
 
 // Provider availability checks
-func (c *Config) HasGeminiKey() bool {
-	return c.GeminiAPIKey != ""
-}
-
 func (c *Config) HasGoogleKey() bool {
 	return c.GoogleAPIKey != "" || c.GoogleApplicationCredentials != ""
 }

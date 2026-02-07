@@ -49,15 +49,15 @@ AzureConfig{
 
 ### Feature Comparison
 
-| Feature         | Google             | Azure          | Gemini         |
-| --------------- | ------------------ | -------------- | -------------- |
-| Mode            | Streaming (gRPC)   | Batch (REST)   | Batch (REST)   |
-| Sample Rate     | 48 kHz             | 16 kHz         | 16 kHz         |
-| Interim Results | ✅                  | ❌              | ❌              |
-| Streaming Limit | ⚠️ 5 minutes        | ไม่จำกัด          | ไม่จำกัด          |
-| Thai Quality    | ⭐⭐⭐⭐⭐              | ⭐⭐⭐⭐           | ⭐⭐⭐⭐           |
-| Latency         | ~300ms             | ~1-2s          | ~2-3s          |
-| Implementation  | Pure Go (gRPC SDK) | Pure Go (REST) | Pure Go (REST) |
+| Feature         | Google             | Azure               |
+| --------------- | ------------------ | ------------------- |
+| Mode            | Streaming (gRPC)   | WebSocket Streaming |
+| Sample Rate     | 48 kHz             | 16 kHz              |
+| Interim Results | ✅                  | ✅                   |
+| Streaming Limit | ⚠️ 5 minutes        | ไม่จำกัด               |
+| Thai Quality    | ⭐⭐⭐⭐⭐              | ⭐⭐⭐⭐                |
+| Latency         | ~300ms             | ~1-2s               |
+| Implementation  | Pure Go (gRPC SDK) | Pure Go (WebSocket) |
 
 ### จุดแข็ง / จุดอ่อน
 
@@ -71,11 +71,6 @@ AzureConfig{
 - ✅ รวมประโยคยาว, context ดี
 - ❌ ช้ากว่า Google (2-3 เท่า), confidence แปรปรวน
 
-**Gemini:**
-- ✅ ราคาถูก, ไม่มี time limit
-- ✅ Good Thai quality
-- ❌ Batch mode only (~2-3s latency), no interim results
-
 ---
 
 ## คำแนะนำ
@@ -84,7 +79,6 @@ AzureConfig{
 | ------------------------- | ------------ | -------------------- |
 | **Live Transcription**    | **Google** ✅ | เร็ว, แม่นยำ, real-time |
 | **Long Sessions (>5min)** | **Azure**    | ไม่มี time limit       |
-| **Cost-effective**        | **Gemini**   | ราคาถูก, คุณภาพดี       |
 
 **Best Practice:** ใช้ side-by-side comparison เพื่อ redundancy และให้ผู้ใช้เลือก
 
