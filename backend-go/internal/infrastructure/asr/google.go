@@ -20,12 +20,14 @@ type GoogleProvider struct {
 	ctx             context.Context
 	cancel          context.CancelFunc
 	mu              sync.Mutex
+	closeOnce       sync.Once
 	credentials     string
 	apiKey          string
 	isRunning       bool
 	sampleRate      int
 	languageCode    string
 	autoPunctuation bool
+	lastErr         error
 }
 
 type GoogleConfig struct {
@@ -125,11 +127,12 @@ func (g *GoogleProvider) Start(ctx context.Context) error {
 	g.isRunning = true
 	go g.receiveResponses()
 
-	log.Println("✅ [Google Agent] STT stream started")
+	log.Println("✅ [Google] STT stream started")
 	return nil
 }
 
 func (g *GoogleProvider) receiveResponses() {
+	defer g.closeOnce.Do(func() { close(g.results) })
 	defer func() {
 		g.mu.Lock()
 		g.isRunning = false
@@ -139,11 +142,14 @@ func (g *GoogleProvider) receiveResponses() {
 	for {
 		resp, err := g.stream.Recv()
 		if err == io.EOF {
-			log.Println("📭 [Google Agent] Stream ended")
+			log.Println("📭 [Google] Stream ended")
 			return
 		}
 		if err != nil {
-			log.Printf("❌ [Google Agent] Receive error: %v", err)
+			g.mu.Lock()
+			g.lastErr = err
+			g.mu.Unlock()
+			log.Printf("❌ [Google] Receive error: %v", err)
 			return
 		}
 
@@ -162,7 +168,7 @@ func (g *GoogleProvider) receiveResponses() {
 			select {
 			case g.results <- transcript:
 			default:
-				log.Println("⚠️ [Google Agent] Results channel full")
+				log.Println("⚠️ [Google] Results channel full")
 			}
 		}
 	}
@@ -187,6 +193,12 @@ func (g *GoogleProvider) Results() <-chan domain.TranscriptResult {
 	return g.results
 }
 
+func (g *GoogleProvider) Err() error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.lastErr
+}
+
 func (g *GoogleProvider) Stop() error {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -208,6 +220,7 @@ func (g *GoogleProvider) Stop() error {
 	}
 
 	g.isRunning = false
-	log.Println("🛑 [Google Agent] STT stream stopped")
+	g.closeOnce.Do(func() { close(g.results) })
+	log.Println("🛑 [Google] STT stream stopped")
 	return nil
 }

@@ -286,10 +286,20 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 	// PCM buffer for decoded audio (max 120ms frame at 48kHz mono = 5760 samples)
 	pcmBuffer := make([]int16, 5760)
 
-	packetCount := 0
+	// Audio batching: accumulate PCM before sending to ASR to reduce
+	// gRPC/WS call overhead. RTP packets are ~20ms each — sending every
+	// packet individually causes heavy lock contention on the provider.
+	// Batch ~100ms of audio before sending for optimal throughput.
+	const batchTargetBytes = 9600 // ~100ms at 48kHz mono 16-bit (4800 samples × 2 bytes)
+	audioBatch := make([]byte, 0, batchTargetBytes*2)
+
 	for {
 		select {
 		case <-ctx.Done():
+			// Flush remaining audio before exit
+			if len(audioBatch) > 0 {
+				provider.SendAudio(audioBatch)
+			}
 			return
 		default:
 		}
@@ -306,8 +316,6 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		if len(opusData) == 0 {
 			continue
 		}
-
-		packetCount++
 
 		// Decode Opus to PCM int16
 		samplesDecoded, err := opusDecoder.Decode(opusData, pcmBuffer)
@@ -341,10 +349,16 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 			}
 		}
 
-		// Send PCM to ASR provider
-		if err := provider.SendAudio(pcmBytes); err != nil {
-			log.Printf("❌ [Agent] Error sending audio to ASR: %v", err)
-			break
+		// Accumulate into batch
+		audioBatch = append(audioBatch, pcmBytes...)
+
+		// Send when batch reaches target size (~100ms of audio)
+		if len(audioBatch) >= batchTargetBytes {
+			if err := provider.SendAudio(audioBatch); err != nil {
+				log.Printf("❌ [Agent] Error sending audio to ASR: %v", err)
+				break
+			}
+			audioBatch = audioBatch[:0] // reset without reallocating
 		}
 	}
 

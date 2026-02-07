@@ -76,14 +76,14 @@ func setupASRRoutes(app *fiber.App, cfg *config.Config) {
 	var enabled []string
 
 	if cfg.HasGoogleKey() {
-		registerWSRoute(app, "/google", func(c *websocket.Conn) { handler.HandleGoogle(c, cfg) })
+		registerWSRoute(app, "/google", func(c *websocket.Conn) { handler.HandleASR(c, cfg, "Google") })
 		enabled = append(enabled, "Google")
 	} else {
 		log.Println("⚠️  [Google] Disabled - GOOGLE_APPLICATION_CREDENTIALS not configured")
 	}
 
 	if cfg.HasAzureKey() {
-		registerWSRoute(app, "/azure", func(c *websocket.Conn) { handler.HandleAzure(c, cfg) })
+		registerWSRoute(app, "/azure", func(c *websocket.Conn) { handler.HandleASR(c, cfg, "Azure") })
 		enabled = append(enabled, "Azure")
 	} else {
 		log.Println("⚠️  [Azure] Disabled - AZURE_SUBSCRIPTION_KEY or AZURE_REGION not configured")

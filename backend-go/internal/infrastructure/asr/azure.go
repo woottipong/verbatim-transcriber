@@ -22,6 +22,7 @@ type AzureProvider struct {
 	ctx                            context.Context
 	cancel                         context.CancelFunc
 	mu                             sync.Mutex
+	closeOnce                      sync.Once
 	subscriptionKey                string
 	region                         string
 	connectionID                   string
@@ -32,6 +33,7 @@ type AzureProvider struct {
 	bufferThreshold                int    // Send when buffer reaches this size
 	segmentationSilenceTimeout     int    // milliseconds
 	segmentationMaxSilenceDuration int    // milliseconds
+	lastErr                        error
 }
 
 type AzureConfig struct {
@@ -95,7 +97,7 @@ func (a *AzureProvider) Start(ctx context.Context) error {
 		a.region,
 	)
 
-	log.Printf("🔗 [Azure Agent] Connecting to: %s", wsURL)
+	log.Printf("🔗 [Azure] Connecting to: %s", wsURL)
 
 	dialer := websocket.Dialer{}
 	conn, resp, err := dialer.Dial(wsURL, map[string][]string{
@@ -104,7 +106,7 @@ func (a *AzureProvider) Start(ctx context.Context) error {
 	})
 	if err != nil {
 		if resp != nil {
-			log.Printf("❌ [Azure Agent] Response status: %d", resp.StatusCode)
+			log.Printf("❌ [Azure] Response status: %d", resp.StatusCode)
 		}
 		return fmt.Errorf("websocket dial failed: %v", err)
 	}
@@ -124,7 +126,7 @@ func (a *AzureProvider) Start(ctx context.Context) error {
 	a.isRunning = true
 	go a.receiveResponses()
 
-	log.Printf("✅ [Azure Agent] WebSocket connected (connection: %s)\n", a.connectionID[:8])
+	log.Printf("✅ [Azure] WebSocket connected (connection: %s)\n", a.connectionID[:8])
 	return nil
 }
 
@@ -205,6 +207,7 @@ func (a *AzureProvider) getTimestamp() string {
 }
 
 func (a *AzureProvider) receiveResponses() {
+	defer a.closeOnce.Do(func() { close(a.results) })
 	defer func() {
 		a.mu.Lock()
 		a.isRunning = false
@@ -214,7 +217,10 @@ func (a *AzureProvider) receiveResponses() {
 	for {
 		msgType, message, err := a.conn.ReadMessage()
 		if err != nil {
-			log.Printf("❌ [Azure Agent] Read error: %v", err)
+			a.mu.Lock()
+			a.lastErr = err
+			a.mu.Unlock()
+			log.Printf("❌ [Azure] Read error: %v", err)
 			return
 		}
 
@@ -245,7 +251,7 @@ func (a *AzureProvider) parseTextMessage(message string) {
 				IsFinal: false,
 			}:
 			default:
-				log.Println("⚠️ [Azure Agent] Results channel full, dropping interim")
+				log.Println("⚠️ [Azure] Results channel full, dropping interim")
 			}
 		}
 	} else if strings.Contains(headers, "Path:speech.phrase") {
@@ -266,7 +272,7 @@ func (a *AzureProvider) parseTextMessage(message string) {
 					confidence = phrase.NBest[0].Confidence
 				}
 				if text != "" {
-					log.Printf("✅ [Azure Agent] Final: %s (conf: %.2f)", text, confidence)
+					log.Printf("✅ [Azure] Final: %s (conf: %.2f)", text, confidence)
 					select {
 					case a.results <- domain.TranscriptResult{
 						Text:       text,
@@ -274,7 +280,7 @@ func (a *AzureProvider) parseTextMessage(message string) {
 						Confidence: confidence,
 					}:
 					default:
-						log.Println("⚠️ [Azure Agent] Results channel full, dropping final")
+						log.Println("⚠️ [Azure] Results channel full, dropping final")
 					}
 				}
 			}
@@ -318,6 +324,12 @@ func (a *AzureProvider) Results() <-chan domain.TranscriptResult {
 	return a.results
 }
 
+func (a *AzureProvider) Err() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.lastErr
+}
+
 func (a *AzureProvider) Stop() error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -335,6 +347,7 @@ func (a *AzureProvider) Stop() error {
 	}
 
 	a.isRunning = false
-	log.Println("🛑 [Azure Agent] WebSocket connection closed")
+	a.closeOnce.Do(func() { close(a.results) })
+	log.Println("🛑 [Azure] WebSocket connection closed")
 	return nil
 }

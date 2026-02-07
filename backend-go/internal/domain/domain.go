@@ -33,11 +33,15 @@ type ASRProvider interface {
 	// SendAudio streams PCM audio data (Int16 Little-Endian) to the provider
 	SendAudio(data []byte) error
 
-	// Results returns a channel of transcription results
+	// Results returns a channel of transcription results.
+	// The channel is closed when the provider stops or encounters an error.
 	Results() <-chan TranscriptResult
 
 	// Stop closes the connection and cleans up resources
 	Stop() error
+
+	// Err returns the last error that caused the stream to end (e.g., timeout)
+	Err() error
 
 	// SampleRate returns the expected sample rate for audio input
 	SampleRate() int
