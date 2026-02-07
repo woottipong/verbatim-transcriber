@@ -111,7 +111,7 @@ export const useGoogle = (config: AppConfig, sharedVAD?: SharedVADProps) => {
             socketRef.current = socket;
 
             socket.onopen = () => {
-                const { audioContext, processor, source } = createAudioProcessor(stream, 48000);
+                const { audioContext, processor, source } = createAudioProcessor(stream, 48000, 1024);
                 audioContextRef.current = audioContext;
                 processorRef.current = processor;
                 sourceRef.current = source;

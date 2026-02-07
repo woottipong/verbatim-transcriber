@@ -18,18 +18,20 @@ type Config struct {
 }
 
 type GoogleConfig struct {
-	Model        string
-	LanguageCode string
-	SampleRate   int
-	UseEnhanced  bool
+	Model                 string
+	LanguageCode          string
+	SampleRate            int
+	UseEnhanced           bool
+	EnableAutoPunctuation bool // false = faster finalization (no waiting for context)
 }
 
 type AzureConfig struct {
-	Language                   string
-	SampleRate                 int
-	BitsPerSample              int
-	Channels                   int
-	SegmentationSilenceTimeout int // milliseconds - ลดค่านี้เพื่อให้ตัดประโยคเร็วขึ้น
+	Language                       string
+	SampleRate                     int
+	BitsPerSample                  int
+	Channels                       int
+	SegmentationSilenceTimeout     int // milliseconds - silence ก่อน finalize segment
+	SegmentationMaxSilenceDuration int // milliseconds - max silence ก่อน force finalize
 }
 
 type LiveKitConfig struct {
@@ -48,17 +50,19 @@ func Load() *Config {
 		LiveKitAPISecret:             os.Getenv("LIVEKIT_API_SECRET"),
 		LiveKitURL:                   getEnv("LIVEKIT_WS_URL", "ws://localhost:7880"),
 		GoogleConfig: GoogleConfig{
-			Model:        "latest_long", // Best for continuous speech & conversations
-			LanguageCode: "th-TH",
-			SampleRate:   48000,
-			UseEnhanced:  true, // Enhanced model for better accuracy
+			Model:                 "latest_long", // Best for continuous speech & conversations
+			LanguageCode:          "th-TH",
+			SampleRate:            48000,
+			UseEnhanced:           true,  // Enhanced model for better accuracy
+			EnableAutoPunctuation: false, // Disable for faster finalization (add punctuation in Editor Mode)
 		},
 		AzureConfig: AzureConfig{
-			Language:                   "th-TH",
-			SampleRate:                 16000,
-			BitsPerSample:              16,
-			Channels:                   1,
-			SegmentationSilenceTimeout: 500, // 500ms - ลดลงจาก default 1000ms
+			Language:                       "th-TH",
+			SampleRate:                     16000,
+			BitsPerSample:                  16,
+			Channels:                       1,
+			SegmentationSilenceTimeout:     300, // 300ms - aggressive endpointing for real-time feel
+			SegmentationMaxSilenceDuration: 500, // 500ms - force finalize faster (was 800ms)
 		},
 		LiveKitConfig: LiveKitConfig{
 			TokenExpiry: 3600, // 1 hour

@@ -198,9 +198,11 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 	case "azure":
 		if a.config.HasAzureKey() {
 			provider, err = asr.NewAzureProvider(ctx, asr.AzureConfig{
-				SubscriptionKey: a.config.AzureSubscriptionKey,
-				Region:          a.config.AzureRegion,
-				SampleRate:      16000, // Azure uses 16kHz
+				SubscriptionKey:                a.config.AzureSubscriptionKey,
+				Region:                         a.config.AzureRegion,
+				SampleRate:                     16000, // Azure uses 16kHz
+				SegmentationSilenceTimeout:     a.config.AzureConfig.SegmentationSilenceTimeout,
+				SegmentationMaxSilenceDuration: a.config.AzureConfig.SegmentationMaxSilenceDuration,
 			})
 			needsResample = true
 			if err != nil {
@@ -212,9 +214,10 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 	case "google":
 		if a.config.HasGoogleKey() {
 			provider, err = asr.NewGoogleProvider(ctx, asr.GoogleConfig{
-				CredentialsFile: a.config.GoogleApplicationCredentials,
-				APIKey:          a.config.GoogleAPIKey,
-				SampleRate:      48000, // Google can handle 48kHz
+				CredentialsFile:       a.config.GoogleApplicationCredentials,
+				APIKey:                a.config.GoogleAPIKey,
+				SampleRate:            48000, // Google can handle 48kHz
+				EnableAutoPunctuation: a.config.GoogleConfig.EnableAutoPunctuation,
 			})
 			if err != nil {
 				log.Printf("⚠️ [Agent] Failed to init Google provider: %v", err)
@@ -226,9 +229,10 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		// Auto-detect: try Google first, then Azure
 		if a.config.HasGoogleKey() {
 			provider, err = asr.NewGoogleProvider(ctx, asr.GoogleConfig{
-				CredentialsFile: a.config.GoogleApplicationCredentials,
-				APIKey:          a.config.GoogleAPIKey,
-				SampleRate:      48000,
+				CredentialsFile:       a.config.GoogleApplicationCredentials,
+				APIKey:                a.config.GoogleAPIKey,
+				SampleRate:            48000,
+				EnableAutoPunctuation: a.config.GoogleConfig.EnableAutoPunctuation,
 			})
 			if err != nil {
 				log.Printf("⚠️ [Agent] Failed to init Google provider: %v", err)
@@ -237,9 +241,11 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		}
 		if provider == nil && a.config.HasAzureKey() {
 			provider, err = asr.NewAzureProvider(ctx, asr.AzureConfig{
-				SubscriptionKey: a.config.AzureSubscriptionKey,
-				Region:          a.config.AzureRegion,
-				SampleRate:      16000,
+				SubscriptionKey:                a.config.AzureSubscriptionKey,
+				Region:                         a.config.AzureRegion,
+				SampleRate:                     16000,
+				SegmentationSilenceTimeout:     a.config.AzureConfig.SegmentationSilenceTimeout,
+				SegmentationMaxSilenceDuration: a.config.AzureConfig.SegmentationMaxSilenceDuration,
 			})
 			needsResample = true
 			if err != nil {

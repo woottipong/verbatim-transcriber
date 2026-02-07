@@ -14,23 +14,26 @@ import (
 )
 
 type GoogleProvider struct {
-	client      *speech.Client
-	stream      speechpb.Speech_StreamingRecognizeClient
-	results     chan domain.TranscriptResult
-	ctx         context.Context
-	cancel      context.CancelFunc
-	mu          sync.Mutex
-	credentials string
-	apiKey      string
-	isRunning   bool
-	sampleRate  int
+	client          *speech.Client
+	stream          speechpb.Speech_StreamingRecognizeClient
+	results         chan domain.TranscriptResult
+	ctx             context.Context
+	cancel          context.CancelFunc
+	mu              sync.Mutex
+	credentials     string
+	apiKey          string
+	isRunning       bool
+	sampleRate      int
+	languageCode    string
+	autoPunctuation bool
 }
 
 type GoogleConfig struct {
-	CredentialsFile string
-	APIKey          string
-	SampleRate      int
-	LanguageCode    string
+	CredentialsFile       string
+	APIKey                string
+	SampleRate            int
+	LanguageCode          string
+	EnableAutoPunctuation bool
 }
 
 func NewGoogleProvider(ctx context.Context, cfg GoogleConfig) (*GoogleProvider, error) {
@@ -54,12 +57,19 @@ func NewGoogleProvider(ctx context.Context, cfg GoogleConfig) (*GoogleProvider, 
 		sampleRate = 48000
 	}
 
+	langCode := cfg.LanguageCode
+	if langCode == "" {
+		langCode = "th-TH"
+	}
+
 	return &GoogleProvider{
-		client:      client,
-		results:     make(chan domain.TranscriptResult, 100),
-		credentials: cfg.CredentialsFile,
-		apiKey:      cfg.APIKey,
-		sampleRate:  sampleRate,
+		client:          client,
+		results:         make(chan domain.TranscriptResult, 100),
+		credentials:     cfg.CredentialsFile,
+		apiKey:          cfg.APIKey,
+		sampleRate:      sampleRate,
+		languageCode:    langCode,
+		autoPunctuation: cfg.EnableAutoPunctuation,
 	}, nil
 }
 
@@ -88,16 +98,20 @@ func (g *GoogleProvider) Start(ctx context.Context) error {
 
 	g.stream = stream
 
+	// Note: EnableAutomaticPunctuation=false ทำให้ finalize เร็วขึ้น
+	// เพราะ model ไม่ต้องรอ context เพิ่มเพื่อวาง punctuation
 	err = stream.Send(&speechpb.StreamingRecognizeRequest{
 		StreamingRequest: &speechpb.StreamingRecognizeRequest_StreamingConfig{
 			StreamingConfig: &speechpb.StreamingRecognitionConfig{
 				Config: &speechpb.RecognitionConfig{
 					Encoding:                   speechpb.RecognitionConfig_LINEAR16,
 					SampleRateHertz:            int32(g.sampleRate),
-					LanguageCode:               "th-TH",
+					AudioChannelCount:          1, // Mono audio
+					LanguageCode:               g.languageCode,
 					Model:                      "latest_long",
 					UseEnhanced:                true,
-					EnableAutomaticPunctuation: true,
+					EnableAutomaticPunctuation: g.autoPunctuation,
+					ProfanityFilter:            false, // ไม่กรองคำหยาบ (verbatim)
 					MaxAlternatives:            1,
 				},
 				InterimResults: true,

@@ -185,11 +185,11 @@ func sendSpeechConfig(session *AzureSession, cfg *config.Config) error {
 			},
 		},
 		"recognition": map[string]interface{}{
-			// ลดเวลา silence ที่ใช้ในการตัดประโยค (หน่วย: milliseconds)
+			// ลดเวลา silence ที่ใช้ในการตัดประโยค — ยิ่งต่ำยิ่ง finalize เร็ว
 			"segmentation": map[string]interface{}{
 				"segmentationSilenceTimeoutMs":         fmt.Sprintf("%d", cfg.AzureConfig.SegmentationSilenceTimeout),
 				"initialSilenceTimeoutMs":              "5000",
-				"segmentationMaximumSilenceDurationMs": "800",
+				"segmentationMaximumSilenceDurationMs": fmt.Sprintf("%d", cfg.AzureConfig.SegmentationMaxSilenceDuration),
 			},
 			// เปิด interim results ให้ส่งบ่อยขึ้น
 			"enableInterimResults": true,

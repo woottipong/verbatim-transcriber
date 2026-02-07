@@ -98,17 +98,18 @@ func HandleGoogle(conn *websocketFiber.Conn, cfg *config.Config) {
 					session.stream = stream
 
 					// Send initial config
+					// Note: EnableAutomaticPunctuation=false ทำให้ finalize เร็วขึ้น
+					// เพราะ model ไม่ต้องรอ context เพิ่มเพื่อวาง punctuation
 					err = stream.Send(&speechpb.StreamingRecognizeRequest{
 						StreamingRequest: &speechpb.StreamingRecognizeRequest_StreamingConfig{
 							StreamingConfig: &speechpb.StreamingRecognitionConfig{
 								Config: &speechpb.RecognitionConfig{
 									Encoding:                   speechpb.RecognitionConfig_LINEAR16,
-									SampleRateHertz:            int32(sampleRate), // ใช้ค่าจาก frontend
-									LanguageCode:               cfg.GoogleConfig.LanguageCode,
+									SampleRateHertz:            int32(sampleRate), // ใช้ค่าจาก frontend							AudioChannelCount:          1,                 // Mono audio									LanguageCode:               cfg.GoogleConfig.LanguageCode,
 									Model:                      cfg.GoogleConfig.Model,
 									UseEnhanced:                cfg.GoogleConfig.UseEnhanced,
 									MaxAlternatives:            1,
-									EnableAutomaticPunctuation: true,
+									EnableAutomaticPunctuation: cfg.GoogleConfig.EnableAutoPunctuation,
 									ProfanityFilter:            false, // ไม่กรองคำหยาบ (verbatim)
 									EnableWordTimeOffsets:      false,
 								},

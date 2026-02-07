@@ -112,7 +112,7 @@ export const useAzure = (config: AppConfig, sharedVAD?: SharedVADProps) => {
             socket.onopen = () => {
                 socket.send(JSON.stringify({ type: 'start' }));
 
-                const { audioContext, processor, source } = createAudioProcessor(stream, 16000);
+                const { audioContext, processor, source } = createAudioProcessor(stream, 16000, 512);
                 audioContextRef.current = audioContext;
                 processorRef.current = processor;
                 sourceRef.current = source;

@@ -17,26 +17,30 @@ import (
 )
 
 type AzureProvider struct {
-	conn            *websocket.Conn
-	results         chan domain.TranscriptResult
-	ctx             context.Context
-	cancel          context.CancelFunc
-	mu              sync.Mutex
-	subscriptionKey string
-	region          string
-	connectionID    string
-	requestID       string
-	isRunning       bool
-	sampleRate      int
-	audioBuffer     []byte // Buffer to accumulate audio chunks
-	bufferThreshold int    // Send when buffer reaches this size
+	conn                           *websocket.Conn
+	results                        chan domain.TranscriptResult
+	ctx                            context.Context
+	cancel                         context.CancelFunc
+	mu                             sync.Mutex
+	subscriptionKey                string
+	region                         string
+	connectionID                   string
+	requestID                      string
+	isRunning                      bool
+	sampleRate                     int
+	audioBuffer                    []byte // Buffer to accumulate audio chunks
+	bufferThreshold                int    // Send when buffer reaches this size
+	segmentationSilenceTimeout     int    // milliseconds
+	segmentationMaxSilenceDuration int    // milliseconds
 }
 
 type AzureConfig struct {
-	SubscriptionKey string
-	Region          string
-	SampleRate      int
-	Language        string
+	SubscriptionKey                string
+	Region                         string
+	SampleRate                     int
+	Language                       string
+	SegmentationSilenceTimeout     int // milliseconds
+	SegmentationMaxSilenceDuration int // milliseconds
 }
 
 func NewAzureProvider(ctx context.Context, cfg AzureConfig) (*AzureProvider, error) {
@@ -45,14 +49,25 @@ func NewAzureProvider(ctx context.Context, cfg AzureConfig) (*AzureProvider, err
 		sampleRate = 16000
 	}
 
+	silenceTimeout := cfg.SegmentationSilenceTimeout
+	if silenceTimeout == 0 {
+		silenceTimeout = 300
+	}
+	maxSilence := cfg.SegmentationMaxSilenceDuration
+	if maxSilence == 0 {
+		maxSilence = 500
+	}
+
 	return &AzureProvider{
-		results:         make(chan domain.TranscriptResult, 100),
-		subscriptionKey: cfg.SubscriptionKey,
-		region:          cfg.Region,
-		connectionID:    strings.ReplaceAll(uuid.New().String(), "-", ""),
-		sampleRate:      sampleRate,
-		audioBuffer:     make([]byte, 0),
-		bufferThreshold: 32000, // ~1 second of 16kHz 16-bit audio
+		results:                        make(chan domain.TranscriptResult, 100),
+		subscriptionKey:                cfg.SubscriptionKey,
+		region:                         cfg.Region,
+		connectionID:                   strings.ReplaceAll(uuid.New().String(), "-", ""),
+		sampleRate:                     sampleRate,
+		audioBuffer:                    make([]byte, 0),
+		bufferThreshold:                6400, // ~200ms of 16kHz 16-bit audio (was 32000/~1s)
+		segmentationSilenceTimeout:     silenceTimeout,
+		segmentationMaxSilenceDuration: maxSilence,
 	}, nil
 }
 
@@ -129,8 +144,9 @@ func (a *AzureProvider) sendSpeechConfig() error {
 		},
 		"recognition": map[string]interface{}{
 			"segmentation": map[string]interface{}{
-				"segmentationSilenceTimeoutMs": "500",
-				"initialSilenceTimeoutMs":      "5000",
+				"segmentationSilenceTimeoutMs":         fmt.Sprintf("%d", a.segmentationSilenceTimeout),
+				"initialSilenceTimeoutMs":              "5000",
+				"segmentationMaximumSilenceDurationMs": fmt.Sprintf("%d", a.segmentationMaxSilenceDuration),
 			},
 			"enableInterimResults": true,
 		},

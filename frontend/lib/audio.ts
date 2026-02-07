@@ -60,11 +60,15 @@ export function getMicrophoneConstraints(
     deviceId: string | undefined,
     sampleRate: number = 48000
 ): MediaStreamConstraints {
+    // สำหรับ verbatim transcription: ปิด browser audio processing
+    // ให้ ASR model (Google/Azure) จัดการ noise เอง — browser ทำ aggressive เกินไป
+    // จะตัดเสียงพูดที่ volume ต่ำหรือมี background noise ออกไปด้วย
     const audioConstraints: MediaTrackConstraints = {
         channelCount: 1,
         sampleRate,
-        echoCancellation: true,
-        noiseSuppression: true,
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: true, // เปิดไว้เพื่อรักษา volume ให้สม่ำเสมอ
     };
 
     if (deviceId) {
