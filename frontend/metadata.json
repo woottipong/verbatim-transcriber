@@ -1,6 +1,6 @@
 {
   "name": "Real-time Thai Transcription",
-  "description": "Real-time Thai speech-to-text comparing Deepgram Nova-2 vs Gemini 2.0 Flash with verbatim accuracy.",
+  "description": "Real-time Thai speech-to-text comparing Google, Azure, and Gemini with verbatim accuracy.",
   "requestFramePermissions": [
     "microphone"
   ]
