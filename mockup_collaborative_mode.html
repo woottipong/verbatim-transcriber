@@ -1,0 +1,1449 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Workstation: Editor Mode - Thai Transcription</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@300;400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
+
+        :root {
+            --bg-main: #0b0f1a;
+            --bg-card: #161e2e;
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            font-family: 'Sarabun', sans-serif;
+            background-color: var(--bg-main);
+            color: #d1d5db;
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .draft-card {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .draft-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(99, 102, 241, 0.4);
+            background: rgba(30, 41, 59, 0.5);
+        }
+
+        .pulse-red {
+            animation: pulse-red 2s infinite;
+        }
+
+        @keyframes pulse-red {
+            0% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+            }
+
+            70% {
+                box-shadow: 0 0 0 6px rgba(239, 68, 68, 0);
+            }
+
+            100% {
+                box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+            }
+        }
+
+        .glass-header {
+            background: rgba(15, 23, 42, 0.8);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+
+        /* Continuous Editor Improvements */
+        .ghost-text {
+            pointer-events: none;
+            position: absolute;
+            color: white;
+            z-index: 50;
+            white-space: pre-wrap;
+            transition: all 0.6s cubic-bezier(0.16, 1, 0.3, 1);
+            font-size: 1.875rem;
+            /* Matches text-3xl */
+            line-height: 1.5;
+        }
+
+        @keyframes flash-active {
+            0% {
+                border-color: rgba(99, 102, 241, 0.5);
+                background-color: rgba(99, 102, 241, 0.1);
+            }
+
+            100% {
+                border-color: rgba(255, 255, 255, 0.05);
+                background-color: transparent;
+            }
+        }
+
+        .editor-flash {
+            animation: flash-active 0.4s ease-out;
+        }
+
+        .low-confidence {
+            text-decoration: underline;
+            text-decoration-style: wavy;
+            text-decoration-color: rgba(239, 68, 68, 0.5);
+            text-underline-offset: 8px;
+            background-color: rgba(239, 68, 68, 0.05);
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .suggestion-popover {
+            position: fixed;
+            z-index: 1000;
+            background: #1e293b;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            padding: 4px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            display: none;
+            flex-direction: column;
+            min-width: 120px;
+        }
+
+        .suggestion-item {
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #d1d5db;
+            text-align: left;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .suggestion-item:hover {
+            background: rgba(99, 102, 241, 0.2);
+            color: #818cf8;
+        }
+
+        /* Remote Cursor Styling for Collaborative Mode */
+        .remote-cursor {
+            position: absolute;
+            width: 2px;
+            height: 1.2em;
+            background-color: #f59e0b;
+            /* Amber for Editor B */
+            pointer-events: none;
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            z-index: 40;
+        }
+
+        /* Turn-based Locked Area Styling */
+        .locked-area {
+            background-color: rgba(245, 158, 11, 0.03);
+            border-left: 2px solid rgba(245, 158, 11, 0.3);
+            position: relative;
+        }
+
+        .locked-area::after {
+            content: "Editor B's Turn";
+            position: absolute;
+            top: 2px;
+            right: 8px;
+            font-size: 8px;
+            font-weight: 900;
+            color: rgba(245, 158, 11, 0.4);
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+
+        .remote-cursor-label {
+            position: absolute;
+            top: -16px;
+            left: 0;
+            background-color: #f59e0b;
+            color: white;
+            padding: 1px 4px;
+            border-radius: 2px;
+            font-size: 8px;
+            font-weight: 900;
+            white-space: nowrap;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+        }
+
+        .send-hint {
+            position: absolute;
+            pointer-events: none;
+            font-size: 10px;
+            font-weight: 900;
+            color: #6366f1;
+            background: rgba(99, 102, 241, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            z-index: 60;
+            opacity: 0;
+            transform: translateY(10px);
+            transition: all 0.3s ease;
+        }
+
+        .send-hint.show {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    </style>
+</head>
+
+<body class="h-screen flex flex-col overflow-hidden selection:bg-indigo-500/30">
+
+    <!-- Ultra Modern Header -->
+    <header
+        class="h-14 flex-none glass-header border-b border-white/5 flex items-center px-6 justify-between z-30 shadow-2xl">
+        <div class="flex items-center gap-8">
+            <div class="flex items-center gap-4">
+                <div
+                    class="h-8 w-8 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                    <i class="fas fa-terminal text-white text-sm"></i>
+                </div>
+                <div class="flex flex-col">
+                    <h1 class="text-[11px] font-black text-white uppercase tracking-[0.2em] leading-tight">Editor
+                        Workstation</h1>
+                    <span
+                        class="text-[9px] text-indigo-400 font-bold uppercase tracking-widest leading-none mt-0.5">v1.2.0
+                        Stable</span>
+                </div>
+            </div>
+
+            <!-- SOURCE SELECTOR (ASR AGENTS) -->
+            <div class="flex items-center gap-3 ml-4">
+                <div class="flex flex-col items-end mr-1">
+                    <span
+                        class="text-[7px] font-black text-indigo-400 uppercase tracking-widest leading-none mb-1">Select</span>
+                    <span class="text-[9px] font-black text-white uppercase tracking-tighter leading-none">ASR
+                        Agent</span>
+                </div>
+                <div class="flex items-center gap-1 bg-black/40 p-1 rounded-xl border border-white/5 shadow-inner">
+                    <button onclick="selectSource('google')" id="nav-google"
+                        class="px-4 py-1.5 rounded-lg text-[9px] font-black tracking-widest uppercase transition-all bg-amber-500 text-white shadow-lg shadow-amber-500/20 flex items-center gap-2">
+                        <i class="fas fa-robot text-[8px]"></i> Google
+                    </button>
+                    <div class="w-[1px] h-3 bg-white/5"></div>
+                    <button onclick="selectSource('azure')" id="nav-azure"
+                        class="px-4 py-1.5 rounded-lg text-[9px] font-black tracking-widest uppercase transition-all text-slate-500 hover:text-slate-300 flex items-center gap-2">
+                        <i class="fas fa-robot text-[8px]"></i> Azure
+                    </button>
+                    <div class="w-[1px] h-3 bg-white/5"></div>
+                    <button onclick="selectSource('gemini')" id="nav-gemini"
+                        class="px-4 py-1.5 rounded-lg text-[9px] font-black tracking-widest uppercase transition-all text-slate-500 hover:text-slate-300 flex items-center gap-2">
+                        <i class="fas fa-robot text-[8px]"></i> Gemini
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-6">
+            <!-- MINI VISUALIZER & TOGGLE -->
+            <div class="flex items-center gap-3 px-3 py-1.5 bg-black/40 rounded-xl border border-white/5 shadow-inner">
+                <div class="flex flex-col items-end mr-1">
+                    <span
+                        class="text-[7px] font-black text-indigo-400 uppercase tracking-widest leading-none mb-1">Live</span>
+                    <span class="text-[9px] font-black text-white uppercase tracking-tighter leading-none">Wave</span>
+                </div>
+                <div class="h-6 w-24 overflow-hidden relative group">
+                    <canvas id="audio-visualizer" class="w-full h-full opacity-60"></canvas>
+                </div>
+                <button id="viz-toggle" onclick="toggleVisualizer()"
+                    class="h-5 w-8 rounded-full bg-indigo-500/20 border border-indigo-500/30 relative transition-all duration-300">
+                    <div id="viz-dot"
+                        class="absolute top-1 left-1 h-2.5 w-2.5 rounded-full bg-indigo-400 transition-all duration-300">
+                    </div>
+                </button>
+            </div>
+
+            <!-- ROOM BADGE: Moved to right side -->
+            <div
+                class="flex items-center gap-3 px-4 py-1.5 bg-indigo-500/10 rounded-2xl border border-indigo-500/20 shadow-[0_0_20px_rgba(99,102,241,0.05)] transition-all hover:bg-indigo-500/15 group pointer-events-none">
+                <div
+                    class="flex items-center justify-center h-5 w-5 rounded-full bg-indigo-500/20 group-hover:scale-110 transition-transform">
+                    <i class="fas fa-door-open text-[8px] text-indigo-400"></i>
+                </div>
+                <div class="flex flex-col">
+                    <span
+                        class="text-[7px] font-black text-indigo-400/60 uppercase tracking-[0.2em] leading-none mb-1">Room
+                        Name</span>
+                    <span
+                        class="text-[11px] text-white font-black tracking-[0.1em] uppercase leading-none">WAR-ROOM-01</span>
+                </div>
+                <div class="ml-2 pl-3 border-l border-white/10 flex items-center gap-1.5">
+                    <span class="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
+                    <span class="text-[8px] font-black text-emerald-400/80 uppercase tracking-widest">Live</span>
+                </div>
+            </div>
+
+            <!-- COLLABORATORS (Multi-user indicator) -->
+            <div class="flex items-center -space-x-2 ml-2 transition-all hover:space-x-1">
+                <div class="h-7 w-7 rounded-full border-2 border-[#0b0f1a] bg-indigo-500 flex items-center justify-center text-[9px] font-black text-white shadow-lg cursor-pointer ring-2 ring-indigo-500/20"
+                    title="You (Editor A)">YW</div>
+                <div class="h-7 w-7 rounded-full border-2 border-[#0b0f1a] bg-amber-500 flex items-center justify-center text-[9px] font-black text-white shadow-lg cursor-pointer hover:scale-110 transition-transform"
+                    title="Editor B (Peer)">EB</div>
+                <div class="h-7 w-7 rounded-full border-2 border-[#0b0f1a] bg-emerald-500 flex items-center justify-center text-[9px] font-black text-white shadow-lg cursor-pointer hover:scale-110 transition-transform"
+                    title="Reviewer">RV</div>
+                <div class="h-7 w-7 rounded-full border-2 border-[#0b0f1a] bg-slate-800 flex items-center justify-center text-[8px] font-black text-slate-400 shadow-lg"
+                    title="1 more observer">+1</div>
+            </div>
+
+            <div class="flex items-center gap-4 border-l border-white/10 pl-6">
+                <button
+                    class="h-8 w-8 rounded-lg bg-slate-800/50 hover:bg-slate-700 border border-white/5 flex items-center justify-center text-slate-400 transition-colors">
+                    <i class="fas fa-sliders text-xs"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <div class="flex-1 flex min-h-0">
+
+        <!-- Left Column: THE CONTINUOUS STREAM EDITOR -->
+        <section class="flex-1 flex flex-col border-r border-white/5 bg-[#080b14]">
+            <div class="flex-none h-11 px-6 flex items-center justify-between bg-slate-900/40 border-b border-white/5">
+                <div class="flex items-center gap-2.5">
+                    <div class="h-5 w-5 rounded-full bg-indigo-500/10 flex items-center justify-center">
+                        <i class="fas fa-keyboard text-indigo-400 text-[10px]"></i>
+                    </div>
+                    <h2 class="text-xs font-black text-slate-400 uppercase tracking-widest">Master Edit Workspace</h2>
+                </div>
+                <div class="flex items-center gap-4">
+                    <div
+                        class="flex items-center gap-2 px-3 py-1 bg-white/[0.03] rounded-lg border border-white/5 shadow-inner">
+                        <span
+                            class="h-1.5 w-1.5 bg-emerald-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.3)]"></span>
+                        <span class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Multi-Agent Sync
+                            Active</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="flex-1 flex flex-col p-6 overflow-hidden">
+                <div
+                    class="flex-1 bg-black/40 border border-white/5 rounded-2xl relative flex flex-col shadow-inner group transition-all duration-500 overflow-hidden">
+                    <div id="master-glow"
+                        class="absolute inset-0 bg-amber-500/5 opacity-0 pointer-events-none transition-opacity duration-1000">
+                    </div>
+
+                    <!-- TOP TOOLBAR: Quick Actions / Shortcuts -->
+                    <div
+                        class="h-11 px-6 border-b border-white/5 flex items-center justify-between bg-white/[0.03] backdrop-blur-md z-20 shrink-0">
+                        <div class="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+                            <span
+                                class="text-[8px] font-black text-indigo-400 uppercase tracking-[0.2em] mr-2">Macros:</span>
+                            <div class="flex items-center gap-1.5">
+                                <button onclick="quickInsert('ครับ')"
+                                    class="px-2.5 py-1 rounded bg-white/5 border border-white/5 text-[10px] text-slate-300 hover:bg-amber-500/20 hover:text-amber-400 hover:border-amber-500/30 transition-all font-medium flex items-center shadow-sm group">
+                                    <kbd
+                                        class="text-[7px] opacity-20 group-hover:opacity-60 mr-1.5 border border-white/10 px-1 rounded transition-opacity">F1</kbd>ครับ
+                                </button>
+                                <button onclick="quickInsert('ค่ะ')"
+                                    class="px-2.5 py-1 rounded bg-white/5 border border-white/5 text-[10px] text-slate-300 hover:bg-blue-500/20 hover:text-blue-400 hover:border-blue-500/30 transition-all font-medium flex items-center shadow-sm group">
+                                    <kbd
+                                        class="text-[7px] opacity-20 group-hover:opacity-60 mr-1.5 border border-white/10 px-1 rounded transition-opacity">F2</kbd>ค่ะ
+                                </button>
+                                <button onclick="quickInsert('นะครับ')"
+                                    class="px-2.5 py-1 rounded bg-white/5 border border-white/5 text-[10px] text-slate-300 hover:bg-amber-500/20 hover:text-amber-400 hover:border-amber-500/30 transition-all font-medium flex items-center shadow-sm group">
+                                    <kbd
+                                        class="text-[7px] opacity-20 group-hover:opacity-60 mr-1.5 border border-white/10 px-1 rounded transition-opacity">F3</kbd>นะครับ
+                                </button>
+                                <button onclick="quickInsert('และ')"
+                                    class="px-2.5 py-1 rounded bg-white/5 border border-white/5 text-[10px] text-slate-300 hover:bg-indigo-500/20 hover:text-indigo-400 hover:border-indigo-500/30 transition-all font-medium flex items-center shadow-sm group">
+                                    <kbd
+                                        class="text-[7px] opacity-20 group-hover:opacity-60 mr-1.5 border border-white/10 px-1 rounded transition-opacity">F4</kbd>และ
+                                </button>
+                                <button onclick="quickInsert('คือ')"
+                                    class="px-2.5 py-1 rounded bg-white/5 border border-white/5 text-[10px] text-slate-300 hover:bg-indigo-500/20 hover:text-indigo-400 hover:border-indigo-500/30 transition-all font-medium flex items-center shadow-sm group">
+                                    <kbd
+                                        class="text-[7px] opacity-20 group-hover:opacity-60 mr-1.5 border border-white/10 px-1 rounded transition-opacity">F5</kbd>คือ
+                                </button>
+                                <button onclick="quickInsert('ในส่วนของ')"
+                                    class="px-2.5 py-1 rounded bg-white/5 border border-white/5 text-[10px] text-slate-300 hover:bg-indigo-500/20 hover:text-indigo-400 hover:border-indigo-500/30 transition-all font-medium flex items-center shadow-sm group">
+                                    <kbd
+                                        class="text-[7px] opacity-20 group-hover:opacity-60 mr-1.5 border border-white/10 px-1 rounded transition-opacity">F6</kbd>ในส่วนของ
+                                </button>
+                                <button onclick="quickInsert('[...พูดแทรก...]')"
+                                    class="px-2.5 py-1 rounded bg-white/5 border border-white/5 text-[10px] text-slate-300 hover:bg-red-500/20 hover:text-red-400 hover:border-red-500/30 transition-all font-medium italic flex items-center shadow-sm group">
+                                    <kbd
+                                        class="text-[7px] opacity-20 group-hover:opacity-60 mr-1.5 border border-white/10 px-1 rounded transition-opacity">F7</kbd>พูดแทรก
+                                </button>
+                                <div class="w-px h-3 bg-white/10 mx-1"></div>
+                                <button onclick="quickInsert('?')"
+                                    class="h-6 w-max px-2.5 flex items-center justify-center rounded bg-white/5 border border-white/5 text-[10px] text-slate-300 hover:bg-indigo-500/20 transition-all shadow-sm group">
+                                    <kbd
+                                        class="text-[7px] opacity-20 group-hover:opacity-60 mr-1.5 border border-white/10 px-1 rounded transition-opacity">F8</kbd>?
+                                </button>
+                                <button onclick="quickInsert('.')"
+                                    class="h-6 w-max px-2.5 flex items-center justify-center rounded bg-white/5 border border-white/5 text-[10px] text-slate-300 hover:bg-indigo-500/20 transition-all shadow-sm group">
+                                    <kbd
+                                        class="text-[7px] opacity-20 group-hover:opacity-60 mr-1.5 border border-white/10 px-1 rounded transition-opacity">F9</kbd>.
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Right Actions -->
+                        <div class="flex items-center gap-4 ml-4 shrink-0">
+                            <!-- Quality Scan Toggle -->
+                            <button onclick="toggleConfidence()" id="conf-toggle"
+                                class="flex items-center gap-2 px-3 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/20 rounded-full transition-all group">
+                                <i class="fas fa-microscope text-[10px] text-emerald-400"></i>
+                                <span
+                                    class="text-[9px] font-black text-emerald-300 uppercase tracking-widest">Confidence
+                                    Scan</span>
+                                <span id="conf-status"
+                                    class="h-1.5 w-1.5 bg-emerald-500 rounded-full shadow-[0_0_5px_rgba(16,185,129,1)]"></span>
+                            </button>
+
+                            <!-- Glossary Trigger -->
+                            <button onclick="toggleGlossaryModal()"
+                                class="flex items-center gap-2 px-3 py-1 bg-indigo-500/10 hover:bg-indigo-500/20 border border-indigo-500/20 rounded-full transition-all group">
+                                <i class="fas fa-book text-[10px] text-indigo-400"></i>
+                                <span
+                                    class="text-[9px] font-black text-indigo-300 uppercase tracking-widest">Glossary</span>
+                                <span id="glossary-count"
+                                    class="h-4 px-1.5 flex items-center justify-center bg-indigo-500 text-white text-[8px] font-bold rounded-full shadow-sm">0</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="flex-1 relative overflow-hidden flex flex-col">
+                        <!-- Layer 1: The Highlight/Color Mirror -->
+                        <div id="editor-mirror"
+                            class="absolute inset-0 p-8 text-white text-3xl leading-[1.5] font-light pointer-events-none custom-scrollbar whitespace-pre-wrap break-words">
+                        </div>
+
+                        <!-- Collaborative Overlay (Remote Cursors) -->
+                        <div id="collaborative-overlay"
+                            class="absolute inset-0 pointer-events-none z-[15] overflow-hidden">
+                            <div id="cursor-editor-b" class="remote-cursor hidden">
+                                <div class="remote-cursor-label">Editor B</div>
+                            </div>
+                        </div>
+
+                        <!-- Layer 2: The Actual Input -->
+                        <textarea id="master-editor"
+                            class="flex-1 w-full bg-transparent p-8 text-transparent caret-white text-3xl leading-[1.5] focus:outline-none custom-scrollbar resize-none font-light placeholder:text-slate-800 transition-all duration-300 z-10"
+                            spellcheck="false" placeholder="Select a source or wait for stream..."></textarea>
+
+                        <!-- AI Suggestion Popover -->
+                        <div id="ai-suggestion" class="suggestion-popover">
+                            <div class="px-2 py-1.5 border-b border-white/5 mb-1 flex items-center gap-1.5">
+                                <i class="fas fa-sparkles text-[8px] text-amber-400"></i>
+                                <span class="text-[8px] font-black text-slate-500 uppercase tracking-widest">AI
+                                    Suggestion</span>
+                            </div>
+                            <div id="suggestion-list"></div>
+                        </div>
+                    </div>
+
+                    <!-- Status Overlay -->
+                    <div class="h-10 px-6 border-t border-white/5 flex items-center justify-between bg-white/[0.02]">
+                        <div class="flex items-center gap-4">
+                            <span
+                                class="text-[9px] font-black text-slate-500 uppercase tracking-widest flex items-center gap-1">
+                                <i class="fas fa-magic text-amber-500/50"></i>
+                                Switching source will transplant text to Master Editor
+                            </span>
+                        </div>
+                        <div class="flex items-center gap-4">
+                            <button id="clear-btn"
+                                class="text-[9px] font-black text-slate-600 hover:text-red-400 uppercase tracking-widest transition-colors">Clear
+                                Buffer</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Right Column: LIVE RECIPIENT VIEW & METRICS -->
+        <aside class="w-[440px] flex flex-none flex-col bg-slate-900/20 backdrop-blur-sm">
+
+            <!-- LIVE PREVIEW HEADER -->
+            <div class="flex-none h-11 px-6 flex items-center justify-between border-b border-white/5 bg-slate-900/40">
+                <div class="flex items-center gap-2.5">
+                    <div class="h-5 w-5 rounded-lg bg-emerald-500/20 flex items-center justify-center">
+                        <i class="fas fa-broadcast-tower text-emerald-400 text-[10px]"></i>
+                    </div>
+                    <h2 class="text-xs font-black text-emerald-100 uppercase tracking-widest">Live Broadcast Monitor
+                    </h2>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="h-2 w-2 bg-emerald-500 rounded-full shadow-[0_0_8px_rgba(16,185,129,0.5)]"></span>
+                    <span class="text-[10px] text-emerald-500 font-bold uppercase tracking-wider">ON AIR</span>
+                </div>
+            </div>
+
+            <!-- LIVE TEXT FEED (Viewer Experience) -->
+            <div id="live-broadcast-feed"
+                class="flex-1 overflow-y-auto p-10 space-y-10 custom-scrollbar bg-black/40 relative">
+
+                <!-- START OF BROADCAST PLACEHOLDER -->
+                <div
+                    class="flex flex-col items-center justify-center py-20 opacity-20 border-b border-dashed border-white/5 mb-10">
+                    <i class="fas fa-microphone-alt text-4xl mb-4"></i>
+                    <span class="text-[10px] font-black uppercase tracking-[0.3em]">Broadcast Started</span>
+                </div>
+
+                <!-- NEW MESSAGES WILL DESCEND HERE -->
+
+            </div>
+        </aside>
+    </div>
+
+    <!-- COMMAND BAR / HOTKEYS -->
+    <footer class="h-9 flex-none bg-indigo-600 flex items-center px-6 justify-between shadow-inner">
+        <div class="flex items-center gap-10">
+            <div class="flex items-center gap-2">
+                <span
+                    class="h-4 w-4 rounded bg-black/20 flex items-center justify-center text-[8px] font-black text-white">⌘</span>
+                <span class="text-white text-[9px] font-bold uppercase tracking-widest italic opacity-80">Quick Commands
+                    Enabled</span>
+            </div>
+
+            <div class="flex items-center gap-8">
+                <div class="flex items-center gap-2 text-indigo-100/70 text-[9px] font-black tracking-widest uppercase">
+                    <kbd
+                        class="px-2 py-0.5 bg-black/20 rounded-md border border-white/5 text-white shadow-sm ring-1 ring-white/5">ENTER</kbd>
+                    <span class="opacity-60">Send to Live</span>
+                </div>
+                <div class="flex items-center gap-2 text-indigo-100/70 text-[9px] font-black tracking-widest uppercase">
+                    <kbd
+                        class="px-2 py-0.5 bg-black/20 rounded-md border border-white/5 text-white shadow-sm ring-1 ring-white/5">ESC</kbd>
+                    <span class="opacity-60">Reject Block</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-4">
+            <span class="text-indigo-100/50 text-[9px] font-black uppercase tracking-widest">Streaming Engine: v4.0
+                (gRPC)</span>
+        </div>
+    </footer>
+
+    <!-- Glossary Modal Overlay -->
+    <div id="glossary-modal" class="fixed inset-0 z-[100] hidden flex items-center justify-center p-6">
+        <div class="absolute inset-0 bg-[#0b0f1a]/80 backdrop-blur-sm" onclick="toggleGlossaryModal()"></div>
+        <div
+            class="w-full max-w-md bg-slate-900 border border-white/10 rounded-2xl shadow-2xl overflow-hidden relative z-10 animate-in fade-in zoom-in duration-300">
+            <div class="px-6 py-4 border-b border-white/5 bg-white/[0.02] flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <i class="fas fa-book-open text-indigo-400"></i>
+                    <h3 class="text-xs font-black text-white uppercase tracking-widest">Session Glossary</h3>
+                </div>
+                <button onclick="toggleGlossaryModal()" class="text-slate-500 hover:text-white"><i
+                        class="fas fa-times"></i></button>
+            </div>
+
+            <div class="p-6 space-y-4">
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="space-y-1.5">
+                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest">ASR Got
+                            Wrong</label>
+                        <input id="glossary-wrong" type="text" placeholder="e.g. คาว"
+                            class="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/50">
+                    </div>
+                    <div class="space-y-1.5">
+                        <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest">Should Be</label>
+                        <input id="glossary-right" type="text" placeholder="e.g. คลาวด์"
+                            class="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-indigo-500/50">
+                    </div>
+                </div>
+                <button onclick="addGlossaryItem()"
+                    class="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-lg transition-all shadow-lg shadow-indigo-600/20">
+                    Register Correction
+                </button>
+
+                <div class="pt-4 border-t border-white/5">
+                    <label class="text-[9px] font-black text-slate-500 uppercase tracking-widest mb-3 block">Current
+                        Session Mapping</label>
+                    <div id="glossary-list" class="space-y-2 max-h-48 overflow-y-auto custom-scrollbar pr-2">
+                        <!-- Items will appear here -->
+                        <div class="text-[10px] text-slate-600 italic py-4 text-center">No corrections registered yet
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const masterEditor = document.getElementById('master-editor');
+        const editorMirror = document.getElementById('editor-mirror');
+        const broadcastFeed = document.getElementById('live-broadcast-feed');
+        const clearBtn = document.getElementById('clear-btn');
+        const masterGlow = document.getElementById('master-glow');
+
+        // --- Confidence & Suggestions ---
+        let isConfidenceEnabled = true;
+        const suggestionMap = {
+            "คาว": ["คลาวด์", "คราว"],
+            "นะ": ["นะคะ", "นาที"],
+            "อา": ["อ่า", "อาจจะ"],
+            "คะ": ["ค่ะ", "ครับ"],
+            "ค่ะ": ["คะ", "ครับ"],
+            "ระบบ": ["เราก็", "ระบุ"],
+            "ประมวล": ["ประมวลผล", "ประมาณ"]
+        };
+
+        // --- Glossary Feature ---
+        let sessionGlossary = {};
+
+        // --- Collaborative State (Yjs Simulation) ---
+        let editorBCursorIdx = 0;
+        let isEditorBActive = true;
+        let editorBTurnRange = { start: 0, end: 0 }; // Characters currently owned by B
+
+        function toggleGlossaryModal() {
+            const modal = document.getElementById('glossary-modal');
+            modal.classList.toggle('hidden');
+        }
+
+        function addGlossaryItem() {
+            const wrong = document.getElementById('glossary-wrong').value.trim();
+            const right = document.getElementById('glossary-right').value.trim();
+
+            if (wrong && right) {
+                sessionGlossary[wrong] = right;
+                document.getElementById('glossary-wrong').value = '';
+                document.getElementById('glossary-right').value = '';
+                updateGlossaryUI();
+            }
+        }
+
+        function removeGlossaryItem(key) {
+            delete sessionGlossary[key];
+            updateGlossaryUI();
+        }
+
+        function updateGlossaryUI() {
+            const list = document.getElementById('glossary-list');
+            const keys = Object.keys(sessionGlossary);
+            document.getElementById('glossary-count').textContent = keys.length;
+
+            if (keys.length === 0) {
+                list.innerHTML = `<div class="text-[10px] text-slate-600 italic py-4 text-center">No corrections registered yet</div>`;
+                return;
+            }
+
+            list.innerHTML = keys.map(key => `
+                <div class="flex items-center justify-between px-3 py-2 bg-white/[0.03] border border-white/5 rounded-lg group animate-in slide-in-from-left-2 duration-300">
+                    <div class="flex items-center gap-3">
+                        <span class="text-[11px] text-red-400 font-medium">${key}</span>
+                        <i class="fas fa-arrow-right text-[8px] text-slate-600"></i>
+                        <span class="text-[11px] text-emerald-400 font-medium">${sessionGlossary[key]}</span>
+                    </div>
+                    <button onclick="removeGlossaryItem('${key}')" class="text-slate-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-all text-[8px]">
+                        <i class="fas fa-trash-alt"></i>
+                    </button>
+                </div>
+            `).join('');
+        }
+
+        function applyGlossary(text) {
+            let result = text;
+            for (const [wrong, right] of Object.entries(sessionGlossary)) {
+                // Simple string replacement (can be improved with Regex for word boundaries)
+                result = result.split(wrong).join(right);
+            }
+            return result;
+        }
+
+        // --- Multi-source data ---
+        const sourceData = {
+            google: { name: "Google Cloud", color: "amber", text: "" },
+            azure: { name: "MS Azure", color: "blue", text: "" },
+            gemini: { name: "Gemini Flash", color: "violet", text: "" }
+        };
+
+        const interimData = {
+            google: "",
+            azure: "",
+            gemini: ""
+        };
+
+        let currentActiveId = 'google';
+
+        function selectSource(sourceId) {
+            currentActiveId = sourceId;
+
+            // Update UI buttons
+            ['google', 'azure', 'gemini'].forEach(id => {
+                const btn = document.getElementById(`nav-${id}`);
+                if (id === sourceId) {
+                    btn.className = `px-4 py-1.5 rounded-lg text-[9px] font-black tracking-widest uppercase transition-all bg-${sourceData[id].color}-500 text-white shadow-lg shadow-${sourceData[id].color}-500/20 flex items-center gap-2`;
+                } else {
+                    btn.className = "px-4 py-1.5 rounded-lg text-[9px] font-black tracking-widest uppercase transition-all text-slate-500 hover:text-slate-300 flex items-center gap-2";
+                }
+            });
+
+            // Swap master editor content
+            masterEditor.value = sourceData[sourceId].text + (interimData[sourceId] || "");
+            masterEditor.focus();
+            syncMirror();
+            updateCursorDisplay();
+        }
+
+        // Quick Insert function for shortcuts
+        function quickInsert(word) {
+            const start = masterEditor.selectionStart;
+            const end = masterEditor.selectionEnd;
+            const text = masterEditor.value;
+
+            // Insert word at cursor position
+            const newText = text.slice(0, start) + word + text.slice(end);
+            masterEditor.value = newText;
+
+            // Update sourceData (stripping interim to keep it stable)
+            const interimLen = (interimData[currentActiveId] || "").length;
+            sourceData[currentActiveId].text = newText.substring(0, Math.max(0, newText.length - interimLen));
+
+            // Move cursor to after the inserted word
+            masterEditor.focus();
+            const newPos = start + word.length;
+            masterEditor.setSelectionRange(newPos, newPos);
+
+            syncMirror();
+            updateCursorDisplay();
+        }
+
+        // Create hint element once
+        const sendHint = document.createElement('div');
+        sendHint.className = 'send-hint';
+        sendHint.innerText = 'Broadcast Published';
+        masterEditor.parentElement.appendChild(sendHint);
+
+        // Update cursor position display
+        const updateCursorDisplay = () => {
+            syncMirror();
+            // Note: syncMirror handles repositionPopover itself
+            checkSuggestions();
+        };
+
+        function checkSuggestions() {
+            const pos = masterEditor.selectionStart;
+            const text = masterEditor.value;
+            const popover = document.getElementById('ai-suggestion');
+            const list = document.getElementById('suggestion-list');
+
+            let foundWord = null;
+            let startIdx = -1;
+
+            const suspiciousWords = Object.keys(suggestionMap);
+            for (const word of suspiciousWords) {
+                const regex = new RegExp(word, 'g');
+                let match;
+                while ((match = regex.exec(text)) !== null) {
+                    if (pos >= match.index && pos <= match.index + word.length) {
+                        foundWord = word;
+                        startIdx = match.index;
+                        break;
+                    }
+                }
+                if (foundWord) break;
+            }
+
+            if (foundWord && isConfidenceEnabled) {
+                const suggestions = suggestionMap[foundWord];
+                list.innerHTML = suggestions.map(s => `
+                    <button onmousedown="applySuggestion('${foundWord}', '${s}', ${startIdx}); event.preventDefault();" class="suggestion-item">
+                        <span>${s}</span>
+                        <i class="fas fa-chevron-right text-[7px] opacity-30"></i>
+                    </button>
+                `).join('');
+
+                // UX: Auto-select the target word to make the "overwrite" feel clear
+                if (popover.style.display !== 'flex') {
+                    masterEditor.setSelectionRange(startIdx, startIdx + foundWord.length);
+                }
+
+                popover.style.display = 'flex';
+                requestAnimationFrame(repositionPopover);
+            } else {
+                popover.style.display = 'none';
+            }
+        }
+
+        function applySuggestion(original, replacement, startIndex) {
+            const text = masterEditor.value;
+            // Overwrite precisely the word at its index
+            const newText = text.substring(0, startIndex) + replacement + text.substring(startIndex + original.length);
+
+            masterEditor.value = newText;
+
+            // Update source data with parity to current interim state
+            const interim = interimData[currentActiveId] || "";
+            const currentInterimLen = interim.length;
+
+            // We assume edits only happen in the Stable portion for this high-fidelity mockup
+            // so we calculate the new stable text by subtracting the interim length from the new total
+            sourceData[currentActiveId].text = newText.substring(0, Math.max(0, newText.length - currentInterimLen));
+
+            document.getElementById('ai-suggestion').style.display = 'none';
+
+            // 1. Refocus focus back to editor
+            masterEditor.focus();
+
+            // 2. Clear selection and place cursor at the end of the replaced word
+            const newPos = startIndex + replacement.length;
+            masterEditor.setSelectionRange(newPos, newPos);
+
+            // 3. Visual feedback: Flash the editor briefly
+            masterGlow.style.backgroundColor = 'rgba(16, 185, 129, 0.1)'; // Emerald flash
+            masterGlow.style.opacity = '1';
+            setTimeout(() => masterGlow.style.opacity = '0', 300);
+
+            updateCursorDisplay();
+        }
+
+        const syncMirror = () => {
+            let val = masterEditor.value;
+            const interim = interimData[currentActiveId] || "";
+            const cursorPos = masterEditor.selectionStart;
+
+            let htmlContent = "";
+
+            // Only show grey interim if it matches the end of the text
+            if (interim.length > 0 && val.endsWith(interim)) {
+                const stableText = val.substring(0, val.length - interim.length);
+                htmlContent = `${highlightConfidence(stableText, cursorPos, editorBCursorIdx)}<span class="text-white/20">${escapeHTML(interim)}</span>`;
+            } else {
+                htmlContent = highlightConfidence(val, cursorPos, editorBCursorIdx);
+            }
+
+            editorMirror.innerHTML = htmlContent;
+            editorMirror.scrollTop = masterEditor.scrollTop;
+
+            // Reposition popovers and remote cursors
+            repositionPopover();
+            positionRemoteCursor();
+        };
+
+        function positionRemoteCursor() {
+            const anchor = document.getElementById('remote-cursor-anchor');
+            const cursor = document.getElementById('cursor-editor-b');
+            const overlay = document.getElementById('collaborative-overlay');
+            const masterScroll = masterEditor.scrollTop;
+
+            if (anchor && cursor && isEditorBActive) {
+                const rect = anchor.getBoundingClientRect();
+                const containerRect = overlay.getBoundingClientRect();
+
+                // Position relative to the overlay container
+                cursor.style.left = (rect.left - containerRect.left) + 'px';
+                cursor.style.top = (rect.top - containerRect.top) + 'px';
+                cursor.classList.remove('hidden');
+            } else {
+                if (cursor) cursor.classList.add('hidden');
+            }
+        }
+
+        function repositionPopover() {
+            const anchor = document.getElementById('active-suggestion-anchor');
+            const popover = document.getElementById('ai-suggestion');
+
+            if (anchor && popover.style.display === 'flex') {
+                const rect = anchor.getBoundingClientRect();
+                popover.style.left = `${rect.left}px`;
+                popover.style.top = `${rect.bottom + 8}px`;
+            }
+        }
+
+        // Helper to process a segment of text for confidence highlights and remote cursor
+        function processTextSegment(chunk, segmentOffset, cursorPos, remoteCursorIdx) {
+            if (!isConfidenceEnabled) {
+                // Just handle remote cursor in this chunk
+                if (remoteCursorIdx >= segmentOffset && remoteCursorIdx <= segmentOffset + chunk.length) {
+                    const localIdx = remoteCursorIdx - segmentOffset;
+                    return escapeHTML(chunk.substring(0, localIdx)) +
+                        '<span id="remote-cursor-anchor"></span>' +
+                        escapeHTML(chunk.substring(localIdx));
+                }
+                return escapeHTML(chunk);
+            }
+
+            const suspiciousWords = Object.keys(suggestionMap);
+            let matches = [];
+            suspiciousWords.forEach(word => {
+                const regex = new RegExp(word, 'g');
+                let match;
+                while ((match = regex.exec(chunk)) !== null) {
+                    matches.push({
+                        start: segmentOffset + match.index,
+                        end: segmentOffset + match.index + word.length,
+                        word: word
+                    });
+                }
+            });
+
+            matches.sort((a, b) => a.start - b.start);
+            let filtered = [];
+            if (matches.length > 0) {
+                filtered.push(matches[0]);
+                for (let i = 1; i < matches.length; i++) {
+                    if (matches[i].start >= filtered[filtered.length - 1].end) {
+                        filtered.push(matches[i]);
+                    }
+                }
+            }
+
+            let result = "";
+            let currentIdx = segmentOffset;
+
+            filtered.forEach(match => {
+                // Text before match
+                if (remoteCursorIdx >= currentIdx && remoteCursorIdx < match.start) {
+                    result += escapeHTML(chunk.substring(currentIdx - segmentOffset, remoteCursorIdx - segmentOffset));
+                    result += '<span id="remote-cursor-anchor"></span>';
+                    result += escapeHTML(chunk.substring(remoteCursorIdx - segmentOffset, match.start - segmentOffset));
+                } else {
+                    result += escapeHTML(chunk.substring(currentIdx - segmentOffset, match.start - segmentOffset));
+                }
+
+                const isUnderCursor = cursorPos >= match.start && cursorPos <= match.end;
+                const idAttr = isUnderCursor ? 'id="active-suggestion-anchor"' : '';
+
+                // Match with possible remote cursor inside
+                if (remoteCursorIdx >= match.start && remoteCursorIdx <= match.end) {
+                    const offsetInside = remoteCursorIdx - match.start;
+                    result += `<span class="low-confidence" ${idAttr}>${escapeHTML(match.word.substring(0, offsetInside))}<span id="remote-cursor-anchor"></span>${escapeHTML(match.word.substring(offsetInside))}</span>`;
+                } else {
+                    result += `<span class="low-confidence" ${idAttr}>${escapeHTML(match.word)}</span>`;
+                }
+                currentIdx = match.end;
+            });
+
+            // Remaining text after last match
+            if (remoteCursorIdx >= currentIdx && remoteCursorIdx <= segmentOffset + chunk.length) {
+                result += escapeHTML(chunk.substring(currentIdx - segmentOffset, remoteCursorIdx - segmentOffset));
+                result += '<span id="remote-cursor-anchor"></span>';
+                result += escapeHTML(chunk.substring(remoteCursorIdx - segmentOffset));
+            } else {
+                result += escapeHTML(chunk.substring(currentIdx - segmentOffset));
+            }
+
+            return result;
+        }
+
+        // Simulated Confidence Scanner with Turn-based Locking
+        function highlightConfidence(text, cursorPos = -1, remoteCursorIdx = -1) {
+            if (!text) return "";
+
+            // If Editor B has a turn, split text into segments: [before][B_Turn][after]
+            if (editorBTurnRange.active) {
+                const { start, end } = editorBTurnRange;
+                let html = "";
+
+                // 1. Before Turn (Editable)
+                const beforeText = text.substring(0, start);
+                html += processTextSegment(beforeText, 0, cursorPos, remoteCursorIdx);
+
+                // 2. Editor B's Turn (Locked for User A)
+                const turnText = text.substring(start, end);
+                html += '<span class="locked-area" title="Locked: Editor B is working here">';
+                html += processTextSegment(turnText, start, cursorPos, remoteCursorIdx);
+                html += '</span>';
+
+                // 3. After Turn (Editable)
+                const afterText = text.substring(end);
+                html += processTextSegment(afterText, end, cursorPos, remoteCursorIdx);
+
+                return html;
+            }
+
+            // Normal mode (No locked turns)
+            return processTextSegment(text, 0, cursorPos, remoteCursorIdx);
+        }
+
+        const escapeHTML = (text) => {
+            return text.replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        };
+
+        masterEditor.addEventListener('scroll', () => {
+            editorMirror.scrollTop = masterEditor.scrollTop;
+        });
+
+        masterEditor.addEventListener('keyup', updateCursorDisplay);
+        masterEditor.addEventListener('click', updateCursorDisplay);
+        masterEditor.addEventListener('input', () => {
+            // Sync manual edits back to sourceData
+            // Note: We strip the current interim portion to keep sourceData "stable"
+            const val = masterEditor.value;
+            const interimLen = (interimData[currentActiveId] || "").length;
+            sourceData[currentActiveId].text = val.substring(0, Math.max(0, val.length - interimLen));
+            syncMirror();
+            updateCursorDisplay();
+        });
+
+        clearBtn.addEventListener('click', () => {
+            sourceData[currentActiveId].text = "";
+            interimData[currentActiveId] = "";
+            masterEditor.value = "";
+            syncMirror();
+            updateCursorDisplay();
+        });
+
+        masterEditor.addEventListener('keydown', (e) => {
+            // Turn-based Blocking Logic:
+            // If the user tries to type inside Editor B's turn area, prevent it.
+            if (editorBTurnRange.active) {
+                const { start, end } = editorBTurnRange;
+                const pos = masterEditor.selectionStart;
+
+                // If cursor is INSIDE the locked range, allow ONLY navigation keys.
+                // Navigation/Control keys: Arrow keys, Home, End, PageUp, PageDown, Escape, Enter, Tab
+                const isNavKey = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', 'Escape', 'Tab'].includes(e.key);
+
+                if (pos >= start && pos <= end && !isNavKey) {
+                    // Specific block for Backspace/Delete if it would affect the locked range
+                    const isDeletingIntoRange = (e.key === 'Backspace' && pos > start && pos <= end) ||
+                        (e.key === 'Delete' && pos >= start && pos < end);
+
+                    if (isDeletingIntoRange || !isNavKey) {
+                        e.preventDefault();
+                        // Visual feedback: Shake or flash red
+                        masterGlow.style.backgroundColor = 'rgba(239, 68, 68, 0.2)';
+                        masterGlow.style.opacity = '1';
+                        setTimeout(() => { masterGlow.style.opacity = '0'; }, 300);
+                        return;
+                    }
+                }
+            }
+
+            // Quick Insert Hotkeys (F1-F9)
+            if (e.key === 'F1') { e.preventDefault(); quickInsert('ครับ'); }
+            if (e.key === 'F2') { e.preventDefault(); quickInsert('ค่ะ'); }
+            if (e.key === 'F3') { e.preventDefault(); quickInsert('นะครับ'); }
+            if (e.key === 'F4') { e.preventDefault(); quickInsert('และ'); }
+            if (e.key === 'F5') { e.preventDefault(); quickInsert('คือ'); }
+            if (e.key === 'F6') { e.preventDefault(); quickInsert('ในส่วนของ'); }
+            if (e.key === 'F7') { e.preventDefault(); quickInsert('[...พูดแทรก...]'); }
+            if (e.key === 'F8') { e.preventDefault(); quickInsert('?'); }
+            if (e.key === 'F9') { e.preventDefault(); quickInsert('.'); }
+
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                // Reject current interim block
+                interimData[currentActiveId] = "";
+                syncMirror();
+                // Flash red to indicate rejection
+                masterGlow.style.backgroundColor = 'rgba(239, 68, 68, 0.1)';
+                masterGlow.style.opacity = '1';
+                setTimeout(() => {
+                    masterGlow.style.opacity = '0';
+                }, 400);
+            }
+
+            if (e.key === 'Enter') {
+                e.preventDefault();
+
+                const start = masterEditor.selectionStart;
+                const end = masterEditor.selectionEnd;
+                const fullText = masterEditor.value;
+                const interim = interimData[currentActiveId] || "";
+
+                // คำนวณขอบเขตของข้อความที่ Final แล้ว (Stable Text)
+                // ข้อความส่วนที่เป็น Interim (สีเทา) จะอยู่ที่ท้ายสุดเสมอในระบบจำลองนี้
+                const stableBoundary = Math.max(0, fullText.length - interim.length);
+
+                let textToSend = "";
+                let textRemaining = "";
+
+                if (start !== end) {
+                    // กรณีลากคลุม: ส่งเฉพาะส่วนที่อยู่ในช่วงที่เลือก และไม่อยู่ในส่วน Interim
+                    const effectiveEnd = Math.min(end, stableBoundary);
+                    if (start >= stableBoundary) {
+                        // ถ้าเลือกอยู่ในโซน Interim ทั้งหมด ไม่ให้ส่ง
+                        showWarningHint("Cannot send unfinalized text");
+                        return;
+                    }
+                    textToSend = fullText.substring(start, effectiveEnd).trim();
+                    textRemaining = fullText.substring(0, start) + fullText.substring(effectiveEnd);
+                } else {
+                    // กรณีวาง cursor: ส่งเฉพาะข้อความก่อน cursor ที่เป็น Stable Text เท่านั้น
+                    const effectiveStart = Math.min(start, stableBoundary);
+                    textToSend = fullText.substring(0, effectiveStart).trim();
+                    textRemaining = fullText.substring(effectiveStart);
+                }
+
+                if (textToSend) {
+                    triggerRealisticSend(textToSend, start, end, textRemaining);
+                } else if (interim.length > 0 && start > stableBoundary) {
+                    // แจ้งเตือนถ้าพยายามส่งในขณะที่ cursor อยู่ในเขต Interim
+                    showWarningHint("Waiting for final result...");
+                }
+            }
+        });
+
+        function showWarningHint(msg) {
+            const hint = document.createElement('div');
+            hint.className = 'absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 px-4 py-2 bg-red-500/90 text-white text-xs font-bold rounded-lg shadow-xl z-[100] animate-bounce';
+            hint.innerHTML = `<i class="fas fa-exclamation-triangle mr-2"></i> ${msg}`;
+            masterEditor.parentElement.appendChild(hint);
+            setTimeout(() => hint.remove(), 2000);
+        }
+
+        function triggerRealisticSend(text, start, end, remaining) {
+            if (!text) return; // Ignore if empty
+
+            // 1. Ghost Animation logic
+            createGhostText(text);
+
+            // 2. Editor Flash
+            masterEditor.classList.add('editor-flash');
+            setTimeout(() => masterEditor.classList.remove('editor-flash'), 400);
+
+            // 3. Status Hint
+            showStatusHint();
+
+            // 4. Update Editor State & PERSIST BACK TO SOURCE DATA
+            sourceData[currentActiveId].text = remaining;
+            masterEditor.value = remaining;
+            masterEditor.selectionStart = 0;
+            masterEditor.selectionEnd = 0;
+            updateCursorDisplay();
+
+            // 5. Send to Live Broadcast Feed
+            sendToLive(text);
+        }
+
+        function createGhostText(text) {
+            const rect = masterEditor.getBoundingClientRect();
+            const ghost = document.createElement('div');
+            ghost.className = 'ghost-text';
+            ghost.innerText = text.length > 200 ? text.substring(0, 200) + '...' : text;
+            ghost.style.left = (rect.left + 32) + 'px';
+            ghost.style.top = (rect.top + 32) + 'px';
+            ghost.style.width = (rect.width - 64) + 'px';
+
+            document.body.appendChild(ghost);
+
+            // Trigger animation towards the broadcast feed
+            requestAnimationFrame(() => {
+                const targetRect = broadcastFeed.getBoundingClientRect();
+                const deltaX = targetRect.left - rect.left + 20;
+                const deltaY = targetRect.top - rect.top;
+
+                ghost.style.transform = `translate(${deltaX}px, ${deltaY}px) scale(0.5)`;
+                ghost.style.opacity = '0';
+                ghost.style.filter = 'blur(10px)';
+            });
+
+            setTimeout(() => ghost.remove(), 800);
+        }
+
+        function showStatusHint() {
+            sendHint.classList.add('show');
+            setTimeout(() => sendHint.classList.remove('show'), 1500);
+        }
+
+        clearBtn.addEventListener('click', () => {
+            if (confirm('Clear all buffered text?')) {
+                masterEditor.value = '';
+                updateCursorDisplay();
+            }
+        });
+
+        function sendToLive(text) {
+            const timeStr = new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+            const div = document.createElement('div');
+            // Broadcast Viewer Style: Impactful, Clear, Professional
+            div.className = 'relative pl-0 opacity-0 translate-y-8 transition-all duration-[1200ms] ease-out mb-12 last:mb-0';
+            div.innerHTML = `
+                <div class="flex items-center gap-3 mb-4 scale-95 origin-left opacity-60">
+                    <span class="text-[9px] mono font-black text-emerald-500 bg-emerald-500/5 px-2 py-0.5 rounded border border-emerald-500/10 tracking-widest">${timeStr}</span>
+                    <div class="h-[1px] flex-1 bg-gradient-to-r from-emerald-500/20 to-transparent"></div>
+                    <span class="text-[8px] font-black text-emerald-500/40 uppercase tracking-[0.2em]">Verified</span>
+                </div>
+                <div class="group relative">
+                    <div class="absolute -left-6 top-0 bottom-0 w-1 bg-emerald-500/50 rounded-full scale-y-0 group-hover:scale-y-100 transition-transform duration-500"></div>
+                    <p class="text-white text-lg leading-[1.6] font-normal selection:bg-emerald-500/30 font-['Sarabun']">${text}</p>
+                </div>
+            `;
+
+            broadcastFeed.appendChild(div);
+
+            // Trigger animation & scroll (with a slight delay for dramatic effect)
+            requestAnimationFrame(() => {
+                setTimeout(() => {
+                    div.classList.remove('opacity-0', 'translate-y-8');
+                    // Smooth scroll to bottom
+                    broadcastFeed.scrollTo({
+                        top: broadcastFeed.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                }, 100);
+            });
+
+            // Limited history management
+            if (broadcastFeed.children.length > 50) {
+                // Keep the "Waiting" placeholder visible if it's the only thing, 
+                // but usually we remove the oldest message
+                if (broadcastFeed.children.length > 2) {
+                    broadcastFeed.removeChild(broadcastFeed.children[1]);
+                }
+            }
+        }
+
+        // Realistic ASR Simulation: Sentences stream as interim, then commit when "final"
+        function simulateIncomingStream() {
+            const scripts = {
+                google: [
+                    "ตอนนี้ระบบ Google Cloud กำลังประมวลผลเสียงจากห้องประชุมอย่างต่อเนื่อง ",
+                    "เราพบว่าความแม่นยำในการถอดความภาษาไทยดีขึ้นอย่างมากเมื่อใช้โมเดลล่าสุด ",
+                    "ผู้ใช้งานสามารถเริ่มแก้ไขคำผิดได้ทันทีโดยไม่ต้องรอให้จบประโยคครับ "
+                ],
+                azure: [
+                    "Microsoft Azure Speech ใช้เทคโนโลยี Neural STT เพื่อลดเสียงรบกวนรอบข้าง ",
+                    "ช่วยให้การถอดความในสภาพแวดล้อมที่มีเสียงก้องทำงานได้อย่างมีประสิทธิภาพ ",
+                    "รองรับการเชื่อมต่อผ่านโปรโตคอล WebSocket เพื่อความเร็วสูงสุดในระดับมิลลิวินาที "
+                ],
+                gemini: [
+                    "Gemini Multi-modal ASR กำลังวิเคราะห์ทั้งโทนเสียงและบริบทของบทสนทนา ",
+                    "ระบบสามารถแยกแยะศัพท์เทคนิคเฉพาะทางในอุตสาหกรรมไอทีได้แม่นยำขึ้น ",
+                    "เทคโนโลยีนี้ช่วยให้การแปลงเสียงเป็นข้อความมีความเป็นธรรมชาติสมบูรณ์แบบ "
+                ]
+            };
+
+            let scriptIndices = { google: 0, azure: 0, gemini: 0 };
+            let charIndices = { google: 0, azure: 0, gemini: 0 };
+
+            setInterval(() => {
+                ['google', 'azure', 'gemini'].forEach(id => {
+                    const providerScripts = scripts[id];
+                    const currentScriptIdx = scriptIndices[id];
+                    const fullSentence = providerScripts[currentScriptIdx];
+                    const charIdx = charIndices[id];
+
+                    if (charIdx < fullSentence.length) {
+                        // 1. Update INTERIM (Growing sentence)
+                        const rawInterim = fullSentence.substring(0, charIdx + 1);
+                        interimData[id] = applyGlossary(rawInterim);
+                        charIndices[id] += 1; // Thai characters are dense, 1 by 1 is smooth
+                    } else {
+                        // 2. Sentence Finished -> Mark as FINAL (Commit to sourceData)
+                        sourceData[id].text += interimData[id];
+                        interimData[id] = "";
+
+                        // Move to next sentence
+                        charIndices[id] = 0;
+                        scriptIndices[id] = (currentScriptIdx + 1) % providerScripts.length;
+                    }
+
+                    // 3. Update Master Editor
+                    if (id === currentActiveId) {
+                        const popover = document.getElementById('ai-suggestion');
+                        const isPopoverVisible = popover && popover.style.display === 'flex';
+
+                        if (!isPopoverVisible) {
+                            const start = masterEditor.selectionStart;
+                            const end = masterEditor.selectionEnd;
+                            const isAtBottom = Math.abs(masterEditor.scrollTop - (masterEditor.scrollHeight - masterEditor.clientHeight)) < 50;
+
+                            // Content = Stable + (Interim)
+                            masterEditor.value = sourceData[id].text + interimData[id];
+
+                            masterEditor.setSelectionRange(start, end);
+
+                            if (isAtBottom) {
+                                masterEditor.scrollTop = masterEditor.scrollHeight;
+                            }
+                            updateCursorDisplay();
+                        }
+                    }
+                });
+            }, 70); // 70ms per char feels like high-speed live speech
+        }
+
+        simulateIncomingStream();
+
+        // Simulation of a Remote Editor (Editor B) - The Yjs Concept
+        function simulateRemoteEditor() {
+            setInterval(() => {
+                if (!isEditorBActive) return;
+
+                const text = masterEditor.value;
+                if (text.length < 20) return;
+
+                // Move Editor B cursor randomly around the stable text
+                const stableText = sourceData[currentActiveId].text;
+                if (stableText.length > 10) {
+                    // Jump to a random low-confidence word to "scan" it
+                    const suspiciousWords = Object.keys(suggestionMap);
+                    let foundAny = false;
+                    for (const sw of suspiciousWords) {
+                        const idx = stableText.indexOf(sw);
+                        if (idx !== -1 && Math.random() > 0.5) {
+                            editorBCursorIdx = idx;
+                            foundAny = true;
+                            break;
+                        }
+                    }
+                    if (!foundAny) {
+                        editorBCursorIdx = Math.floor(Math.random() * stableText.length);
+                    }
+                    syncMirror();
+                }
+
+                // Occasionally simulate a remote edit (Fixing a typo)
+                if (Math.random() > 0.7) {
+                    const suspiciousWords = Object.keys(suggestionMap);
+                    for (const word of suspiciousWords) {
+                        const idx = stableText.indexOf(word);
+                        if (idx !== -1) {
+                            const replacement = suggestionMap[word][0];
+
+                            // Commit change to sourceData (Simulating Yjs Sync)
+                            sourceData[currentActiveId].text = stableText.substring(0, idx) + replacement + stableText.substring(idx + word.length);
+                            masterEditor.value = sourceData[currentActiveId].text + (interimData[currentActiveId] || "");
+
+                            editorBCursorIdx = idx + replacement.length;
+                            syncMirror();
+
+                            // Flash effect at remote location
+                            const ghost = document.createElement('div');
+                            ghost.className = 'absolute px-2 py-0.5 bg-amber-500 text-white text-[8px] font-black rounded z-[60] animate-bounce';
+                            ghost.innerText = 'Fixed by Editor B';
+
+                            const anchor = document.getElementById('remote-cursor-anchor');
+                            if (anchor) {
+                                const rect = anchor.getBoundingClientRect();
+                                ghost.style.left = rect.left + 'px';
+                                ghost.style.top = (rect.top - 20) + 'px';
+                                document.body.appendChild(ghost);
+                                setTimeout(() => ghost.remove(), 2000);
+                            }
+                            break;
+                        }
+                    }
+                }
+            }, 4000);
+        }
+
+        // Sound Wave Visualizer Simulation
+        let isVizEnabled = true;
+
+        function toggleVisualizer() {
+            isVizEnabled = !isVizEnabled;
+            const dot = document.getElementById('viz-dot');
+            const toggle = document.getElementById('viz-toggle');
+            const canvas = document.getElementById('audio-visualizer');
+
+            if (isVizEnabled) {
+                dot.style.transform = 'translateX(0)';
+                toggle.classList.remove('bg-slate-700');
+                toggle.classList.add('bg-indigo-500/20');
+                canvas.style.opacity = '0.6';
+            } else {
+                dot.style.transform = 'translateX(12px)';
+                toggle.classList.remove('bg-indigo-500/20');
+                toggle.classList.add('bg-slate-700');
+                canvas.style.opacity = '0.1';
+            }
+        }
+
+        function initVisualizer() {
+            const canvas = document.getElementById('audio-visualizer');
+            const ctx = canvas.getContext('2d');
+
+            function resize() {
+                canvas.width = canvas.offsetWidth;
+                canvas.height = canvas.offsetHeight;
+            }
+            resize();
+            window.addEventListener('resize', resize);
+
+            let bars = [];
+            const barCount = 30; // Reduced for mini version
+            for (let i = 0; i < barCount; i++) {
+                bars.push({ h: 2 });
+            }
+
+            function draw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                if (!isVizEnabled) {
+                    requestAnimationFrame(draw);
+                    return;
+                }
+
+                // Collaborative Visualization: 
+                // If Editor B has a turn, the bars turn Amber and pulse more vigorously
+                const isBActive = editorBTurnRange.active;
+                const isSpeaking = interimData[currentActiveId].length > 0;
+
+                // Base volume logic
+                let baseVolume = isSpeaking ? 1.0 : 0.15;
+                if (isBActive) baseVolume = 0.6 + (Math.random() * 0.4); // Constant pulse for peer activity
+
+                // Color based on active user
+                ctx.fillStyle = isBActive ? '#fbbf24' : '#6366f1';
+
+                const barWidth = canvas.width / barCount;
+
+                bars.forEach((bar, i) => {
+                    const targetH = (Math.random() * (canvas.height - 4) + 2) * baseVolume;
+                    bar.h += (targetH - bar.h) * 0.3;
+
+                    const x = i * barWidth;
+                    const y = (canvas.height - bar.h) / 2;
+
+                    ctx.beginPath();
+                    if (ctx.roundRect) {
+                        ctx.roundRect(x + 1, y, barWidth - 2, bar.h, 2);
+                    } else {
+                        ctx.rect(x + 1, y, barWidth - 2, bar.h);
+                    }
+                    ctx.fill();
+                });
+
+                requestAnimationFrame(draw);
+            }
+            draw();
+        }
+
+        // Focus editor on start
+        window.onload = () => {
+            masterEditor.focus();
+            initVisualizer();
+            simulateRemoteEditor();
+        };
+    </script>
+</body>
+
+</html>

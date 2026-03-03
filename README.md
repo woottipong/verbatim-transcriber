@@ -174,6 +174,7 @@ thai-verbatim-transcriber/
 
 - Node.js 18+
 - Go 1.22+
+- pnpm (recommended) or npm
 - API Keys (Google/Azure - อย่างน้อย 1 provider)
 
 ### 1. Clone & Setup
@@ -190,6 +191,11 @@ cp .env.example .env
 # Frontend
 cd ../frontend
 cp .env.example .env
+
+# Recommended: Use pnpm for better performance
+pnpm install
+
+# Alternative: Use npm
 npm install
 ```
 
@@ -204,7 +210,7 @@ npm install
 cd backend-go && go run main.go
 
 # Terminal 2 - Frontend
-cd frontend && npm run dev
+cd frontend && pnpm run dev  # or npm run dev
 ```
 
 ### 3. Open Browser

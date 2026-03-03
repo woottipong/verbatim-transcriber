@@ -1,8 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
 
 	"thai-transcriber-backend/config"
 	"thai-transcriber-backend/internal/delivery"
@@ -27,11 +34,22 @@ func main() {
 		DisableStartupMessage: true,
 	})
 
-	// Middleware
+	// Middleware - CORS with restricted origins
+	allowedOrigins := strings.Split(cfg.AllowedOrigins, ",")
 	app.Use(cors.New(cors.Config{
-		AllowOrigins: "*",
-		AllowMethods: "GET,POST,HEAD,PUT,DELETE,PATCH,OPTIONS",
-		AllowHeaders: "Origin, Content-Type, Accept",
+		AllowOrigins:     allowedOrigins[0],
+		AllowOriginsFunc: func(origin string) bool {
+			for _, allowed := range allowedOrigins {
+				if strings.TrimSpace(allowed) == origin {
+					return true
+				}
+			}
+			return false
+		},
+		AllowMethods:     "GET,POST,HEAD,PUT,DELETE,PATCH,OPTIONS",
+		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
+		AllowCredentials: true,
+		MaxAge:           300,
 	}))
 	app.Use(logger.New())
 
@@ -41,10 +59,31 @@ func main() {
 	// Print startup info
 	printStartupInfo(cfg)
 
-	// Start server
+	// Start server in goroutine
 	addr := fmt.Sprintf("%s:%s", cfg.Host, cfg.Port)
-	log.Printf("🚀 Server starting at http://%s:%s\n", cfg.Host, cfg.Port)
-	log.Fatal(app.Listen(addr))
+	go func() {
+		log.Printf("🚀 Server starting at http://%s:%s\n", cfg.Host, cfg.Port)
+		if err := app.Listen(addr); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	// Graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	log.Println("\n⚠️  Shutting down server...")
+
+	// Timeout for graceful shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := app.ShutdownWithContext(ctx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	log.Println("✅ Server exited gracefully")
 }
 
 func printStartupInfo(cfg *config.Config) {

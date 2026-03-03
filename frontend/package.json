@@ -7,10 +7,10 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "backend:install": "cd backend && npm install && cd ..",
-    "backend:start": "cd backend && npm start && cd ..",
-    "full-setup": "npm install && npm run backend:install",
-    "full-dev": "npm run dev & cd backend && npm start"
+    "backend:install": "cd backend && pnpm install && cd ..",
+    "backend:start": "cd backend && pnpm start && cd ..",
+    "full-setup": "pnpm install && pnpm run backend:install",
+    "full-dev": "pnpm run dev & cd backend && pnpm start"
   },
   "dependencies": {
     "@google-cloud/speech": "^7.2.1",

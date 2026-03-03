@@ -5,6 +5,7 @@ import "os"
 type Config struct {
 	Port                         string
 	Host                         string
+	AllowedOrigins               string // Comma-separated list of allowed origins
 	GoogleAPIKey                 string
 	GoogleApplicationCredentials string
 	AzureSubscriptionKey         string
@@ -42,6 +43,7 @@ func Load() *Config {
 	return &Config{
 		Port:                         getEnv("PORT", "3000"),
 		Host:                         getEnv("HOST", "localhost"),
+		AllowedOrigins:               getEnv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000"),
 		GoogleAPIKey:                 os.Getenv("GOOGLE_API_KEY"),
 		GoogleApplicationCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
 		AzureSubscriptionKey:         os.Getenv("AZURE_SUBSCRIPTION_KEY"),

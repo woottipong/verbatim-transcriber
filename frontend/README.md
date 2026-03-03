@@ -6,17 +6,26 @@ Real-time Thai speech-to-text transcription UI built with React 19 + TypeScript 
 
 ### Prerequisites
 - Node.js 18+
+- pnpm (recommended) or npm
 - Backend server running on `ws://localhost:3000`
 
 ### Installation
 
 ```bash
+# Recommended: Use pnpm for better performance and smaller disk usage
+pnpm install
+
+# Alternative: Use npm
 npm install
 ```
 
 ### Development
 
 ```bash
+# Using pnpm (recommended)
+pnpm run dev
+
+# Using npm
 npm run dev
 ```
 
@@ -25,6 +34,10 @@ Open [http://localhost:5173](http://localhost:5173)
 ### Build
 
 ```bash
+# Using pnpm (recommended)
+pnpm run build
+
+# Using npm
 npm run build
 ```
 
@@ -142,11 +155,17 @@ ws.send(audioBuffer);  // Int16Array binary
 
 ## Scripts
 
-| Command           | Description              |
-| ----------------- | ------------------------ |
-| `npm run dev`     | Start dev server         |
-| `npm run build`   | Build for production     |
-| `npm run preview` | Preview production build |
+| Command               | Description              |
+| --------------------- | ------------------------ |
+| `pnpm run dev`        | Start dev server         |
+| `pnpm run build`      | Build for production     |
+| `pnpm run preview`    | Preview production build |
+| `pnpm run backend:install` | Install backend deps  |
+| `pnpm run backend:start`   | Start backend server  |
+| `pnpm run full-setup` | Install frontend + backend |
+| `pnpm run full-dev`   | Start frontend + backend  |
+
+**Note:** All npm commands work with pnpm as well.
 
 ## Browser Support
 
