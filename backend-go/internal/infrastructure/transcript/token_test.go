@@ -94,3 +94,31 @@ func TestTokenServiceRequiresSecret(t *testing.T) {
 		t.Fatalf("Verify() error = %v, want ErrTokenServiceDisabled", err)
 	}
 }
+
+func TestTokenServiceBindsTokenToRoomGeneration(t *testing.T) {
+	service := NewTokenService("test-secret-at-least-32-bytes-long", time.Hour)
+	token, _, err := service.IssueForGeneration("room-a", 3)
+	if err != nil {
+		t.Fatalf("IssueForGeneration() error = %v", err)
+	}
+	if _, err := service.VerifyForGeneration(token, "room-a", 3); err != nil {
+		t.Fatalf("VerifyForGeneration() error = %v", err)
+	}
+	if _, err := service.VerifyForGeneration(token, "room-a", 4); !errors.Is(err, ErrInvalidTranscriptToken) {
+		t.Fatalf("VerifyForGeneration() error = %v, want invalid token", err)
+	}
+}
+
+func TestTokenServiceBindsTokenToLiveKitRoom(t *testing.T) {
+	service := NewTokenService("test-secret-at-least-32-bytes-long", time.Hour)
+	token, _, err := service.IssueForRoom("room-a", "RM_old", 0)
+	if err != nil {
+		t.Fatalf("IssueForRoom() error = %v", err)
+	}
+	if _, err := service.VerifyForRoom(token, "room-a", "RM_old", 0); err != nil {
+		t.Fatalf("VerifyForRoom() error = %v", err)
+	}
+	if _, err := service.VerifyForRoom(token, "room-a", "RM_new", 0); !errors.Is(err, ErrInvalidTranscriptToken) {
+		t.Fatalf("VerifyForRoom() error = %v, want invalid token", err)
+	}
+}

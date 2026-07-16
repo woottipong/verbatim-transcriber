@@ -1,6 +1,10 @@
 package config
 
-import "os"
+import (
+	"net"
+	"os"
+	"strings"
+)
 
 type Config struct {
 	Port                         string
@@ -16,6 +20,7 @@ type Config struct {
 	LiveKitAPISecret             string
 	LiveKitURL                   string
 	TranscriptWSSecret           string
+	ControlAPIKey                string
 	GoogleConfig                 GoogleConfig
 	GeminiConfig                 GeminiConfig
 	AzureConfig                  AzureConfig
@@ -65,6 +70,7 @@ func Load() *Config {
 		LiveKitAPISecret:             os.Getenv("LIVEKIT_API_SECRET"),
 		LiveKitURL:                   getEnv("LIVEKIT_WS_URL", "ws://localhost:7880"),
 		TranscriptWSSecret:           os.Getenv("TRANSCRIPT_WS_SECRET"),
+		ControlAPIKey:                os.Getenv("CONTROL_API_KEY"),
 		GoogleConfig: GoogleConfig{
 			Location:              getEnv("GOOGLE_CLOUD_LOCATION", "asia-southeast1"),
 			Model:                 getEnv("GOOGLE_SPEECH_MODEL", "chirp_2"),
@@ -114,4 +120,27 @@ func (c *Config) HasAzureKey() bool {
 
 func (c *Config) HasLiveKitKey() bool {
 	return c.LiveKitAPIKey != "" && c.LiveKitAPISecret != ""
+}
+
+func (c *Config) HasControlAPIKey() bool {
+	return c != nil && len(strings.TrimSpace(c.ControlAPIKey)) >= 32
+}
+
+// RequiresControlAuth keeps local development available without a key while
+// failing closed whenever the backend is configured to listen remotely.
+func (c *Config) RequiresControlAuth() bool {
+	if c == nil {
+		return true
+	}
+	if c.HasControlAPIKey() {
+		return true
+	}
+	host := strings.TrimSpace(strings.Trim(c.Host, "[]"))
+	if strings.EqualFold(host, "localhost") {
+		return false
+	}
+	if parsed := net.ParseIP(host); parsed != nil {
+		return !parsed.IsLoopback()
+	}
+	return true
 }

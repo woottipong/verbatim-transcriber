@@ -31,6 +31,12 @@ export function toHttpUrl(url: string): string {
     return url.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:');
 }
 
+export function getControlAuthHeaders(): Record<string, string> {
+    const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
+    const apiKey = env?.VITE_CONTROL_API_KEY?.trim();
+    return apiKey ? { Authorization: `Bearer ${apiKey}` } : {};
+}
+
 export function getErrorMessage(error: unknown, fallback: string): string {
     return error instanceof Error && error.message ? error.message : fallback;
 }

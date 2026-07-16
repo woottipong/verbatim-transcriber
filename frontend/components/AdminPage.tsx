@@ -36,7 +36,7 @@ import {
     selectRoomAfterDelete,
     validateRoomName,
 } from '../lib/adminRooms';
-import { toHttpUrl } from '../lib/runtime';
+import { getControlAuthHeaders, toHttpUrl } from '../lib/runtime';
 
 interface AdminPageProps {
     onBack?: () => void;
@@ -84,6 +84,8 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     const [notice, setNotice] = useState<Notice | null>(null);
     const createRoomInputRef = useRef<HTMLInputElement>(null);
     const noticeTimerRef = useRef<number | null>(null);
+    const roomsRequestRef = useRef(0);
+    const agentStatusRequestRef = useRef(0);
 
     const selectedRoom = rooms.find(room => room.name === selectedRoomName) || null;
     const selectedAgents = useMemo(
@@ -127,22 +129,28 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     }, [isCreateDialogOpen, isCreatingRoom]);
 
     const refreshRooms = useCallback(async () => {
+        const requestId = ++roomsRequestRef.current;
         setIsLoadingRooms(true);
         try {
             const nextRooms = await fetchDetailedRooms(backendUrl);
+            if (requestId !== roomsRequestRef.current) return;
             setRooms(nextRooms);
             setError(null);
         } catch (err) {
+            if (requestId !== roomsRequestRef.current) return;
             setError(err instanceof Error ? err.message : 'Failed to load rooms');
         } finally {
-            setIsLoadingRooms(false);
+            if (requestId === roomsRequestRef.current) setIsLoadingRooms(false);
         }
     }, [backendUrl]);
 
     const refreshAgentStatus = useCallback(async () => {
+        const requestId = ++agentStatusRequestRef.current;
         try {
-            setAgentStatus(await fetchAgentStatus(backendUrl));
+            const nextStatus = await fetchAgentStatus(backendUrl);
+            if (requestId === agentStatusRequestRef.current) setAgentStatus(nextStatus);
         } catch (err) {
+            if (requestId !== agentStatusRequestRef.current) return;
             // Agent routes are intentionally absent when no ASR provider is configured.
             console.warn('[Admin] Agent status unavailable:', err);
             setAgentStatus({ count: 0, agents: [] });
@@ -194,7 +202,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         try {
             const response = await fetch(`${httpBackendUrl}/livekit/agent/start`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
                 body: JSON.stringify({ roomName: selectedRoom.name, provider: agentProvider }),
             });
             const data = await response.json().catch(() => ({}));
@@ -214,7 +222,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         try {
             const response = await fetch(`${httpBackendUrl}/livekit/agent/stop`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
                 body: JSON.stringify({ roomName: agent.room, provider: agent.provider }),
             });
             const data = await response.json().catch(() => ({}));
@@ -232,7 +240,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         try {
             const response = await fetch(
                 `${httpBackendUrl}/livekit/rooms/${encodeURIComponent(roomName)}/participants/${encodeURIComponent(identity)}`,
-                { method: 'DELETE' },
+                { method: 'DELETE', headers: getControlAuthHeaders() },
             );
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || 'Failed to remove participant');
@@ -250,6 +258,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         try {
             const response = await fetch(`${httpBackendUrl}/livekit/rooms/${encodeURIComponent(roomToDelete)}`, {
                 method: 'DELETE',
+                headers: getControlAuthHeaders(),
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || 'Failed to delete room');

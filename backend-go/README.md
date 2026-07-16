@@ -70,6 +70,7 @@ Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `g
 | `LIVEKIT_API_SECRET` | — | Keep server-side only |
 | `LIVEKIT_WS_URL` | `ws://localhost:7880` | LiveKit URL used by SDK clients |
 | `TRANSCRIPT_WS_SECRET` | — | At least 32 random bytes; enables signed external transcript links |
+| `CONTROL_API_KEY` | — | At least 32 random bytes; required for remote control-plane APIs |
 | `GOOGLE_CLOUD_PROJECT` | — | Required for Google |
 | `GOOGLE_APPLICATION_CREDENTIALS` | — | Service-account JSON path |
 | `GOOGLE_API_KEY` | — | Alternative Google authentication |
@@ -83,6 +84,12 @@ Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `g
 | `AZURE_REGION` | `southeastasia` | Azure Speech region |
 
 `HasGoogleKey`, `HasGeminiKey`, `HasAzureKey`, and `HasLiveKitKey` in `config/config.go` define availability shown by `/providers`.
+
+When `HOST` is remote (for example `0.0.0.0`), room, agent, participant-token,
+and transcript-link management endpoints require `Authorization: Bearer
+<CONTROL_API_KEY>`. The API fails closed if a strong key is missing. Localhost
+development remains available without this key. Do not embed the key in a
+public frontend build.
 
 ## HTTP API
 
@@ -113,7 +120,7 @@ curl -X POST http://localhost:3000/livekit/agent/start \
 
 There are no public `/google`, `/azure`, or `/gemini` audio WebSocket routes.
 
-The transcript WebSocket is text-only and separate from the upstream Azure provider WebSocket. It authenticates with a signed HS256 JWT containing the room, issuer and subject `transcript:subscribe`, and an expiry 24 hours from issuance. It sends `session.ready`, `transcript.interim`, and `transcript.final` events. It has no history/replay and does not accept audio or commands.
+The transcript WebSocket is text-only and separate from the upstream Azure provider WebSocket. It authenticates with a signed HS256 JWT containing the room, current LiveKit room SID, issuer and subject `transcript:subscribe`, and an expiry 24 hours from issuance. Deleting a room invalidates active subscribers and prevents the old link from attaching to a recreated room with the same name. It sends `session.ready`, `transcript.interim`, and `transcript.final` events. It has no history/replay and does not accept audio or commands.
 
 ```json
 {"schemaVersion":"1.0","type":"session.ready","room":"test","timestamp":"2026-07-16T10:00:00.000Z"}

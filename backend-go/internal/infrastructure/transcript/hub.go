@@ -54,10 +54,11 @@ type roomState struct {
 }
 
 type Hub struct {
-	mu        sync.Mutex
-	rooms     map[string]*roomState
-	queueSize int
-	now       func() time.Time
+	mu          sync.Mutex
+	rooms       map[string]*roomState
+	generations map[string]uint64
+	queueSize   int
+	now         func() time.Time
 }
 
 func NewHub() *Hub {
@@ -69,9 +70,33 @@ func NewHubWithQueueSize(queueSize int) *Hub {
 		queueSize = defaultSubscriberQueueSize
 	}
 	return &Hub{
-		rooms:     make(map[string]*roomState),
-		queueSize: queueSize,
-		now:       time.Now,
+		rooms:       make(map[string]*roomState),
+		generations: make(map[string]uint64),
+		queueSize:   queueSize,
+		now:         time.Now,
+	}
+}
+
+func (h *Hub) Generation(room string) uint64 {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.generations[room]
+}
+
+// Invalidate closes active integrations and advances the room generation so
+// links from a deleted room cannot attach to a later room with the same name.
+func (h *Hub) Invalidate(room string) {
+	if room == "" {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.generations[room]++
+	if state := h.rooms[room]; state != nil {
+		for subscription := range state.subscribers {
+			h.removeSubscriptionLocked(room, subscription)
+		}
+		delete(h.rooms, room)
 	}
 }
 

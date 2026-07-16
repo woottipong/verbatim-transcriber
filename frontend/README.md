@@ -29,6 +29,7 @@ Open:
 | --- | --- | --- |
 | `VITE_BACKEND_URL` | `http://localhost:3000` | Backend HTTP base URL |
 | `VITE_LIVEKIT_URL` | `ws://localhost:7880` | Browser LiveKit URL |
+| `VITE_CONTROL_API_KEY` | — | Backend control key for trusted internal deployments; never use in a public frontend build |
 
 These values are embedded by Vite at build time. Use HTTPS/WSS for remote deployments.
 
@@ -40,6 +41,7 @@ frontend/
 ├── components/
 │   ├── LiveKitPanel.tsx        # Session controls and transcript list
 │   ├── MicrophoneInputStrip.tsx # Input-level visualization
+│   ├── StreamPage.tsx           # Publisher-only route and microphone lifecycle
 │   ├── ViewerPage.tsx          # Subscribe-only viewer
 │   ├── AdminPage.tsx           # Room and agent management
 │   └── SettingsModal.tsx       # Backend URL configuration

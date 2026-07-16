@@ -37,16 +37,16 @@ func HandleCreateTranscriptToken(c *fiber.Ctx, cfg *config.Config) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	exists, err := liveKitRoomExists(c.UserContext(), cfg, roomName)
+	room, err := liveKitRoom(c.UserContext(), cfg, roomName)
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Failed to check room"})
 	}
-	if !exists {
+	if room == nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Room not found"})
 	}
 
 	tokenService := transcript.NewTokenService(cfg.TranscriptWSSecret, transcriptTokenTTL)
-	token, expiresAt, err := tokenService.Issue(roomName)
+	token, expiresAt, err := tokenService.IssueForRoom(roomName, room.Sid, liveTranscriptHub.Generation(roomName))
 	if err != nil {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "Transcript WebSocket links are not configured"})
 	}
@@ -58,20 +58,20 @@ func HandleCreateTranscriptToken(c *fiber.Ctx, cfg *config.Config) error {
 	})
 }
 
-func liveKitRoomExists(parent context.Context, cfg *config.Config, roomName string) (bool, error) {
+func liveKitRoom(parent context.Context, cfg *config.Config, roomName string) (*livekit.Room, error) {
 	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
 	defer cancel()
 	roomClient := lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
 	rooms, err := roomClient.ListRooms(ctx, &livekit.ListRoomsRequest{})
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	for _, room := range rooms.Rooms {
 		if room.Name == roomName {
-			return true, nil
+			return room, nil
 		}
 	}
-	return false, nil
+	return nil, nil
 }
 
 func buildTranscriptWebSocketURL(c *fiber.Ctx, roomName, token string) string {
@@ -106,7 +106,14 @@ func TranscriptWebSocketMiddleware(cfg *config.Config) fiber.Handler {
 		}
 		roomName := c.Params("room")
 		service := transcript.NewTokenService(cfg.TranscriptWSSecret, transcriptTokenTTL)
-		if _, err := service.Verify(c.Query("token"), roomName); err != nil {
+		room, err := liveKitRoom(c.UserContext(), cfg, roomName)
+		if err != nil {
+			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Failed to check room"})
+		}
+		if room == nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Room not found"})
+		}
+		if _, err := service.VerifyForRoom(c.Query("token"), roomName, room.Sid, liveTranscriptHub.Generation(roomName)); err != nil {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid transcript token"})
 		}
 		if !websocket.IsWebSocketUpgrade(c) {

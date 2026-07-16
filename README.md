@@ -172,6 +172,7 @@ Latency and interim frequency depend on service, model, region, network, and spe
 | `LIVEKIT_API_SECRET` | For LiveKit routes | — | LiveKit API secret |
 | `LIVEKIT_WS_URL` | No | `ws://localhost:7880` | LiveKit server URL |
 | `TRANSCRIPT_WS_SECRET` | For external transcript links | — | Server-side HS256 signing secret; use at least 32 random bytes |
+| `CONTROL_API_KEY` | Required for remote control API | — | At least 32 random bytes; protects room, agent, participant-token, and transcript-link APIs |
 | `GOOGLE_CLOUD_PROJECT` | For Google | — | Google Cloud project |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Google service account | — | Credential JSON path |
 | `GOOGLE_API_KEY` | Alternative Google auth | — | Google API key |
@@ -190,6 +191,7 @@ Latency and interim frequency depend on service, model, region, network, and spe
 | --- | --- | --- |
 | `VITE_BACKEND_URL` | `http://localhost:3000` | Backend HTTP base URL |
 | `VITE_LIVEKIT_URL` | `ws://localhost:7880` | Browser LiveKit URL |
+| `VITE_CONTROL_API_KEY` | — | Shared control API key for trusted internal deployments; do not embed in a public frontend build |
 
 ## Backend API
 
@@ -219,7 +221,7 @@ Valid providers are `google`, `gemini`, and `azure` when configured.
 
 ### External transcript WebSocket
 
-The Admin workspace generates a signed URL for a room after `TRANSCRIPT_WS_SECRET` is configured. The socket carries text only; it cannot publish audio or control the room. There is no history/replay, and events are delivered only after the client connects.
+The Admin workspace generates a signed URL for a room after `TRANSCRIPT_WS_SECRET` is configured. The token is bound to the current LiveKit room identity, so deleting and recreating a room with the same name does not reuse the old link. The socket carries text only; it cannot publish audio or control the room. There is no history/replay, and events are delivered only after the client connects.
 
 The first event is:
 

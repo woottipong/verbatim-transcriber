@@ -17,6 +17,7 @@ import {
 } from 'livekit-client';
 import { ConnectionState, TranscriptSegment } from '../types';
 import { appendBounded } from '../lib/runtime';
+import { getControlAuthHeaders } from '../lib/runtime';
 import {
     InterimTranscript,
     appendTranscriptIfNew,
@@ -110,7 +111,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
 
         const response = await fetch(tokenEndpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
             body: JSON.stringify({
                 identity,
                 roomName,

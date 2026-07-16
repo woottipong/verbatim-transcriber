@@ -4,6 +4,8 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/livekit/psrpc"
 )
 
 func TestValidateRoomName(t *testing.T) {
@@ -38,5 +40,8 @@ func TestIsRoomConflictError(t *testing.T) {
 	}
 	if isRoomConflictError(errors.New("permission denied")) {
 		t.Fatal("unrelated error was recognized as a conflict")
+	}
+	if !isRoomConflictError(psrpc.NewError(psrpc.AlreadyExists, errors.New("room conflict"))) {
+		t.Fatal("typed already_exists error was not recognized")
 	}
 }

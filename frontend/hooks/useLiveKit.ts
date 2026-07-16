@@ -11,6 +11,7 @@ import { Room, RoomEvent, DataPacket_Kind, LocalParticipant, RemoteParticipant, 
 import { ConnectionState, TranscriptSegment } from '../types';
 import { TranscriptUpdateBuffer } from '../lib/transcriptUpdates';
 import { appendBounded } from '../lib/runtime';
+import { getControlAuthHeaders } from '../lib/runtime';
 import {
     InterimTranscript,
     TranscriptMessage,
@@ -35,6 +36,7 @@ export interface UseLiveKitOptions {
     serverUrl: string;       // LiveKit server URL (ws://localhost:7880)
     tokenEndpoint: string;   // Backend token endpoint (http://localhost:3000/livekit/token)
     roomName: string;        // Room name for ASR session
+    audioDeviceId?: string;  // Selected microphone device, or default
     autoConnect?: boolean;   // Auto-connect on mount
 }
 
@@ -62,6 +64,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         serverUrl,
         tokenEndpoint,
         roomName,
+        audioDeviceId,
         autoConnect = false,
     } = options;
 
@@ -129,7 +132,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
 
         const response = await fetch(tokenEndpoint, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
             body: JSON.stringify({ identity, roomName }),
         });
 
@@ -224,6 +227,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                     autoGainControl: true,
                     sampleRate: 48000,
                     channelCount: 1,
+                    ...(audioDeviceId && audioDeviceId !== 'default' ? { deviceId: audioDeviceId } : {}),
                 },
             });
 
@@ -323,7 +327,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             setIsMicrophoneEnabled(false);
             setConnectionState(ConnectionState.ERROR);
         }
-    }, [serverUrl, fetchToken, roomName, handleDataReceived, handleParticipantConnected, handleParticipantDisconnected]);
+    }, [serverUrl, fetchToken, roomName, audioDeviceId, handleDataReceived, handleParticipantConnected, handleParticipantDisconnected]);
 
     const toggleMicrophone = useCallback(async () => {
         const currentRoom = roomRef.current;

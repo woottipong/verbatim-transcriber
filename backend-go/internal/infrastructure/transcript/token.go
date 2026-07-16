@@ -22,7 +22,9 @@ var (
 
 // Claims are intentionally limited to a room-scoped, read-only subscription.
 type Claims struct {
-	Room string `json:"room"`
+	Room       string `json:"room"`
+	RoomSID    string `json:"roomSid,omitempty"`
+	Generation uint64 `json:"generation,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -41,6 +43,14 @@ func NewTokenService(secret string, ttl time.Duration) *TokenService {
 }
 
 func (s *TokenService) Issue(room string) (string, time.Time, error) {
+	return s.IssueForGeneration(room, 0)
+}
+
+func (s *TokenService) IssueForGeneration(room string, generation uint64) (string, time.Time, error) {
+	return s.IssueForRoom(room, "", generation)
+}
+
+func (s *TokenService) IssueForRoom(room, roomSID string, generation uint64) (string, time.Time, error) {
 	if s == nil || len(s.secret) < MinimumSecretLength {
 		return "", time.Time{}, ErrTokenServiceDisabled
 	}
@@ -55,7 +65,9 @@ func (s *TokenService) Issue(room string) (string, time.Time, error) {
 	now := s.now()
 	expiresAt := now.Add(s.ttl)
 	claims := Claims{
-		Room: room,
+		Room:       room,
+		RoomSID:    roomSID,
+		Generation: generation,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    TokenIssuer,
 			Subject:   TokenSubject,
@@ -72,6 +84,14 @@ func (s *TokenService) Issue(room string) (string, time.Time, error) {
 }
 
 func (s *TokenService) Verify(rawToken, expectedRoom string) (*Claims, error) {
+	return s.VerifyForGeneration(rawToken, expectedRoom, 0)
+}
+
+func (s *TokenService) VerifyForGeneration(rawToken, expectedRoom string, expectedGeneration uint64) (*Claims, error) {
+	return s.VerifyForRoom(rawToken, expectedRoom, "", expectedGeneration)
+}
+
+func (s *TokenService) VerifyForRoom(rawToken, expectedRoom, expectedRoomSID string, expectedGeneration uint64) (*Claims, error) {
 	if s == nil || len(s.secret) < MinimumSecretLength {
 		return nil, ErrTokenServiceDisabled
 	}
@@ -94,7 +114,9 @@ func (s *TokenService) Verify(rawToken, expectedRoom string) (*Claims, error) {
 		}
 		return s.secret, nil
 	}, parserOptions...)
-	if err != nil || !parsed.Valid || claims.Room == "" || claims.Room != strings.TrimSpace(expectedRoom) {
+	if err != nil || !parsed.Valid || claims.Room == "" || claims.Room != strings.TrimSpace(expectedRoom) ||
+		(expectedRoomSID != "" && claims.RoomSID != expectedRoomSID) ||
+		(expectedGeneration > 0 && claims.Generation != expectedGeneration) {
 		return nil, ErrInvalidTranscriptToken
 	}
 	return claims, nil

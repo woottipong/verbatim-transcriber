@@ -59,6 +59,7 @@ type Agent struct {
 	asrProvider       domain.ASRProvider
 	mu                sync.Mutex
 	isRunning         bool
+	stopRequested     bool
 	cancel            context.CancelFunc
 	preferredProvider string // "google", "gemini", "azure", or "" for auto
 	roomName          string // store room name for status
@@ -98,6 +99,10 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 	if a.isRunning {
 		a.mu.Unlock()
 		return fmt.Errorf("agent already running")
+	}
+	if a.stopRequested {
+		a.mu.Unlock()
+		return fmt.Errorf("agent was stopped before connecting")
 	}
 	a.isRunning = true
 	a.roomName = roomName
@@ -203,9 +208,11 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 func (a *Agent) Stop() {
 	a.mu.Lock()
 	if !a.isRunning {
+		a.stopRequested = true
 		a.mu.Unlock()
 		return
 	}
+	a.stopRequested = true
 	cancel := a.cancel
 	room := a.room
 	provider := a.asrProvider

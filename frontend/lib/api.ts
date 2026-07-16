@@ -2,7 +2,7 @@
  * API utilities for checking backend provider availability
  */
 
-import { toHttpUrl } from './runtime.ts';
+import { getControlAuthHeaders, toHttpUrl } from './runtime.ts';
 
 export interface ParticipantInfo {
     identity: string;
@@ -38,15 +38,11 @@ export interface TranscriptTokenResponse {
     websocketUrl: string;
 }
 
-export interface ProviderStatus {
-    enabled: boolean;
-    provider: string;
-}
-
 export interface ProvidersResponse {
-    providers: ProviderStatus[];
-    enabledCount: number;
-    totalCount: number;
+    google: boolean;
+    gemini: boolean;
+    azure: boolean;
+    livekit: boolean;
 }
 
 /**
@@ -86,23 +82,15 @@ export function isProviderEnabled(
     // This provides graceful fallback if backend check fails
     if (!providersResponse) return true;
 
-    // Validate that providers array exists
-    if (!providersResponse.providers || !Array.isArray(providersResponse.providers)) {
-        console.warn('Invalid providers response format, allowing all providers');
-        return true;
-    }
-
-    const provider = providersResponse.providers.find(
-        p => p.provider.toLowerCase() === providerName.toLowerCase()
-    );
-
-    return provider?.enabled ?? false;
+    const provider = providerName.toLowerCase() as keyof ProvidersResponse;
+    if (!['google', 'gemini', 'azure'].includes(provider)) return false;
+    return providersResponse[provider] === true;
 }
 
 export async function createRoom(backendUrl: string, name: string): Promise<RoomDetails> {
     const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/rooms/`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
         body: JSON.stringify({ name }),
     });
     return parseApiResponse<RoomDetails>(response, 'Failed to create room');
@@ -114,19 +102,19 @@ export async function createTranscriptToken(
 ): Promise<TranscriptTokenResponse> {
     const response = await fetch(
         `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/transcript-token`,
-        { method: 'POST' },
+        { method: 'POST', headers: getControlAuthHeaders() },
     );
     return parseApiResponse<TranscriptTokenResponse>(response, 'Failed to generate transcript link');
 }
 
 export async function fetchDetailedRooms(backendUrl: string): Promise<RoomDetails[]> {
-    const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/rooms/detailed`);
+    const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/rooms/detailed`, { headers: getControlAuthHeaders() });
     const data = await parseApiResponse<{ rooms?: RoomDetails[] }>(response, 'Failed to load rooms');
     return data.rooms || [];
 }
 
 export async function fetchAgentStatus(backendUrl: string): Promise<AgentStatus> {
-    const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/agent/status`);
+    const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/agent/status`, { headers: getControlAuthHeaders() });
     return parseApiResponse<AgentStatus>(response, 'Failed to load agent status');
 }
 

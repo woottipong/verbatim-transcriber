@@ -13,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/livekit/protocol/auth"
 	"github.com/livekit/protocol/livekit"
+	"github.com/livekit/psrpc"
 	lksdk "github.com/livekit/server-sdk-go/v2"
 )
 
@@ -127,8 +128,12 @@ func HandleCreateRoom(c *fiber.Ctx, cfg *config.Config) error {
 }
 
 func isRoomConflictError(err error) bool {
+	if code, ok := psrpc.GetErrorCode(err); ok && code == psrpc.AlreadyExists {
+		return true
+	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "already exists") ||
+		strings.Contains(message, "already_exists") ||
 		strings.Contains(message, "room exists") ||
 		strings.Contains(message, "already_present") ||
 		strings.Contains(message, "already present")
@@ -160,7 +165,6 @@ func HandleListRooms(c *fiber.Ctx, cfg *config.Config) error {
 			CreationTime:    room.CreationTime,
 		})
 	}
-
 	return c.JSON(fiber.Map{
 		"rooms": roomInfos,
 		"total": len(roomInfos),
@@ -239,6 +243,8 @@ func HandleDeleteRoom(c *fiber.Ctx, cfg *config.Config) error {
 			"details": err.Error(),
 		})
 	}
+	stopAgentsForRoom(roomName)
+	TranscriptHub().Invalidate(roomName)
 
 	return c.JSON(fiber.Map{
 		"success": true,

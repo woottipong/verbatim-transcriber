@@ -84,6 +84,21 @@ func TestHubReadyEvent(t *testing.T) {
 	}
 }
 
+func TestHubInvalidationClosesSubscribersAndAdvancesGeneration(t *testing.T) {
+	hub := NewHub()
+	subscription := hub.Subscribe("room-a")
+	hub.Invalidate("room-a")
+
+	select {
+	case <-subscription.Done():
+	case <-time.After(time.Second):
+		t.Fatal("subscription was not closed during invalidation")
+	}
+	if got := hub.Generation("room-a"); got != 1 {
+		t.Fatalf("generation = %d, want 1", got)
+	}
+}
+
 func decodeEvent(t *testing.T, payload []byte) Event {
 	t.Helper()
 	var event Event
