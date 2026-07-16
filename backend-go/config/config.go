@@ -56,7 +56,7 @@ func Load() *Config {
 			Location:              getEnv("GOOGLE_CLOUD_LOCATION", "asia-southeast1"),
 			LanguageCode:          "th-TH",
 			SampleRate:            48000,
-			EnableAutoPunctuation: false, // Disable for faster finalization (add punctuation in Editor Mode)
+			EnableAutoPunctuation: true, // Let Google add punctuation for more natural sentence formatting
 		},
 		AzureConfig: AzureConfig{
 			Language:                       "th-TH",

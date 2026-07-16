@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { X, Server, Mic, Gauge } from 'lucide-react';
 import { AppConfig } from '../types';
-import VADInfoBadge from './VADInfoBadge';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -168,20 +167,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, config, 
                     </p>
                   </div>
 
-                  {/* VAD Preview */}
-                  <div className="mt-4 pt-4 border-t border-slate-700/50">
-                    <p className="text-xs font-semibold text-slate-300 mb-2 flex items-center gap-1">
-                      <Gauge size={12} className="text-purple-400" />
-                      Live Preview:
-                    </p>
-                    <VADInfoBadge
-                      enabled={localConfig.vadConfig?.enabled || false}
-                      threshold={localConfig.vadConfig?.threshold || 0.4}
-                      isReady={false}
-                      isLoading={false}
-                      isSpeaking={false}
-                    />
-                  </div>
                 </div>
               )}
             </div>
