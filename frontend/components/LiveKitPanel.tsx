@@ -24,6 +24,7 @@ interface LiveKitPanelProps {
 
 const providerClasses: Record<string, string> = {
   google: 'border-sky-400/30 bg-sky-400/10 text-sky-200',
+  gemini: 'border-violet-400/30 bg-violet-400/10 text-violet-200',
   azure: 'border-cyan-400/30 bg-cyan-400/10 text-cyan-200',
 };
 
@@ -228,14 +229,13 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                 aria-atomic="true"
                 aria-label={`Live interim transcript from ${interim.speaker}`}
               >
-                <span className="pt-0.5 text-xs tabular-nums text-slate-500">
-                  {String(transcripts.length + 1).padStart(2, '0')}
-                </span>
+                <span className="transcript-row__marker pt-0.5 text-sm text-violet-300" aria-hidden="true">↳</span>
                 <div className="transcript-row__content flex min-w-0 items-baseline gap-2.5">
                   <span className={`inline-flex shrink-0 items-center gap-1.5 rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${providerClasses[interim.provider] ?? 'border-violet-400/30 bg-violet-400/10 text-violet-200'}`}>
                     <span className="transcript-live-dot" aria-hidden="true" />
-                    {interim.provider.toUpperCase()} · LIVE
+                    {interim.provider.toUpperCase()} · LIVE DRAFT
                   </span>
+                  <span className="transcript-row__hint text-[10px] font-medium uppercase tracking-[0.12em] text-violet-300/70">กำลังถอดเสียง</span>
                   <p className="transcript-row__text min-w-0 text-[1.05rem] leading-7 text-slate-300">{interim.text}</p>
                 </div>
               </div>

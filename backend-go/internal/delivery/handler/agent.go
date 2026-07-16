@@ -160,12 +160,16 @@ func validateAgentProvider(cfg *config.Config, provider string) (string, error) 
 		if !cfg.HasGoogleKey() {
 			return "", fmt.Errorf("google provider is not configured")
 		}
+	case "gemini":
+		if !cfg.HasGeminiKey() {
+			return "", fmt.Errorf("gemini provider is not configured")
+		}
 	case "azure":
 		if !cfg.HasAzureKey() {
 			return "", fmt.Errorf("azure provider is not configured")
 		}
 	default:
-		return "", fmt.Errorf("provider must be google or azure")
+		return "", fmt.Errorf("provider must be google, gemini, or azure")
 	}
 	return provider, nil
 }

@@ -19,8 +19,10 @@ import { ConnectionState, TranscriptSegment } from '../types';
 import { appendBounded } from '../lib/runtime';
 import {
     InterimTranscript,
+    appendTranscriptIfNew,
     clearInterimsBySource,
     getTranscriptKey,
+    isAppendOnlyInterimProvider,
     parseTranscriptMessage,
     removeInterim,
     upsertInterim,
@@ -218,18 +220,27 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
                 ));
             }
 
-            if (message.isFinal && message.text.trim()) {
-                // Final transcript - add to list
+            const speaker = message.speaker || agentIdentity;
+            const segment: TranscriptSegment = {
+                id: `view-${segmentIdRef.current + 1}`,
+                text: message.text,
+                // Gemini Live can emit committed input chunks with isFinal=false.
+                // Keep those chunks as normal transcript rows instead of replacing
+                // the previous chunk in the interim map.
+                isFinal: message.isFinal || isAppendOnlyInterimProvider(provider),
+                timestamp: message.timestamp || Date.now(),
+                provider,
+                speaker,
+            };
+
+            if (isAppendOnlyInterimProvider(provider)) {
                 segmentIdRef.current++;
-                const segment: TranscriptSegment = {
-                    id: `view-${segmentIdRef.current}`,
-                    text: message.text,
-                    isFinal: true,
-                    timestamp: message.timestamp || Date.now(),
-                    provider: provider,
-                    speaker: message.speaker || agentIdentity,
-                };
-                setTranscripts(prev => appendBounded(prev, segment));
+                setTranscripts(prev => appendTranscriptIfNew(prev, segment));
+
+                setInterimTranscripts(prev => removeInterim(prev, key));
+            } else if (message.isFinal) {
+                segmentIdRef.current++;
+                setTranscripts(prev => appendBounded(prev, { ...segment, isFinal: true }));
 
                 setInterimTranscripts(prev => removeInterim(prev, key));
             } else if (!message.isFinal) {
@@ -237,7 +248,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
                     key,
                     text: message.text,
                     provider,
-                    speaker: message.speaker || agentIdentity,
+                    speaker,
                     sourceIdentity: agentIdentity,
                 }));
             }

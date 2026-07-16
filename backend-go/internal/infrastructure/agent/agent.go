@@ -54,12 +54,12 @@ type Agent struct {
 	mu                sync.Mutex
 	isRunning         bool
 	cancel            context.CancelFunc
-	preferredProvider string // "google", "azure", or "" for auto
+	preferredProvider string // "google", "gemini", "azure", or "" for auto
 	roomName          string // store room name for status
 }
 
 // New creates a new LiveKit ASR Agent
-// provider can be "google", "azure", or "" for auto-detect
+// provider can be "google", "gemini", "azure", or "" for auto-detect
 func New(cfg *config.Config, provider string) *Agent {
 	return &Agent{
 		config:            cfg,
@@ -143,6 +143,8 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 			identity = "agent-google"
 		} else if a.config.HasAzureKey() {
 			identity = "agent-azure"
+		} else if a.config.HasGeminiKey() {
+			identity = "agent-gemini"
 		} else {
 			identity = "agent-unknown"
 		}
@@ -266,8 +268,24 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		} else {
 			log.Println("⚠️ [Agent] Google requested but no API key configured")
 		}
+	case "gemini":
+		if a.config.HasGeminiKey() {
+			provider, err = asr.NewGeminiProvider(ctx, asr.GeminiConfig{
+				APIKey:             a.config.GeminiAPIKey,
+				Model:              a.config.GeminiConfig.Model,
+				LanguageCode:       a.config.GeminiConfig.LanguageCode,
+				TargetLanguageCode: a.config.GeminiConfig.TargetLanguageCode,
+				SampleRate:         a.config.GeminiConfig.SampleRate,
+			})
+			needsResample = true
+			if err != nil {
+				log.Printf("⚠️ [Agent] Failed to init Gemini provider: %v", err)
+			}
+		} else {
+			log.Println("⚠️ [Agent] Gemini requested but no API key configured")
+		}
 	default:
-		// Auto-detect: try Google first, then Azure
+		// Auto-detect: preserve the existing Google/Azure priority, then use Gemini.
 		if a.config.HasGoogleKey() {
 			provider, err = asr.NewGoogleProvider(ctx, asr.GoogleConfig{
 				CredentialsFile:       a.config.GoogleApplicationCredentials,
@@ -295,6 +313,19 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 			needsResample = true
 			if err != nil {
 				log.Printf("⚠️ [Agent] Failed to init Azure provider: %v", err)
+			}
+		}
+		if provider == nil && a.config.HasGeminiKey() {
+			provider, err = asr.NewGeminiProvider(ctx, asr.GeminiConfig{
+				APIKey:             a.config.GeminiAPIKey,
+				Model:              a.config.GeminiConfig.Model,
+				LanguageCode:       a.config.GeminiConfig.LanguageCode,
+				TargetLanguageCode: a.config.GeminiConfig.TargetLanguageCode,
+				SampleRate:         a.config.GeminiConfig.SampleRate,
+			})
+			needsResample = true
+			if err != nil {
+				log.Printf("⚠️ [Agent] Failed to init Gemini provider: %v", err)
 			}
 		}
 	}

@@ -1,3 +1,5 @@
+import type { TranscriptSegment } from '../types';
+
 export interface TranscriptMessage {
     type: 'transcript';
     text: string;
@@ -14,6 +16,27 @@ export interface InterimTranscript {
     provider: string;
     speaker: string;
     sourceIdentity: string;
+}
+
+export function isAppendOnlyInterimProvider(provider: string): boolean {
+    return provider.toLowerCase() === 'gemini';
+}
+
+export function appendTranscriptIfNew(
+    current: ReadonlyArray<TranscriptSegment>,
+    next: TranscriptSegment,
+): TranscriptSegment[] {
+    const previous = current[current.length - 1];
+    if (
+        previous &&
+        previous.text === next.text &&
+        previous.provider === next.provider &&
+        previous.speaker === next.speaker
+    ) {
+        return [...current];
+    }
+
+    return [...current.slice(-499), next];
 }
 
 export function parseTranscriptMessage(value: unknown): TranscriptMessage | undefined {

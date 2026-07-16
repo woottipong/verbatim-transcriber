@@ -14,8 +14,10 @@ import { appendBounded } from '../lib/runtime';
 import {
     InterimTranscript,
     TranscriptMessage,
+    appendTranscriptIfNew,
     clearInterimsBySource,
     getTranscriptKey,
+    isAppendOnlyInterimProvider,
     parseTranscriptMessage,
     removeInterim,
     upsertInterim,
@@ -82,17 +84,20 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const connectionAttemptRef = useRef(0);
 
     const applyTranscriptUpdate = useCallback((message: BufferedTranscriptMessage) => {
-        if (message.isFinal) {
+        const provider = message.provider || 'unknown';
+        if (message.isFinal || isAppendOnlyInterimProvider(provider)) {
             segmentIdRef.current++;
             const segment: TranscriptSegment = {
                 id: `lk-${segmentIdRef.current}`,
                 text: message.text,
                 isFinal: true,
                 timestamp: message.timestamp || Date.now(),
-                provider: message.provider,
+                provider,
                 speaker: message.speaker,
             };
-            setTranscripts(prev => appendBounded(prev, segment));
+            setTranscripts(prev => isAppendOnlyInterimProvider(provider)
+                ? appendTranscriptIfNew(prev, segment)
+                : appendBounded(prev, segment));
             setInterimTranscripts(prev => removeInterim(prev, message.key));
             return;
         }
@@ -148,15 +153,24 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             const message = parseTranscriptMessage(JSON.parse(decoder.decode(payload)));
             if (!message) return;
             const sourceIdentity = participant?.identity || 'unknown';
-            transcriptUpdatesRef.current?.push({
+            const bufferedMessage = {
                 ...message,
                 key: getTranscriptKey(message, sourceIdentity),
                 sourceIdentity,
-            });
+            };
+
+            // Gemini Live emits committed input chunks as interim packets.
+            // Preserve every chunk so the transcript reads like ordinary STT.
+            if (isAppendOnlyInterimProvider(message.provider || '')) {
+                applyTranscriptUpdate(bufferedMessage);
+                return;
+            }
+
+            transcriptUpdatesRef.current?.push(bufferedMessage);
         } catch (err) {
             console.error('[LiveKit] Failed to parse transcript data:', err);
         }
-    }, []);
+    }, [applyTranscriptUpdate]);
 
     // Handle participant connected (check for agent)
     const handleParticipantConnected = useCallback((participant: RemoteParticipant) => {

@@ -30,7 +30,7 @@ import (
 //   - Text messages: JSON control messages (start/stop)
 //   - Binary messages: Raw PCM audio data (Int16 Little-Endian)
 //
-// providerName: "Google" or "Azure" (used for logging and provider selection)
+// providerName: "Google", "Gemini", or "Azure" (used for logging and provider selection)
 func HandleASR(conn *websocketFiber.Conn, cfg *config.Config, providerName string) {
 	logConnection(providerName)
 	conn.SetReadLimit(1 << 20)
@@ -150,7 +150,7 @@ func HandleASR(conn *websocketFiber.Conn, cfg *config.Config, providerName strin
 }
 
 // createASRProvider creates the appropriate ASR provider based on providerName.
-// Supports "Google" and "Azure" providers with configuration from config.Config.
+// Supports "Google", "Gemini", and "Azure" providers with configuration from config.Config.
 func createASRProvider(ctx context.Context, cfg *config.Config, providerName string, msg models.Message) (domain.ASRProvider, error) {
 	switch strings.ToLower(providerName) {
 	case "google":
@@ -195,6 +195,19 @@ func createASRProvider(ctx context.Context, cfg *config.Config, providerName str
 			SampleRate:                     cfg.AzureConfig.SampleRate,
 			SegmentationSilenceTimeout:     cfg.AzureConfig.SegmentationSilenceTimeout,
 			SegmentationMaxSilenceDuration: cfg.AzureConfig.SegmentationMaxSilenceDuration,
+		})
+
+	case "gemini":
+		if cfg.GeminiAPIKey == "" {
+			return nil, fmt.Errorf("gemini credentials not configured")
+		}
+
+		return asr.NewGeminiProvider(ctx, asr.GeminiConfig{
+			APIKey:             cfg.GeminiAPIKey,
+			Model:              cfg.GeminiConfig.Model,
+			LanguageCode:       cfg.GeminiConfig.LanguageCode,
+			TargetLanguageCode: cfg.GeminiConfig.TargetLanguageCode,
+			SampleRate:         cfg.GeminiConfig.SampleRate,
 		})
 
 	default:

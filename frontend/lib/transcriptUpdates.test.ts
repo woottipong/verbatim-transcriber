@@ -121,6 +121,20 @@ test('updates and clears interim entries by speaker and source', async () => {
     assert.deepEqual(Array.from(entries.keys()), ['azure:user-3']);
 });
 
+test('keeps Gemini interim chunks as separate transcript rows', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const append = module.appendTranscriptIfNew;
+    const isAppendOnly = module.isAppendOnlyInterimProvider;
+    const first = { id: '1', text: 'ทดสอบ', isFinal: true, timestamp: 1, provider: 'gemini', speaker: 'user-1' };
+    const second = { id: '2', text: 'เอาเด็กเท่านั้น', isFinal: true, timestamp: 2, provider: 'gemini', speaker: 'user-1' };
+
+    assert.equal(isAppendOnly('gemini'), true);
+    let rows = append([], first);
+    rows = append(rows, second);
+    assert.deepEqual(rows.map(row => row.text), ['ทดสอบ', 'เอาเด็กเท่านั้น']);
+    assert.deepEqual(append(rows, { ...second, id: '3' }).map(row => row.text), ['ทดสอบ', 'เอาเด็กเท่านั้น']);
+});
+
 test('sticks to latest only while the viewport is near the bottom', async () => {
     const module = await import('./transcriptViewport.ts').catch(() => ({}));
     const shouldStick = 'shouldStickToLatest' in module ? module.shouldStickToLatest : () => false;

@@ -10,6 +10,7 @@ func TestValidateAgentProvider(t *testing.T) {
 	cfg := &config.Config{
 		GoogleCloudProject:           "project",
 		GoogleApplicationCredentials: "credentials.json",
+		GeminiAPIKey:                 "gemini-key",
 		AzureSubscriptionKey:         "azure-key",
 		AzureRegion:                  "southeastasia",
 	}
@@ -22,6 +23,7 @@ func TestValidateAgentProvider(t *testing.T) {
 	}{
 		{name: "normalizes Google", provider: " Google ", want: "google"},
 		{name: "accepts Azure", provider: "azure", want: "azure"},
+		{name: "accepts Gemini", provider: " GEMINI ", want: "gemini"},
 		{name: "rejects empty", wantErr: true},
 		{name: "rejects unknown", provider: "other", wantErr: true},
 	}

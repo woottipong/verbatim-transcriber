@@ -111,6 +111,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
     const getProviderColor = (provider: string) => {
         switch (provider.toLowerCase()) {
             case 'google': return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
+            case 'gemini': return 'text-violet-400 bg-violet-500/20 border-violet-500/30';
             case 'azure': return 'text-cyan-400 bg-cyan-500/20 border-cyan-500/30';
             default: return 'text-slate-400 bg-slate-500/20 border-slate-500/30';
         }
@@ -386,17 +387,26 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
 
                                         {/* Interim transcripts (per agent) */}
                                         {filteredInterims.map(interim => (
-                                                <div
-                                                    key={interim.key}
-                                                    className="my-2 grid grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-3"
-                                                >
-                                                    <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(interim.provider)}`}>
-                                                        {interim.provider}<span className="ml-1 normal-case opacity-75">· {interim.speaker}</span>
+                                            <div
+                                                key={interim.key}
+                                                className="transcript-row transcript-row--interim grid grid-cols-[auto_minmax(0,1fr)] gap-3 py-3"
+                                                role="status"
+                                                aria-live="polite"
+                                                aria-atomic="true"
+                                                aria-label={`Live interim transcript from ${interim.speaker}`}
+                                            >
+                                                <span className="transcript-row__marker pt-0.5 text-sm text-violet-300" aria-hidden="true">↳</span>
+                                                <div className="transcript-row__content flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1">
+                                                    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(interim.provider)}`}>
+                                                        <span className="transcript-live-dot" aria-hidden="true" />
+                                                        {interim.provider} · Live draft
                                                     </span>
-                                                    <p className="min-w-0 text-[1rem] italic leading-7 text-violet-100" aria-live="polite">
+                                                    <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-violet-300/70">กำลังถอดเสียง</span>
+                                                    <p className="transcript-row__text basis-full min-w-0 text-[1rem] leading-7 text-slate-300">
                                                         {interim.text}
                                                     </p>
                                                 </div>
+                                            </div>
                                         ))}
                                     </>
                                 )}

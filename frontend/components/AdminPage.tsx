@@ -67,7 +67,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
 
     // Agent start form
     const [agentRoom, setAgentRoom] = useState('');
-    const [agentProvider, setAgentProvider] = useState<'google' | 'azure'>('google');
+    const [agentProvider, setAgentProvider] = useState<'google' | 'gemini' | 'azure'>('google');
     const [isStartingAgent, setIsStartingAgent] = useState(false);
     const [isStoppingAgent, setIsStoppingAgent] = useState(false);
 
@@ -496,11 +496,12 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                     <label htmlFor="agent-provider" className="mb-1 block text-xs font-medium text-slate-400">Provider</label>
                                     <select
                                         value={agentProvider}
-                                        onChange={(e) => setAgentProvider(e.target.value as 'google' | 'azure')}
+                                        onChange={(e) => setAgentProvider(e.target.value as 'google' | 'gemini' | 'azure')}
                                         id="agent-provider"
                                         className="h-10 w-full rounded-lg border border-slate-600 bg-slate-950/40 px-3 text-sm text-white"
                                     >
                                         <option value="google">Google Cloud STT</option>
+                                        <option value="gemini">Gemini Live STT (text)</option>
                                         <option value="azure">Azure Speech</option>
                                     </select>
                                 </div>
