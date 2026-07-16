@@ -78,8 +78,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
     const [isMicrophoneEnabled, setIsMicrophoneEnabled] = useState(false);
     const [participants, setParticipants] = useState<RemoteParticipant[]>([]);
-    const [isAgentConnected, setIsAgentConnected] = useState(false);
-    const [agentIdentity, setAgentIdentity] = useState<string | null>(null);
+    const [connectedAgents, setConnectedAgents] = useState<string[]>([]);
 
     // Refs
     const roomRef = useRef<Room | null>(null);
@@ -185,8 +184,10 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
 
         // Check if it's the agent
         if (participant.identity.startsWith('agent-') || participant.identity === 'asr-agent') {
-            setIsAgentConnected(true);
-            setAgentIdentity(participant.identity);
+            setConnectedAgents(prev => {
+                if (prev.includes(participant.identity)) return prev;
+                return [...prev, participant.identity];
+            });
             console.log('[LiveKit] 🤖 Agent connected:', participant.identity);
         }
     }, []);
@@ -197,10 +198,9 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         setParticipants(prev => prev.filter(p => p.sid !== participant.sid));
 
         if (participant.identity.startsWith('agent-') || participant.identity === 'asr-agent') {
-            setIsAgentConnected(false);
-            setAgentIdentity(null);
+            setConnectedAgents(prev => prev.filter(id => id !== participant.identity));
             setInterimTranscripts(prev => clearInterimsBySource(prev, participant.identity));
-            console.log('[LiveKit] 🤖 Agent disconnected');
+            console.log('[LiveKit] 🤖 Agent disconnected:', participant.identity);
         }
     }, []);
 
@@ -306,13 +306,12 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             const existingParticipants = Array.from(newRoom.remoteParticipants.values());
             setParticipants(existingParticipants);
 
-            const agent = existingParticipants.find(
+            const agents = existingParticipants.filter(
                 p => p.identity.startsWith('agent-') || p.identity === 'asr-agent'
             );
-            if (agent) {
-                setIsAgentConnected(true);
-                setAgentIdentity(agent.identity);
-                console.log('[LiveKit] 🤖 Agent already in room');
+            if (agents.length > 0) {
+                setConnectedAgents(agents.map(a => a.identity));
+                console.log('[LiveKit] 🤖 Agents already in room:', agents.map(a => a.identity));
             }
 
         } catch (err) {
@@ -374,8 +373,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         setMediaStream(null);
         setIsMicrophoneEnabled(false);
         setParticipants([]);
-        setIsAgentConnected(false);
-        setAgentIdentity(null);
+        setConnectedAgents([]);
         setConnectionState(ConnectionState.DISCONNECTED);
     }, []);
 
@@ -417,8 +415,8 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         disconnect,
         toggleMicrophone,
         clearTranscripts,
-        isAgentConnected,
-        agentIdentity,
+        isAgentConnected: connectedAgents.length > 0,
+        agentIdentity: connectedAgents.length > 0 ? connectedAgents.join(',') : null,
         currentRoomName: roomName,
     };
 }

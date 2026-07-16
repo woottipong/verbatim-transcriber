@@ -103,6 +103,7 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
               interimTranscripts={livekitHook.interimTranscripts}
               connectionState={livekitHook.connectionState}
               isAgentConnected={livekitHook.isAgentConnected}
+              agentIdentity={livekitHook.agentIdentity}
               isMicrophoneEnabled={livekitHook.isMicrophoneEnabled}
               participantCount={livekitHook.participants.length + 1}
               error={livekitHook.error}
