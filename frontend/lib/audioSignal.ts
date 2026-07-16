@@ -7,6 +7,16 @@ export interface InputSignalMonitorOptions {
   activityHoldMs: number;
 }
 
+export function getCanvasMetrics(width: number, height: number, pixelRatio: number) {
+  const safePixelRatio = Math.min(Math.max(pixelRatio || 1, 1), 2);
+  return {
+    displayWidth: width,
+    displayHeight: height,
+    backingWidth: Math.max(1, Math.floor(width * safePixelRatio)),
+    backingHeight: Math.max(1, Math.floor(height * safePixelRatio)),
+  };
+}
+
 const DEFAULT_MONITOR_OPTIONS: InputSignalMonitorOptions = {
   activityThreshold: 0.018,
   lowInputThreshold: 0.004,

@@ -21,6 +21,7 @@ type Config struct {
 
 type GoogleConfig struct {
 	Location              string
+	Model                 string
 	LanguageCode          string
 	SampleRate            int
 	EnableAutoPunctuation bool // false = faster finalization (no waiting for context)
@@ -43,7 +44,7 @@ func Load() *Config {
 	return &Config{
 		Port:                         getEnv("PORT", "3000"),
 		Host:                         getEnv("HOST", "localhost"),
-		AllowedOrigins:               getEnv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000"),
+		AllowedOrigins:               getEnv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000"),
 		GoogleAPIKey:                 os.Getenv("GOOGLE_API_KEY"),
 		GoogleApplicationCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
 		GoogleCloudProject:           os.Getenv("GOOGLE_CLOUD_PROJECT"),
@@ -54,6 +55,7 @@ func Load() *Config {
 		LiveKitURL:                   getEnv("LIVEKIT_WS_URL", "ws://localhost:7880"),
 		GoogleConfig: GoogleConfig{
 			Location:              getEnv("GOOGLE_CLOUD_LOCATION", "asia-southeast1"),
+			Model:                 getEnv("GOOGLE_SPEECH_MODEL", "chirp_2"),
 			LanguageCode:          "th-TH",
 			SampleRate:            48000,
 			EnableAutoPunctuation: true, // Let Google add punctuation for more natural sentence formatting

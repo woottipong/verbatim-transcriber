@@ -12,6 +12,7 @@ func TestBuildV2StreamingConfigRequest(t *testing.T) {
 	request := buildV2StreamingConfigRequest(GoogleConfig{
 		ProjectID:             "thai-transcriber",
 		Location:              "asia-southeast1",
+		Model:                 "chirp_3",
 		SampleRate:            48000,
 		LanguageCode:          "th-TH",
 		EnableAutoPunctuation: true,
@@ -25,7 +26,7 @@ func TestBuildV2StreamingConfigRequest(t *testing.T) {
 	if config == nil {
 		t.Fatal("streaming config is nil")
 	}
-	if got, want := config.GetConfig().GetModel(), "chirp_2"; got != want {
+	if got, want := config.GetConfig().GetModel(), "chirp_3"; got != want {
 		t.Fatalf("model = %q, want %q", got, want)
 	}
 	if got, want := config.GetConfig().GetLanguageCodes(), []string{"th-TH"}; len(got) != len(want) || got[0] != want[0] {
@@ -36,6 +37,19 @@ func TestBuildV2StreamingConfigRequest(t *testing.T) {
 	}
 	if !config.GetStreamingFeatures().GetInterimResults() {
 		t.Fatal("interim results are disabled")
+	}
+}
+
+func TestBuildV2StreamingConfigRequestDefaultsToChirp2(t *testing.T) {
+	request := buildV2StreamingConfigRequest(GoogleConfig{
+		ProjectID:    "thai-transcriber",
+		Location:     "asia-southeast1",
+		SampleRate:   48000,
+		LanguageCode: "th-TH",
+	})
+
+	if got, want := request.GetStreamingConfig().GetConfig().GetModel(), "chirp_2"; got != want {
+		t.Fatalf("model = %q, want %q", got, want)
 	}
 }
 

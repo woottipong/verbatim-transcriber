@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { getCanvasMetrics } from '../lib/audioSignal';
 
 interface VisualizerProps {
   bars: number[];
@@ -56,17 +57,16 @@ const Visualizer: React.FC<VisualizerProps> = ({ bars, isActive, isListening }) 
 
     const resizeCanvas = () => {
       const bounds = canvas.getBoundingClientRect();
-      const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
-      const nextWidth = Math.max(1, Math.floor(bounds.width * pixelRatio));
-      const nextHeight = Math.max(1, Math.floor(bounds.height * pixelRatio));
+      const metrics = getCanvasMetrics(bounds.width, bounds.height, window.devicePixelRatio);
+      canvasWidth = metrics.displayWidth;
+      canvasHeight = metrics.displayHeight;
 
-      if (canvas.width === nextWidth && canvas.height === nextHeight) return;
+      if (canvas.width === metrics.backingWidth && canvas.height === metrics.backingHeight) return;
 
-      canvas.width = nextWidth;
-      canvas.height = nextHeight;
-      canvasWidth = bounds.width;
-      canvasHeight = bounds.height;
-      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      canvas.width = metrics.backingWidth;
+      canvas.height = metrics.backingHeight;
+      const scale = metrics.backingWidth / Math.max(metrics.displayWidth, 1);
+      context.setTransform(scale, 0, 0, scale, 0, 0);
     };
 
     const draw = () => {

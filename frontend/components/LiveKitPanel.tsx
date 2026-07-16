@@ -220,12 +220,24 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
               </div>
             ))}
             {Array.from<InterimTranscript>(interimTranscripts.values()).map(interim => (
-              <div key={interim.key} className="my-2 flex items-baseline gap-2.5 rounded-lg border border-violet-400/35 bg-violet-500/10 px-3.5 py-2.5" aria-label={`Live interim transcript from ${interim.speaker}`}>
-                <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-violet-200">
-                  <span className="status-dot status-dot--pending" aria-hidden="true" /> Live
+              <div
+                key={interim.key}
+                className="transcript-row transcript-row--interim grid grid-cols-[2.25rem_minmax(0,1fr)] items-baseline gap-3 py-2.5"
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+                aria-label={`Live interim transcript from ${interim.speaker}`}
+              >
+                <span className="pt-0.5 text-xs tabular-nums text-slate-500">
+                  {String(transcripts.length + 1).padStart(2, '0')}
                 </span>
-                <span className="shrink-0 text-xs text-violet-300/80">{interim.provider}</span>
-                <p className="min-w-0 text-[1.05rem] leading-7 text-violet-50">{interim.text}</p>
+                <div className="transcript-row__content flex min-w-0 items-baseline gap-2.5">
+                  <span className={`inline-flex shrink-0 items-center gap-1.5 rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${providerClasses[interim.provider] ?? 'border-violet-400/30 bg-violet-400/10 text-violet-200'}`}>
+                    <span className="transcript-live-dot" aria-hidden="true" />
+                    {interim.provider.toUpperCase()} · LIVE
+                  </span>
+                  <p className="transcript-row__text min-w-0 text-[1.05rem] leading-7 text-slate-300">{interim.text}</p>
+                </div>
               </div>
             ))}
           </div>

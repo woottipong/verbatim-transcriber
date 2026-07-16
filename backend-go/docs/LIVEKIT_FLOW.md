@@ -215,7 +215,7 @@ Agent ส่ง transcript ไปยังทุก participant ผ่าน rel
 ```bash
 LIVEKIT_API_KEY=your_key
 LIVEKIT_API_SECRET=your_secret
-LIVEKIT_URL=ws://localhost:7880    # Production: wss://your-domain
+LIVEKIT_WS_URL=ws://localhost:7880 # Production: wss://your-domain
 ```
 
 ---

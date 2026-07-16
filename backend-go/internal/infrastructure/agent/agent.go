@@ -34,6 +34,18 @@ type TranscriptMessage struct {
 	Speaker    string  `json:"speaker,omitempty"`
 }
 
+const liveAudioBatchDuration = 40 * time.Millisecond
+
+func audioBatchTargetBytes(sampleRate int, duration time.Duration) int {
+	return sampleRate * 2 * int(duration) / int(time.Second)
+}
+
+func transcriptDeliveryReliable(_ bool) bool {
+	// Transcript snapshots are small and every interim state is meaningful UI.
+	// Reliable delivery prevents active drafts from disappearing on busy rooms.
+	return true
+}
+
 // Agent handles audio transcription in a LiveKit room
 type Agent struct {
 	config            *config.Config
@@ -243,6 +255,7 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 				APIKey:                a.config.GoogleAPIKey,
 				ProjectID:             a.config.GoogleCloudProject,
 				Location:              a.config.GoogleConfig.Location,
+				Model:                 a.config.GoogleConfig.Model,
 				SampleRate:            48000, // Google can handle 48kHz
 				LanguageCode:          a.config.GoogleConfig.LanguageCode,
 				EnableAutoPunctuation: a.config.GoogleConfig.EnableAutoPunctuation,
@@ -261,6 +274,7 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 				APIKey:                a.config.GoogleAPIKey,
 				ProjectID:             a.config.GoogleCloudProject,
 				Location:              a.config.GoogleConfig.Location,
+				Model:                 a.config.GoogleConfig.Model,
 				SampleRate:            48000,
 				LanguageCode:          a.config.GoogleConfig.LanguageCode,
 				EnableAutoPunctuation: a.config.GoogleConfig.EnableAutoPunctuation,
@@ -325,11 +339,9 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 	// PCM buffer for decoded audio (max 120ms frame at 48kHz mono = 5760 samples)
 	pcmBuffer := make([]int16, 5760)
 
-	// Audio batching: accumulate PCM before sending to ASR to reduce
-	// gRPC/WS call overhead. RTP packets are ~20ms each — sending every
-	// packet individually causes heavy lock contention on the provider.
-	// Batch ~100ms of audio before sending for optimal throughput.
-	const batchTargetBytes = 9600 // ~100ms at 48kHz mono 16-bit (4800 samples × 2 bytes)
+	// Keep enough batching to avoid per-packet provider calls while limiting
+	// capture-side latency to roughly two 20ms WebRTC audio packets.
+	batchTargetBytes := audioBatchTargetBytes(provider.SampleRate(), liveAudioBatchDuration)
 	audioBatch := make([]byte, 0, batchTargetBytes*2)
 
 	for {
@@ -433,13 +445,19 @@ func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, particip
 			continue
 		}
 
-		// Log final transcripts only
 		if result.IsFinal {
 			log.Printf("📝 [%s] %s", participant.Identity(), msg.Text)
+		} else {
+			log.Printf("🟡 [Agent] INTERIM from %s (provider=%s, reliable=%t): %q",
+				participant.Identity(),
+				provider.Name(),
+				transcriptDeliveryReliable(false),
+				msg.Text,
+			)
 		}
 
 		// Publish via Data Channel to all participants
-		if err := a.publishTranscript(data); err != nil {
+		if err := a.publishTranscript(data, transcriptDeliveryReliable(result.IsFinal)); err != nil {
 			log.Printf("❌ [Agent] Error publishing transcript: %v", err)
 		}
 	}
@@ -457,7 +475,7 @@ func newTranscriptMessage(result domain.TranscriptResult, provider, speaker stri
 	}
 }
 
-func (a *Agent) publishTranscript(data []byte) error {
+func (a *Agent) publishTranscript(data []byte, reliable bool) error {
 	a.mu.Lock()
 	room := a.room
 	a.mu.Unlock()
@@ -466,6 +484,8 @@ func (a *Agent) publishTranscript(data []byte) error {
 		return nil
 	}
 
-	// Publish to all participants via reliable data channel
-	return room.LocalParticipant.PublishDataPacket(lksdk.UserData(data), lksdk.WithDataPublishReliable(true))
+	return room.LocalParticipant.PublishDataPacket(
+		lksdk.UserData(data),
+		lksdk.WithDataPublishReliable(reliable),
+	)
 }

@@ -143,13 +143,14 @@ GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
 GOOGLE_CLOUD_PROJECT=your-google-cloud-project-id
 # Optional; defaults to asia-southeast1 for Thai Chirp 2
 GOOGLE_CLOUD_LOCATION=asia-southeast1
+GOOGLE_SPEECH_MODEL=chirp_2
 AZURE_SUBSCRIPTION_KEY=your_key
 AZURE_REGION=southeastasia
 
 # LiveKit (optional)
 LIVEKIT_API_KEY=your_key
 LIVEKIT_API_SECRET=your_secret
-LIVEKIT_URL=wss://your-livekit-server.com
+LIVEKIT_WS_URL=wss://your-livekit-server.com
 ```
 
 ## Check Provider Status

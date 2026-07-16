@@ -26,6 +26,8 @@ interface BufferedTranscriptMessage extends TranscriptMessage {
     sourceIdentity: string;
 }
 
+const INTERIM_UPDATE_INTERVAL_MS = 33;
+
 export interface UseLiveKitOptions {
     serverUrl: string;       // LiveKit server URL (ws://localhost:7880)
     tokenEndpoint: string;   // Backend token endpoint (http://localhost:3000/livekit/token)
@@ -108,7 +110,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     if (transcriptUpdatesRef.current === null) {
         transcriptUpdatesRef.current = new TranscriptUpdateBuffer<BufferedTranscriptMessage>(
             applyTranscriptUpdate,
-            50,
+            INTERIM_UPDATE_INTERVAL_MS,
             undefined,
             undefined,
             message => message.isFinal,

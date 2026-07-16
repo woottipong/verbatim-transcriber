@@ -236,13 +236,16 @@ PORT=3000
 
 # ASR Providers (configure what you have)
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
+GOOGLE_CLOUD_PROJECT=your-google-cloud-project-id
+GOOGLE_CLOUD_LOCATION=asia-southeast1
+GOOGLE_SPEECH_MODEL=chirp_2
 AZURE_SUBSCRIPTION_KEY=your_key
 AZURE_REGION=southeastasia
 
 # LiveKit (optional)
 LIVEKIT_API_KEY=your_key
 LIVEKIT_API_SECRET=your_secret
-LIVEKIT_URL=ws://localhost:7880
+LIVEKIT_WS_URL=ws://localhost:7880
 ```
 
 ### Frontend (`frontend/.env`)

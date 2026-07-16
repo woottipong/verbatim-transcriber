@@ -11,7 +11,7 @@ services:
       - "7882:7882/udp"   # WebRTC UDP
       - "50000-50100:50000-50100/udp"  # WebRTC UDP range
     environment:
-      - "LIVEKIT_KEYS=devkey: secret"
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:-devkey}: ${LIVEKIT_API_SECRET:-secret}"
     command: --dev --bind 0.0.0.0
     restart: unless-stopped
     depends_on:

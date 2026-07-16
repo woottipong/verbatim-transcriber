@@ -91,11 +91,16 @@ const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
               </div>
             ))}
             {interimTranscript && (
-              <div className="my-2 flex items-baseline gap-2.5 rounded-lg border border-indigo-400/30 bg-indigo-400/10 px-3 py-2.5" aria-label="Live interim transcript" aria-live="polite">
-                <span className="flex shrink-0 items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-indigo-200">
-                  <span className="status-dot status-dot--pending" aria-hidden="true" /> Interim
+              <div className="transcript-row transcript-row--interim grid grid-cols-[2rem_minmax(0,1fr)] items-baseline gap-2 py-3" role="status" aria-label="Live interim transcript" aria-live="polite" aria-atomic="true">
+                <span className="pt-0.5 text-xs tabular-nums text-slate-500">
+                  {String(transcripts.length + 1).padStart(2, '0')}
                 </span>
-                <p className="min-w-0 text-base leading-7 text-indigo-50">{interimTranscript}</p>
+                <div className="transcript-row__content flex min-w-0 items-baseline gap-2.5">
+                  <span className="inline-flex shrink-0 items-center gap-1.5 rounded border border-violet-400/30 bg-violet-400/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-violet-200">
+                    <span className="transcript-live-dot" aria-hidden="true" /> LIVE
+                  </span>
+                  <p className="transcript-row__text min-w-0 text-base leading-7 text-slate-300">{interimTranscript}</p>
+                </div>
               </div>
             )}
           </div>

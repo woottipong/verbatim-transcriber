@@ -3,11 +3,21 @@ import test from 'node:test';
 
 import {
   calculateRms,
+  getCanvasMetrics,
   createInputSignalMonitor,
   smoothWaveformBars,
   toFrequencyBars,
   toWaveformBars,
 } from './audioSignal.ts';
+
+test('canvas metrics retain display size when backing dimensions already match', () => {
+  assert.deepEqual(getCanvasMetrics(320, 64, 2), {
+    displayWidth: 320,
+    displayHeight: 64,
+    backingWidth: 640,
+    backingHeight: 128,
+  });
+});
 
 test('calculateRms returns zero for a centered silent signal', () => {
   assert.equal(calculateRms(new Uint8Array([128, 128, 128, 128])), 0);

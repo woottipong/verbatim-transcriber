@@ -88,6 +88,7 @@ type GoogleProvider struct {
 	closeOnce       sync.Once
 	projectID       string
 	location        string
+	model           string
 	isRunning       bool
 	stopped         bool // user explicitly called Stop()
 	sampleRate      int
@@ -109,6 +110,7 @@ type GoogleConfig struct {
 	APIKey                string
 	ProjectID             string
 	Location              string
+	Model                 string
 	SampleRate            int
 	LanguageCode          string
 	EnableAutoPunctuation bool
@@ -149,6 +151,7 @@ func NewGoogleProvider(ctx context.Context, cfg GoogleConfig) (*GoogleProvider, 
 	if langCode == "" {
 		langCode = "th-TH"
 	}
+	model := googleModel(cfg.Model)
 
 	// Ring buffer size = 1 second of audio at the given sample rate
 	// PCM Int16 = 2 bytes per sample
@@ -159,6 +162,7 @@ func NewGoogleProvider(ctx context.Context, cfg GoogleConfig) (*GoogleProvider, 
 		results:         make(chan domain.TranscriptResult, 100),
 		projectID:       cfg.ProjectID,
 		location:        location,
+		model:           model,
 		sampleRate:      sampleRate,
 		languageCode:    langCode,
 		autoPunctuation: cfg.EnableAutoPunctuation,
@@ -180,7 +184,7 @@ func buildV2StreamingConfigRequest(cfg GoogleConfig) *speechpb.StreamingRecogniz
 						},
 					},
 					LanguageCodes: []string{cfg.LanguageCode},
-					Model:         "chirp_2",
+					Model:         googleModel(cfg.Model),
 					Features: &speechpb.RecognitionFeatures{
 						EnableAutomaticPunctuation: cfg.EnableAutoPunctuation,
 						MaxAlternatives:            1,
@@ -192,6 +196,13 @@ func buildV2StreamingConfigRequest(cfg GoogleConfig) *speechpb.StreamingRecogniz
 			},
 		},
 	}
+}
+
+func googleModel(model string) string {
+	if model == "" {
+		return "chirp_2"
+	}
+	return model
 }
 
 func audioChunks(audio []byte) [][]byte {
@@ -233,7 +244,7 @@ func (g *GoogleProvider) Start(ctx context.Context) error {
 	}
 
 	g.isRunning = true
-	log.Println("✅ [Google] STT stream started")
+	log.Printf("✅ [Google] STT stream started (model=%s, location=%s, language=%s)", g.model, g.location, g.languageCode)
 	return nil
 }
 
@@ -252,6 +263,7 @@ func (g *GoogleProvider) startStreamLocked() error {
 	err = stream.Send(buildV2StreamingConfigRequest(GoogleConfig{
 		ProjectID:             g.projectID,
 		Location:              g.location,
+		Model:                 g.model,
 		SampleRate:            g.sampleRate,
 		LanguageCode:          g.languageCode,
 		EnableAutoPunctuation: g.autoPunctuation,
@@ -273,6 +285,7 @@ func (g *GoogleProvider) receiveResponses() {
 	defer func() {
 		close(g.recvDone)
 	}()
+	interimCount := 0
 
 	for {
 		resp, err := g.stream.Recv()
@@ -314,6 +327,19 @@ func (g *GoogleProvider) receiveResponses() {
 				Text:       alt.Transcript,
 				IsFinal:    result.IsFinal,
 				Confidence: float64(alt.Confidence),
+			}
+			if result.IsFinal {
+				log.Printf("📊 [Google] Utterance finalized (interim_updates=%d, model=%s, language=%s)", interimCount, g.model, g.languageCode)
+				interimCount = 0
+			} else {
+				interimCount++
+				log.Printf("🟡 [Google] INTERIM #%d (elapsed=%s, stability=%.2f, model=%s): %q",
+					interimCount,
+					time.Since(g.streamStartTime).Round(10*time.Millisecond),
+					result.GetStability(),
+					g.model,
+					alt.Transcript,
+				)
 			}
 
 			if !g.emitResult(transcript) {

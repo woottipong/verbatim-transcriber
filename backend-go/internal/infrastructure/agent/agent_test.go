@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"thai-transcriber-backend/internal/domain"
 )
@@ -62,5 +63,38 @@ func TestNewTranscriptMessageNormalizesThaiSpacing(t *testing.T) {
 
 	if got, want := message.Text, "ทดสอบถอดความ 1 2 3 4"; got != want {
 		t.Fatalf("message text = %q, want %q", got, want)
+	}
+}
+
+func TestNewInterimTranscriptMessageKeepsNormalizedThaiText(t *testing.T) {
+	message := newTranscriptMessage(
+		domain.TranscriptResult{Text: "กำ ลัง ทด สอบ", IsFinal: false},
+		"google",
+		"speaker-1",
+	)
+
+	if message.IsFinal {
+		t.Fatal("interim message was marked final")
+	}
+	if got, want := message.Text, "กำลังทดสอบ"; got != want {
+		t.Fatalf("interim message text = %q, want %q", got, want)
+	}
+}
+
+func TestAudioBatchTargetBytesUsesLowLatencyWindow(t *testing.T) {
+	if got, want := audioBatchTargetBytes(48000, 40*time.Millisecond), 3840; got != want {
+		t.Fatalf("audioBatchTargetBytes() = %d, want %d", got, want)
+	}
+	if got, want := audioBatchTargetBytes(16000, 40*time.Millisecond), 1280; got != want {
+		t.Fatalf("audioBatchTargetBytes() = %d, want %d", got, want)
+	}
+}
+
+func TestTranscriptDeliveryIsReliableForInterimAndFinal(t *testing.T) {
+	if !transcriptDeliveryReliable(false) {
+		t.Fatal("interim transcript should use reliable delivery")
+	}
+	if !transcriptDeliveryReliable(true) {
+		t.Fatal("final transcript should use reliable delivery")
 	}
 }
