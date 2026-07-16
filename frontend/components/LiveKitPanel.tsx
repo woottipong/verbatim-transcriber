@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Check, Copy, LogOut, Mic, MicOff, Play, Radio, Trash2, Users } from 'lucide-react';
+import { Eraser, LogOut, Mic, MicOff, Play, Radio, Users } from 'lucide-react';
 import { ConnectionState, TranscriptSegment } from '../types';
 import { InterimTranscript } from '../lib/transcriptMessages';
 import { shouldStickToLatest } from '../lib/transcriptViewport';
@@ -14,12 +14,10 @@ interface LiveKitPanelProps {
   participantCount: number;
   error: string | null;
   roomName: string;
-  onRoomNameChange: (name: string) => void;
   onConnect: () => void;
   onDisconnect: () => void;
   onToggleMicrophone: () => void;
   onClear: () => void;
-  roomPlaceholder?: string;
 }
 
 const providerClasses: Record<string, string> = {
@@ -37,15 +35,12 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
   participantCount,
   error,
   roomName,
-  onRoomNameChange,
   onConnect,
   onDisconnect,
   onToggleMicrophone,
   onClear,
-  roomPlaceholder = 'Room name',
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [copied, setCopied] = useState(false);
   const [isFollowingLatest, setIsFollowingLatest] = useState(true);
 
   useEffect(() => {
@@ -69,20 +64,8 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
       : session.tone === 'error'
         ? 'status-dot--error'
         : '';
-  const agentCommand = `curl -X POST localhost:3000/livekit/agent/start -H "Content-Type: application/json" -d '{"roomName":"${roomName}","provider":"google"}'`;
-
-  const copyAgentCommand = async () => {
-    try {
-      await navigator.clipboard.writeText(agentCommand);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
-    }
-  };
-
   return (
-    <article className="app-panel flex min-h-[390px] flex-col" aria-label="LiveKit transcription workspace">
+    <article className="livekit-panel app-panel flex min-h-[340px] flex-col" aria-label="LiveKit transcription workspace">
       <header className="panel-header px-4 py-3 sm:px-5">
         <div className="session-toolbar">
           <div className="session-toolbar__identity">
@@ -93,10 +76,8 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
               <h3 className="text-sm font-semibold text-slate-100">LiveKit / WebRTC</h3>
               {isConnected ? (
                 <p className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
-                  <span className="truncate font-mono text-slate-300">Room: {roomName}</span>
-                  <span aria-hidden="true">·</span>
                   <Users size={13} aria-hidden="true" />
-                  {participantCount}
+                  {participantCount} {participantCount === 1 ? 'participant' : 'participants'}
                 </p>
               ) : (
                 <p className="mt-0.5 text-xs text-slate-500">Low-latency audio session</p>
@@ -128,20 +109,8 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
           <div className="session-toolbar__actions">
             {!isConnected && !isConnecting && (
               <>
-                <label className="sr-only" htmlFor="livekit-room">LiveKit room name</label>
-                <input
-                  id="livekit-room"
-                  type="text"
-                  value={roomName}
-                  onChange={(event) => onRoomNameChange(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && roomName.trim()) onConnect();
-                  }}
-                  placeholder={roomPlaceholder}
-                  className="h-9 w-full rounded-lg border border-slate-600 bg-slate-950/40 px-3 text-sm text-slate-100 placeholder:text-slate-400 sm:w-48"
-                />
-                <button onClick={onConnect} disabled={!roomName.trim()} className="control-button control-button--primary" aria-label="Join room and turn on microphone">
-                  <Play size={14} fill="currentColor" aria-hidden="true" /> Join &amp; turn on mic
+                <button onClick={onConnect} disabled={!roomName.trim()} className="control-button control-button--primary" aria-label={roomName.trim() ? 'Join room and enable microphone' : 'A room link is required'}>
+                  <Play size={14} fill="currentColor" aria-hidden="true" /> {roomName.trim() ? 'Join & enable mic' : 'Room link required'}
                 </button>
               </>
             )}
@@ -161,8 +130,9 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                 </button>
               </>
             )}
-            <button onClick={onClear} className="control-button control-button--quiet !px-2.5" aria-label="Clear LiveKit transcripts">
-              <Trash2 size={14} aria-hidden="true" />
+            <button onClick={onClear} className="control-button control-button--quiet !px-2.5 sm:!px-3" aria-label="Clear transcript" title="Clear transcript">
+              <Eraser size={14} aria-hidden="true" />
+              <span className="hidden sm:inline">Clear</span>
             </button>
           </div>
         </div>
@@ -176,33 +146,32 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
 
       {isConnected && !isAgentConnected && (
         <div className="border-b border-amber-300/25 bg-amber-300/5 px-4 py-3 sm:px-5">
-          <p className="text-sm text-amber-100">Room connected. Transcription will start automatically when the agent joins.</p>
-          <details className="mt-2 text-xs text-slate-400">
-            <summary className="w-fit cursor-pointer select-none rounded text-amber-200 hover:text-amber-100">Agent setup</summary>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-              <code className="min-w-0 flex-1 overflow-x-auto rounded-md bg-slate-950/45 px-3 py-2 text-slate-300">{agentCommand}</code>
-              <button onClick={copyAgentCommand} className="control-button control-button--quiet shrink-0 text-amber-100" aria-label="Copy agent start command">
-                {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-                {copied ? 'Copied' : 'Copy command'}
-              </button>
-            </div>
-          </details>
+          <p className="text-sm text-amber-100">Room connected. Waiting for the transcription agent.</p>
+          <p className="mt-1 text-xs text-slate-400">An administrator can start the agent from the room workspace.</p>
         </div>
       )}
 
-      <div className="relative min-h-[250px] flex-1">
+      <div className="relative min-h-[200px] flex-1">
       <div
         ref={scrollRef}
         className="transcript-scroller absolute inset-0 overflow-y-auto px-4 py-2 sm:px-5"
         onScroll={(event) => setIsFollowingLatest(shouldStickToLatest(event.currentTarget))}
       >
         {!hasContent ? (
-          <div className="flex h-full min-h-[230px] max-w-sm flex-col justify-center">
+          <div className="transcript-empty-state">
             <p className="text-base font-medium text-slate-300">
-              {session.canSpeak ? 'Speak normally. Your transcript will appear here.' : session.headline}
+              {connectionState === ConnectionState.DISCONNECTED
+                ? 'No transcript yet'
+                : session.canSpeak
+                  ? 'Speak normally. Your transcript will appear here.'
+                  : session.headline}
             </p>
             <p className="mt-2 text-sm leading-6 text-slate-500">
-              {session.canSpeak ? 'Interim text updates live, then settles into a final segment.' : session.detail}
+              {connectionState === ConnectionState.DISCONNECTED
+                ? 'Join the room to enable your microphone and start transcribing.'
+                : session.canSpeak
+                  ? 'Interim text updates live, then settles into a final segment.'
+                  : session.detail}
             </p>
           </div>
         ) : (

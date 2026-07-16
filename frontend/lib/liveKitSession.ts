@@ -72,8 +72,8 @@ export function getLiveKitSessionPresentation(
   if (connectionState === 'DISCONNECTED') {
     const steps: [SessionStepState, SessionStepState, SessionStepState] = ['idle', 'idle', 'idle'];
     return {
-      headline: 'Join a room to start',
-      detail: 'Joining also turns on your microphone so transcription can begin.',
+      headline: 'Ready to join',
+      detail: 'Join this prepared room to connect and enable your microphone.',
       canSpeak: false,
       tone: 'neutral',
       steps,

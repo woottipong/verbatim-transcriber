@@ -10,7 +10,7 @@ const getPresentation = sessionModule.getLiveKitSessionPresentation;
 test('session is not ready before joining a room', () => {
   const presentation = getPresentation('DISCONNECTED', false, false);
 
-  assert.equal(presentation?.headline, 'Join a room to start');
+  assert.equal(presentation?.headline, 'Ready to join');
   assert.equal(presentation?.canSpeak, false);
   assert.deepEqual(presentation?.steps, ['idle', 'idle', 'idle']);
   assert.deepEqual(presentation?.health, [

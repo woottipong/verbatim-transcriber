@@ -1,12 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Eye, Mic2, Radio, Settings, Wrench } from 'lucide-react';
+import { Hash, Mic2, Radio, Settings } from 'lucide-react';
 import { useAudioDevices } from '../hooks/useAudioDevices';
 import { useLiveKit } from '../hooks/useLiveKit';
 import SettingsModal from './SettingsModal';
 import LiveKitPanel from './LiveKitPanel';
 import MicrophoneInputStrip from './MicrophoneInputStrip';
 import { AppConfig, ConnectionState } from '../types';
-import { buildViewerUrl } from '../lib/appRoutes';
 import { toHttpUrl } from '../lib/runtime';
 
 interface StreamPageProps {
@@ -37,14 +36,6 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
     onConfigSave({ ...config, audioDeviceId: deviceId });
   }, [config, onConfigSave]);
 
-  const openViewerTab = useCallback(() => {
-    window.open(buildViewerUrl(`${window.location.origin}${window.location.pathname}`, ''), '_blank', 'noopener,noreferrer');
-  }, []);
-
-  const openAdminTab = useCallback(() => {
-    window.open(`${window.location.origin}${window.location.pathname}`, '_blank', 'noopener,noreferrer');
-  }, []);
-
   const isAnyConnected = livekitHook.connectionState === ConnectionState.CONNECTED;
   const microphoneSource = livekitHook.mediaStream
     ? { mediaStream: livekitHook.mediaStream, label: 'LiveKit', isMicrophoneEnabled: livekitHook.isMicrophoneEnabled }
@@ -53,25 +44,36 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
   return (
     <div className="app-shell">
       <header className="app-header">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-3">
+        <div className="stream-navbar mx-auto max-w-7xl px-4 py-3 sm:px-6">
+          <div className="stream-navbar__brand flex min-w-0 items-center gap-3">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-violet-400/45 bg-violet-500/20 text-violet-200">
               <Radio size={19} aria-hidden="true" />
             </span>
             <div className="min-w-0">
-              <h1 className="truncate text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">Thai Transcription</h1>
-              <p className="truncate text-xs text-slate-400">Live transcription workspace</p>
+              <h1 className="truncate text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">Stream publisher</h1>
+              <p className="truncate text-xs text-slate-400">Join a prepared room to start transcription</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <button onClick={openViewerTab} className="control-button control-button--quiet !hidden sm:!inline-flex" title="Open Viewer">
-              <Eye size={16} /> Viewer
-            </button>
-            <button onClick={openAdminTab} className="control-button control-button--quiet !hidden md:!inline-flex" title="Open Admin">
-              <Wrench size={16} /> Admin
-            </button>
+          <div className="stream-room-nav" aria-label={livekitRoomName ? `Room ${livekitRoomName}` : 'Room link is missing'}>
+            <span className="stream-room-nav__icon" aria-hidden="true">
+              <Hash size={16} />
+            </span>
+            <div className="min-w-0">
+              <code title={livekitRoomName || 'Room link is missing'}>{livekitRoomName || 'Room link required'}</code>
+            </div>
+          </div>
 
+          <MicrophoneInputStrip
+            mediaStream={microphoneSource.mediaStream}
+            sourceLabel={microphoneSource.label}
+            isMicrophoneEnabled={microphoneSource.isMicrophoneEnabled}
+            connectionState={livekitHook.connectionState}
+            variant="navbar"
+            showIdentity={false}
+          />
+
+          <div className="stream-navbar__controls flex items-center gap-1.5 sm:gap-2">
             {audioDevices.length > 1 && (
               <div className="hidden items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-800/70 px-2.5 py-2 lg:flex">
                 <Mic2 size={14} className="text-slate-400" />
@@ -96,20 +98,7 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-        <div className="space-y-8">
-          <MicrophoneInputStrip
-            mediaStream={microphoneSource.mediaStream}
-            sourceLabel={microphoneSource.label}
-            isMicrophoneEnabled={microphoneSource.isMicrophoneEnabled}
-          />
-          <section className="space-y-3" aria-labelledby="livekit-heading">
-            <div className="flex items-end justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-300">WebRTC stream</p>
-                <h2 id="livekit-heading" className="mt-1 text-xl font-semibold tracking-tight text-white">LiveKit transcription</h2>
-              </div>
-              <p className="hidden text-sm text-slate-400 sm:block">Low-latency streaming monitor</p>
-            </div>
+        <section aria-label="LiveKit transcription">
             <LiveKitPanel
               transcripts={livekitHook.transcripts}
               interimTranscripts={livekitHook.interimTranscripts}
@@ -119,15 +108,12 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
               participantCount={livekitHook.participants.length + 1}
               error={livekitHook.error}
               roomName={livekitRoomName}
-              onRoomNameChange={setLivekitRoomName}
               onConnect={livekitHook.connect}
               onDisconnect={livekitHook.disconnect}
               onToggleMicrophone={livekitHook.toggleMicrophone}
               onClear={livekitHook.clearTranscripts}
-              roomPlaceholder="Enter room name..."
             />
-          </section>
-        </div>
+        </section>
       </main>
 
       <SettingsModal

@@ -105,6 +105,7 @@ select:focus-visible {
 
 .session-toolbar__actions {
   display: flex;
+  min-width: 0;
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
@@ -241,6 +242,90 @@ select:focus-visible {
   background: oklch(22% 0.028 274 / 0.82);
 }
 
+.stream-navbar {
+  display: grid;
+  grid-template-columns: minmax(14rem, auto) minmax(8rem, 10rem) minmax(24rem, 1fr) auto;
+  align-items: center;
+  gap: 1.25rem;
+}
+
+.stream-navbar__brand,
+.stream-navbar__controls {
+  min-width: 0;
+}
+
+.stream-navbar__controls {
+  justify-content: flex-end;
+  white-space: nowrap;
+}
+
+.stream-room-nav {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.stream-room-nav__icon {
+  display: inline-flex;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid oklch(55% 0.12 292 / 0.36);
+  border-radius: 8px;
+  color: oklch(82% 0.11 292);
+  background: oklch(34% 0.075 291 / 0.64);
+}
+
+.stream-room-nav code {
+  display: block;
+  max-width: 12rem;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 0.9375rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.microphone-strip--navbar {
+  grid-template-columns: minmax(11rem, auto) minmax(3rem, 1fr) minmax(8rem, auto);
+  gap: 0.85rem;
+  min-width: 0;
+  min-height: 3.75rem;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+}
+
+.microphone-strip--navbar.microphone-strip--compact {
+  grid-template-columns: minmax(0, 1fr) minmax(8rem, auto);
+}
+
+.microphone-strip--navbar.microphone-strip--compact .microphone-strip__status {
+  grid-column: 2;
+}
+
+.microphone-strip--navbar .microphone-strip__identity {
+  gap: 0.6rem;
+}
+
+.microphone-strip--navbar .microphone-strip__identity p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.microphone-strip--navbar .microphone-strip__status {
+  max-width: 9.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .microphone-strip__identity {
   display: flex;
   min-width: 0;
@@ -282,6 +367,10 @@ select:focus-visible {
   overflow: hidden;
 }
 
+.microphone-strip--navbar .audio-waveform {
+  height: 3rem;
+}
+
 .audio-waveform:not(.audio-waveform--listening) .audio-waveform__canvas {
   visibility: hidden;
 }
@@ -321,6 +410,15 @@ select:focus-visible {
 .microphone-strip__status--error {
   color: oklch(86% 0.09 25);
   background: oklch(34% 0.075 25 / 0.7);
+}
+
+.transcript-empty-state {
+  display: flex;
+  min-height: 11rem;
+  max-width: 34rem;
+  flex-direction: column;
+  justify-content: center;
+  padding-block: 1.5rem;
 }
 
 @media (max-width: 1199px) {
@@ -376,6 +474,52 @@ select:focus-visible {
     grid-column: 1 / -1;
     grid-row: 2;
     height: 3.5rem;
+  }
+
+  .microphone-strip--navbar .audio-waveform {
+    height: 2.75rem;
+  }
+
+  .microphone-strip--navbar .microphone-strip__identity p {
+    white-space: normal;
+  }
+}
+
+@media (max-width: 1199px) {
+  .stream-navbar {
+    grid-template-columns: minmax(12rem, auto) minmax(7rem, 9rem) minmax(22rem, 1fr) auto;
+    gap: 0.85rem;
+  }
+
+  .microphone-strip--navbar {
+    gap: 0.75rem;
+  }
+}
+
+@media (max-width: 1023px) {
+  .stream-navbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0.75rem 1rem;
+  }
+
+  .stream-navbar__brand {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .stream-navbar__controls {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .stream-room-nav {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .microphone-strip--navbar {
+    grid-column: 1 / -1;
+    grid-row: 3;
   }
 }
 
