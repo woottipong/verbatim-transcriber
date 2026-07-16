@@ -2,6 +2,8 @@
  * API utilities for checking backend provider availability
  */
 
+import { toHttpUrl } from './runtime';
+
 export interface ProviderStatus {
     enabled: boolean;
     provider: string;
@@ -19,7 +21,7 @@ export interface ProvidersResponse {
 export async function checkAvailableProviders(backendUrl: string): Promise<ProvidersResponse | null> {
     try {
         // Convert WebSocket URL to HTTP
-        const httpUrl = backendUrl.replace(/^ws:/, 'http:').replace(/^wss:/, 'https:');
+        const httpUrl = toHttpUrl(backendUrl);
         const response = await fetch(`${httpUrl}/providers`, {
             method: 'GET',
             headers: {

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "test": "node --experimental-strip-types --test lib/*.test.ts",
     "build": "vite build",
     "preview": "vite preview",
     "backend:install": "cd backend && pnpm install && cd ..",
@@ -13,9 +14,6 @@
     "full-dev": "pnpm run dev & cd backend && pnpm start"
   },
   "dependencies": {
-    "@google-cloud/speech": "^7.2.1",
-    "@livekit/components-react": "^2.9.19",
-    "@ricky0123/vad-react": "^0.0.36",
     "livekit-client": "^2.17.0",
     "lucide-react": "^0.563.0",
     "react": "^19.2.4",

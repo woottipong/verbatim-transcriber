@@ -3,6 +3,7 @@
  */
 
 import { useState, useEffect } from 'react';
+import { getErrorMessage, stopMediaStream } from '../lib/runtime';
 
 export interface AudioDevice {
     deviceId: string;
@@ -24,7 +25,8 @@ export const useAudioDevices = () => {
                 setError(null);
 
                 // Request permission first
-                await navigator.mediaDevices.getUserMedia({ audio: true });
+                const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stopMediaStream(permissionStream);
 
                 // Enumerate devices
                 const allDevices = await navigator.mediaDevices.enumerateDevices();
@@ -39,9 +41,9 @@ export const useAudioDevices = () => {
                 if (mounted) {
                     setDevices(audioInputs);
                 }
-            } catch (err: any) {
+            } catch (err: unknown) {
                 if (mounted) {
-                    setError(err.message || 'Failed to get audio devices');
+                    setError(getErrorMessage(err, 'Failed to get audio devices'));
                 }
             } finally {
                 if (mounted) {

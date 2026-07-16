@@ -13,6 +13,7 @@ import AdminPage from './components/AdminPage';
 import { AppConfig, ConnectionState } from './types';
 import { STORAGE_KEYS, DEFAULT_CONFIG } from './lib/constants';
 import { safeJsonParse } from './lib/utils';
+import { normalizeAppConfig, toHttpUrl } from './lib/runtime';
 
 // Page types for routing
 type PageType = 'main' | 'viewer' | 'admin';
@@ -28,11 +29,12 @@ const getInitialPage = (): PageType => {
 // Load initial config from localStorage or use defaults
 const getInitialConfig = (): AppConfig => {
   const saved = localStorage.getItem(STORAGE_KEYS.CONFIG);
-  const parsedConfig = saved ? safeJsonParse<AppConfig>(saved, DEFAULT_CONFIG) : DEFAULT_CONFIG;
+  const parsedConfig = saved ? safeJsonParse<unknown>(saved, DEFAULT_CONFIG) : DEFAULT_CONFIG;
+  const config = normalizeAppConfig(parsedConfig, DEFAULT_CONFIG);
 
   return {
-    ...parsedConfig,
-    backendUrl: import.meta.env.VITE_BACKEND_URL || parsedConfig.backendUrl,
+    ...config,
+    backendUrl: import.meta.env.VITE_BACKEND_URL || config.backendUrl,
   };
 };
 
@@ -59,7 +61,7 @@ export default function App() {
   // LiveKit WebRTC hook for ultra-low latency transcription
   const livekitHook = useLiveKit({
     serverUrl: import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880',
-    tokenEndpoint: `${config.backendUrl.replace('ws://', 'http://').replace('wss://', 'https://')}/livekit/token`,
+    tokenEndpoint: `${toHttpUrl(config.backendUrl)}/livekit/token`,
     roomName: livekitRoomName,
     autoConnect: false,
   });
@@ -77,10 +79,12 @@ export default function App() {
   }, []);
 
   const handleAudioDeviceChange = useCallback((deviceId: string) => {
-    const newConfig = { ...config, audioDeviceId: deviceId };
-    setConfig(newConfig);
-    localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(newConfig));
-  }, [config]);
+    setConfig(currentConfig => {
+      const newConfig = { ...currentConfig, audioDeviceId: deviceId };
+      localStorage.setItem(STORAGE_KEYS.CONFIG, JSON.stringify(newConfig));
+      return newConfig;
+    });
+  }, []);
 
   const handleOpenSettings = useCallback(() => setIsSettingsOpen(true), []);
   const handleCloseSettings = useCallback(() => setIsSettingsOpen(false), []);

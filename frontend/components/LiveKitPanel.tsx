@@ -250,9 +250,16 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
 
                         {/* Interim transcript */}
                         {interimTranscript && (
-                            <div className="text-purple-200/70 italic p-2 rounded-lg bg-purple-900/20 border-l-2 border-purple-400/50 animate-pulse">
-                                <span className="text-xs text-purple-500 mr-2">●</span>
-                                {interimTranscript}
+                            <div
+                                className="flex items-start gap-2 p-2 rounded-lg bg-purple-900/30 border-l-2 border-purple-400 text-purple-100"
+                                aria-live="polite"
+                                aria-label="Live interim transcript"
+                            >
+                                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-purple-400 animate-pulse" />
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-800/60 text-purple-300 font-semibold">
+                                    LIVE
+                                </span>
+                                <span className="text-base leading-relaxed">{interimTranscript}</span>
                             </div>
                         )}
                     </div>

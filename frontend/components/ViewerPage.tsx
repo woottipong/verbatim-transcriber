@@ -9,8 +9,9 @@
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { RefreshCw, Users, Radio, Trash2, X, Bot, Eye, Volume2, VolumeX } from 'lucide-react';
-import { useRoomViewer, AgentInfo } from '../hooks/useRoomViewer';
-import { ConnectionState, TranscriptSegment } from '../types';
+import { useRoomViewer } from '../hooks/useRoomViewer';
+import { ConnectionState } from '../types';
+import { toHttpUrl } from '../lib/runtime';
 import ConnectionBadge from './ConnectionBadge';
 
 interface RoomInfo {
@@ -34,7 +35,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
     const [filterProvider, setFilterProvider] = useState<string>('all');
 
     // Convert backend URL to HTTP
-    const httpBackendUrl = backendUrl.replace('ws://', 'http://').replace('wss://', 'https://');
+    const httpBackendUrl = toHttpUrl(backendUrl);
 
     // Room viewer hook
     const viewer = useRoomViewer({
@@ -78,20 +79,15 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
         viewer.transcripts.forEach(t => {
             if (t.provider) providers.add(t.provider);
         });
-        const result = Array.from(providers).sort();
-        console.log('[Viewer Filter] Available providers:', result, 'Agents:', viewer.agents, 'Transcripts count:', viewer.transcripts.length);
-        return result;
+        return Array.from(providers).sort();
     }, [viewer.agents, viewer.transcripts]);
 
     // Filter transcripts by selected provider
     const filteredTranscripts = useMemo(() => {
-        console.log('[Viewer Filter] Filter provider:', filterProvider, 'Total transcripts:', viewer.transcripts.length);
         if (filterProvider === 'all') {
             return viewer.transcripts; // Show all
         }
-        const filtered = viewer.transcripts.filter(t => t.provider === filterProvider);
-        console.log('[Viewer Filter] Filtered count:', filtered.length);
-        return filtered;
+        return viewer.transcripts.filter(t => t.provider === filterProvider);
     }, [viewer.transcripts, filterProvider]);
 
     // Provider color mapping

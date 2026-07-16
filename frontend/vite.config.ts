@@ -6,11 +6,6 @@ export default defineConfig({
   server: {
     port: 5173,
     host: 'localhost',
-    headers: {
-      // Required for SharedArrayBuffer (used by ONNX Runtime WASM)
-      'Cross-Origin-Embedder-Policy': 'require-corp',
-      'Cross-Origin-Opener-Policy': 'same-origin',
-    },
   },
   plugins: [react()],
   resolve: {
@@ -18,13 +13,6 @@ export default defineConfig({
       '@': path.resolve(__dirname, '.'),
     }
   },
-  optimizeDeps: {
-    include: ['@ricky0123/vad-react', '@ricky0123/vad-web'],
-  },
-  worker: {
-    format: 'es',
-  },
-  assetsInclude: ['**/*.onnx', '**/*.wasm'],
   build: {
     sourcemap: false,
     rollupOptions: {

@@ -6,6 +6,7 @@
 import React, { MutableRefObject } from 'react';
 import { ConnectionState, TranscriptSegment } from '../types';
 import { generateId } from './utils';
+import { appendBounded } from './runtime';
 
 // ============================================================
 // Types
@@ -136,15 +137,12 @@ export function addFinalTranscript(
     text: string
 ): void {
     if (!text) return;
-    setTranscripts(prev => [
-        ...prev,
-        {
+    setTranscripts(prev => appendBounded(prev, {
             id: generateId(),
             text,
             isFinal: true,
             timestamp: Date.now(),
-        },
-    ]);
+        }));
 }
 
 /**

@@ -7,9 +7,11 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Room, RoomEvent, ConnectionState as LKConnectionState, DataPacket_Kind, LocalParticipant, RemoteParticipant } from 'livekit-client';
+import { Room, RoomEvent, DataPacket_Kind, LocalParticipant, RemoteParticipant } from 'livekit-client';
 import { ConnectionState, TranscriptSegment } from '../types';
 import { cleanThaiText } from '../lib/audio';
+import { TranscriptUpdateBuffer } from '../lib/transcriptUpdates';
+import { appendBounded } from '../lib/runtime';
 
 // LiveKit Transcript Message from Agent (via Data Channel)
 export interface LiveKitTranscriptMessage {
@@ -68,6 +70,31 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const roomRef = useRef<Room | null>(null);
     const reconnectAttemptsRef = useRef(0);
     const segmentIdRef = useRef(0);
+    const connectionAttemptRef = useRef(0);
+
+    const applyTranscriptUpdate = useCallback((message: LiveKitTranscriptMessage) => {
+        if (message.isFinal) {
+            segmentIdRef.current++;
+            const segment: TranscriptSegment = {
+                id: `lk-${segmentIdRef.current}`,
+                text: message.text,
+                isFinal: true,
+                timestamp: message.timestamp || Date.now(),
+                provider: message.provider,
+                speaker: message.speaker,
+            };
+            setTranscripts(prev => appendBounded(prev, segment));
+            setInterimTranscript('');
+            return;
+        }
+
+        setInterimTranscript(message.text);
+    }, []);
+
+    const transcriptUpdatesRef = useRef<TranscriptUpdateBuffer<LiveKitTranscriptMessage> | null>(null);
+    if (transcriptUpdatesRef.current === null) {
+        transcriptUpdatesRef.current = new TranscriptUpdateBuffer(applyTranscriptUpdate);
+    }
 
     // Fetch token from backend
     const fetchToken = useCallback(async (): Promise<string> => {
@@ -91,32 +118,16 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     // Handle incoming transcript data from Agent
     const handleDataReceived = useCallback((
         payload: Uint8Array,
-        participant?: RemoteParticipant,
+        _participant?: RemoteParticipant,
         _kind?: DataPacket_Kind
     ) => {
         try {
             const decoder = new TextDecoder();
             const message: LiveKitTranscriptMessage = JSON.parse(decoder.decode(payload));
+            const text = cleanThaiText(message.text);
+            if (!text) return;
 
-            if (message.isFinal && message.text.trim()) {
-                // Final transcript - add to list
-                const text = cleanThaiText(message.text);
-                if (!text) return;
-                segmentIdRef.current++;
-                const segment: TranscriptSegment = {
-                    id: `lk-${segmentIdRef.current}`,
-                    text,
-                    isFinal: true,
-                    timestamp: message.timestamp || Date.now(),
-                    provider: message.provider,
-                    speaker: message.speaker,
-                };
-                setTranscripts(prev => [...prev, segment]);
-                setInterimTranscript('');
-            } else if (!message.isFinal && message.text.trim()) {
-                // Interim transcript
-                setInterimTranscript(cleanThaiText(message.text));
-            }
+            transcriptUpdatesRef.current?.push({ ...message, text });
         } catch (err) {
             console.error('[LiveKit] Failed to parse transcript data:', err);
         }
@@ -149,16 +160,20 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
 
     // Connect to LiveKit room
     const connect = useCallback(async () => {
+        const connectionAttempt = ++connectionAttemptRef.current;
+        let newRoom: Room | null = null;
+
         try {
             setConnectionState(ConnectionState.CONNECTING);
             setError(null);
 
             // Get token
             const token = await fetchToken();
+            if (connectionAttempt !== connectionAttemptRef.current) return;
             console.log('[LiveKit] 🎫 Token received');
 
             // Create and configure room
-            const newRoom = new Room({
+            newRoom = new Room({
                 adaptiveStream: true,
                 dynacast: true,
                 audioCaptureDefaults: {
@@ -174,6 +189,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
 
             // Set up event listeners
             newRoom.on(RoomEvent.Connected, () => {
+                if (roomRef.current !== newRoom) return;
                 console.log('[LiveKit] ✅ Connected to room:', roomName);
                 setConnectionState(ConnectionState.CONNECTED);
                 setLocalParticipant(newRoom.localParticipant);
@@ -181,9 +197,17 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             });
 
             newRoom.on(RoomEvent.Disconnected, () => {
+                if (roomRef.current !== newRoom) return;
                 console.log('[LiveKit] ❌ Disconnected from room');
+                roomRef.current = null;
+                transcriptUpdatesRef.current?.clear();
+                setInterimTranscript('');
+                setRoom(null);
+                setLocalParticipant(null);
+                setParticipants([]);
                 setConnectionState(ConnectionState.DISCONNECTED);
                 setIsAgentConnected(false);
+                setAgentIdentity(null);
             });
 
             newRoom.on(RoomEvent.Reconnecting, () => {
@@ -200,16 +224,25 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             newRoom.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
             newRoom.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
 
+            roomRef.current = newRoom;
+
             // Connect to room with audio enabled
             await newRoom.connect(serverUrl, token, {
                 autoSubscribe: true,
             });
+            if (connectionAttempt !== connectionAttemptRef.current) {
+                newRoom.disconnect();
+                return;
+            }
 
             // Enable microphone
             await newRoom.localParticipant.setMicrophoneEnabled(true);
+            if (connectionAttempt !== connectionAttemptRef.current) {
+                newRoom.disconnect();
+                return;
+            }
             console.log('[LiveKit] 🎤 Microphone enabled');
 
-            roomRef.current = newRoom;
             setRoom(newRoom);
 
             // Check for existing participants (agent might already be there)
@@ -221,10 +254,18 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             );
             if (agent) {
                 setIsAgentConnected(true);
+                setAgentIdentity(agent.identity);
                 console.log('[LiveKit] 🤖 Agent already in room');
             }
 
         } catch (err) {
+            if (newRoom) {
+                if (roomRef.current === newRoom) {
+                    roomRef.current = null;
+                }
+                newRoom.disconnect();
+            }
+            if (connectionAttempt !== connectionAttemptRef.current) return;
             console.error('[LiveKit] Connection failed:', err);
             setError(err instanceof Error ? err.message : 'Connection failed');
             setConnectionState(ConnectionState.ERROR);
@@ -233,21 +274,26 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
 
     // Disconnect from room
     const disconnect = useCallback(() => {
-        if (roomRef.current) {
+        connectionAttemptRef.current++;
+        transcriptUpdatesRef.current?.clear();
+        setInterimTranscript('');
+        const currentRoom = roomRef.current;
+        roomRef.current = null;
+        if (currentRoom) {
             console.log('[LiveKit] 🔌 Disconnecting...');
-            roomRef.current.disconnect();
-            roomRef.current = null;
-            setRoom(null);
-            setLocalParticipant(null);
-            setParticipants([]);
-            setIsAgentConnected(false);
-            setAgentIdentity(null);
-            setConnectionState(ConnectionState.DISCONNECTED);
+            currentRoom.disconnect();
         }
+        setRoom(null);
+        setLocalParticipant(null);
+        setParticipants([]);
+        setIsAgentConnected(false);
+        setAgentIdentity(null);
+        setConnectionState(ConnectionState.DISCONNECTED);
     }, []);
 
     // Clear transcripts
     const clearTranscripts = useCallback(() => {
+        transcriptUpdatesRef.current?.clear();
         setTranscripts([]);
         setInterimTranscript('');
         segmentIdRef.current = 0;
@@ -261,6 +307,8 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
 
         // Cleanup on unmount
         return () => {
+            connectionAttemptRef.current++;
+            transcriptUpdatesRef.current?.clear();
             if (roomRef.current) {
                 roomRef.current.disconnect();
             }

@@ -13,8 +13,6 @@ import {
     Users,
     Trash2,
     Bot,
-    Play,
-    Square,
     Radio,
     Settings,
     UserMinus,
@@ -24,7 +22,7 @@ import {
     AlertTriangle,
     ArrowLeft,
 } from 'lucide-react';
-import { ConnectionState } from '../types';
+import { toHttpUrl } from '../lib/runtime';
 
 interface ParticipantInfo {
     identity: string;
@@ -77,7 +75,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
     // Convert backend URL to HTTP
-    const httpBackendUrl = backendUrl.replace('ws://', 'http://').replace('wss://', 'https://');
+    const httpBackendUrl = toHttpUrl(backendUrl);
 
     // Fetch rooms
     const fetchRooms = useCallback(async () => {
