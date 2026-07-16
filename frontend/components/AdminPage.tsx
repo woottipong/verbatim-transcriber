@@ -326,7 +326,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                             <Settings size={19} aria-hidden="true" />
                         </span>
                         <div className="min-w-0">
-                            <h1 className="truncate text-lg font-semibold tracking-tight text-slate-55 sm:text-xl">Thai Transcription</h1>
+                            <h1 className="truncate text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">Thai Transcription</h1>
                             <div className="flex flex-wrap items-center gap-2 mt-0.5">
                                 <p className="truncate text-xs text-slate-400">Room operations</p>
                                 <span className="h-2 w-px bg-slate-700 hidden sm:inline" aria-hidden="true" />

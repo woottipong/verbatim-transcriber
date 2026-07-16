@@ -72,6 +72,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isFollowingLatest, setIsFollowingLatest] = useState(true);
+  const [viewMode, setViewMode] = useState<'timeline' | 'paragraph'>('timeline');
 
   useEffect(() => {
     if (isFollowingLatest) {
@@ -190,6 +191,22 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                 </button>
               </>
             )}
+            {isConnected && (
+              <div className="flex items-center rounded-lg border border-slate-700 bg-slate-950/45 p-0.5 select-none shrink-0" role="group" aria-label="View mode">
+                <button
+                  onClick={() => setViewMode('timeline')}
+                  className={`h-8 px-2.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${viewMode === 'timeline' ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  Lines
+                </button>
+                <button
+                  onClick={() => setViewMode('paragraph')}
+                  className={`h-8 px-2.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${viewMode === 'paragraph' ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  Text
+                </button>
+              </div>
+            )}
             <button onClick={onClear} className="control-button control-button--quiet !px-2.5 sm:!px-3" aria-label="Clear text" title="Clear text">
               <Eraser size={14} aria-hidden="true" />
               <span className="hidden sm:inline">Clear Text</span>
@@ -257,7 +274,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                         <span className={`w-1.5 h-1.5 rounded-full animate-pulse mb-2 ${providerAccents[provider] ?? 'bg-slate-500'}`} />
                         <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Awaiting Signal</p>
                       </div>
-                    ) : (
+                    ) : viewMode === 'timeline' ? (
                       <div className="space-y-1">
                         {providerTranscripts.map((segment, idx) => (
                           <div 
@@ -288,6 +305,24 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                             </div>
                           );
                         })}
+                      </div>
+                    ) : (
+                      <div className="text-[1.05rem] leading-8 text-slate-100 font-medium tracking-wide space-y-3">
+                        <p>
+                          {providerTranscripts.map((segment) => (
+                            <span key={segment.id} className="hover:bg-slate-900/40 rounded px-0.5 transition-colors duration-100">
+                              {segment.text}
+                            </span>
+                          ))}
+                          {providerInterims.map(interim => {
+                            const classes = draftClasses[interim.provider] ?? { bg: 'bg-violet-500/5 border-violet-500/10', text: 'text-violet-400' };
+                            return (
+                              <span key={interim.key} className={`italic ${classes.text}`}>
+                                {interim.text}…
+                              </span>
+                            );
+                          })}
+                        </p>
                       </div>
                     )}
                   </div>

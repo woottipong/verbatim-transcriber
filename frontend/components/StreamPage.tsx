@@ -7,6 +7,7 @@ import LiveKitPanel from './LiveKitPanel';
 import MicrophoneInputStrip from './MicrophoneInputStrip';
 import { AppConfig, ConnectionState } from '../types';
 import { toHttpUrl } from '../lib/runtime';
+import { buildStreamUrl } from '../lib/appRoutes';
 
 interface StreamPageProps {
   config: AppConfig;
@@ -58,6 +59,19 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
                 <span className="inline-flex items-center rounded bg-slate-800 border border-slate-700/60 px-1.5 py-0.5 text-[11px] font-semibold text-slate-400" aria-label={livekitRoomName ? `Room ${livekitRoomName}` : 'Room ID is missing'}>
                   Room: <span className="text-slate-200 font-bold ml-1">{livekitRoomName || 'Required'}</span>
                 </span>
+                {livekitRoomName && livekitHook.connectionState === ConnectionState.DISCONNECTED && (
+                  <button
+                    onClick={() => {
+                      setLivekitRoomName('');
+                      const nextUrl = buildStreamUrl(window.location.origin + window.location.pathname, '');
+                      window.location.hash = new URL(nextUrl).hash;
+                    }}
+                    className="text-[10px] text-violet-400 hover:text-violet-300 underline font-medium cursor-pointer"
+                    aria-label="Change room"
+                  >
+                    Change
+                  </button>
+                )}
               </div>
               <p className="truncate text-xs text-slate-400">Connect to a room to start sending audio for transcription</p>
             </div>
@@ -97,23 +111,54 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
       </header>
 
       <main id="main-content" className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-        <section aria-label="LiveKit transcription">
-            <LiveKitPanel
-              transcripts={livekitHook.transcripts}
-              interimTranscripts={livekitHook.interimTranscripts}
-              connectionState={livekitHook.connectionState}
-              isAgentConnected={livekitHook.isAgentConnected}
-              agentIdentity={livekitHook.agentIdentity}
-              isMicrophoneEnabled={livekitHook.isMicrophoneEnabled}
-              participantCount={livekitHook.participants.length + 1}
-              error={livekitHook.error}
-              roomName={livekitRoomName}
-              onConnect={livekitHook.connect}
-              onDisconnect={livekitHook.disconnect}
-              onToggleMicrophone={livekitHook.toggleMicrophone}
-              onClear={livekitHook.clearTranscripts}
-            />
-        </section>
+        {!livekitRoomName ? (
+          <div className="mx-auto max-w-md app-panel p-6 text-center my-8">
+            <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-violet-400/10 text-violet-200 mb-4">
+              <Radio size={22} className="animate-pulse" />
+            </span>
+            <h2 className="text-lg font-semibold text-white">Join Transcription Room</h2>
+            <p className="mt-2 text-sm text-slate-400">Enter the room name provided by your administrator to start sending audio.</p>
+            <form onSubmit={(e) => {
+              e.preventDefault();
+              const form = e.currentTarget;
+              const input = form.elements.namedItem('roomName') as HTMLInputElement;
+              if (input?.value.trim()) {
+                const room = input.value.trim();
+                setLivekitRoomName(room);
+                const nextUrl = buildStreamUrl(window.location.origin + window.location.pathname, room);
+                window.location.hash = new URL(nextUrl).hash;
+              }
+            }} className="mt-6 flex flex-col gap-3">
+              <input
+                name="roomName"
+                placeholder="Enter room name..."
+                required
+                className="h-11 w-full rounded-lg border border-slate-700 bg-slate-950/40 px-3 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/70 focus:outline-none"
+              />
+              <button type="submit" className="control-button control-button--primary h-11 w-full font-medium">
+                Continue to Room
+              </button>
+            </form>
+          </div>
+        ) : (
+          <section aria-label="LiveKit transcription">
+              <LiveKitPanel
+                transcripts={livekitHook.transcripts}
+                interimTranscripts={livekitHook.interimTranscripts}
+                connectionState={livekitHook.connectionState}
+                isAgentConnected={livekitHook.isAgentConnected}
+                agentIdentity={livekitHook.agentIdentity}
+                isMicrophoneEnabled={livekitHook.isMicrophoneEnabled}
+                participantCount={livekitHook.participants.length + 1}
+                error={livekitHook.error}
+                roomName={livekitRoomName}
+                onConnect={livekitHook.connect}
+                onDisconnect={livekitHook.disconnect}
+                onToggleMicrophone={livekitHook.toggleMicrophone}
+                onClear={livekitHook.clearTranscripts}
+              />
+          </section>
+        )}
       </main>
 
       <SettingsModal

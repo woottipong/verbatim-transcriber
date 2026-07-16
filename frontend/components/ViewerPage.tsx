@@ -15,6 +15,7 @@ import { toHttpUrl } from '../lib/runtime';
 import { shouldStickToLatest } from '../lib/transcriptViewport';
 import { shouldAutoConnectViewer } from '../lib/viewerLaunch';
 import ConnectionBadge from './ConnectionBadge';
+import { buildViewerUrl } from '../lib/appRoutes';
 
 interface RoomInfo {
     name: string;
@@ -229,7 +230,11 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                     {rooms.map(room => (
                                         <button
                                             key={room.name}
-                                            onClick={() => viewer.connect(room.name)}
+                                            onClick={() => {
+                                                void viewer.connect(room.name);
+                                                const nextUrl = buildViewerUrl(window.location.origin + window.location.pathname, room.name);
+                                                window.location.hash = new URL(nextUrl).hash;
+                                            }}
                                             disabled={viewer.connectionState === ConnectionState.CONNECTING}
                                             className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${viewer.currentRoomName === room.name
                                                 ? 'border-violet-400/55 bg-violet-400/10 text-white'
@@ -248,7 +253,11 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
 
                             {viewer.connectionState === ConnectionState.CONNECTED && (
                                 <button
-                                    onClick={viewer.disconnect}
+                                    onClick={() => {
+                                        viewer.disconnect();
+                                        const nextUrl = buildViewerUrl(window.location.origin + window.location.pathname, '');
+                                        window.location.hash = new URL(nextUrl).hash;
+                                    }}
                                     className="control-button control-button--danger mt-4 w-full"
                                 >
                                     Disconnect

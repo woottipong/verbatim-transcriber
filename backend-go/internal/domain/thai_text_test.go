@@ -23,6 +23,26 @@ func TestNormalizeThaiSpacing(t *testing.T) {
 			input: "  ทดสอบ   1  2  ",
 			want:  "ทดสอบ 1 2",
 		},
+		{
+			name:  "inserts spaces at Latin-Thai boundaries if missing",
+			input: "Smartเป็นAI",
+			want:  "Smart เป็น AI",
+		},
+		{
+			name:  "inserts spaces at Thai-Number boundaries if missing",
+			input: "พระราม9และ10ชิ้น",
+			want:  "พระราม 9 และ 10 ชิ้น",
+		},
+		{
+			name:  "does not insert space around punctuation in abbreviations",
+			input: "ม.3และร.5",
+			want:  "ม.3 และร.5",
+		},
+		{
+			name:  "inserts spaces in user test case",
+			input: "รายงานคืนAppleนะ",
+			want:  "รายงานคืน Apple นะ",
+		},
 	}
 
 	for _, tt := range tests {
