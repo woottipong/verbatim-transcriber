@@ -217,14 +217,14 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
             <div className="transcript-empty-state">
               <p className="text-base font-medium text-slate-300">
                 {connectionState === ConnectionState.DISCONNECTED
-                  ? 'Waiting for speech...'
+                  ? 'Disconnected'
                   : session.canSpeak
                     ? 'Start speaking. Your transcript will show here.'
                     : session.headline}
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-500">
                 {connectionState === ConnectionState.DISCONNECTED
-                  ? 'Connect to start transcribing.'
+                  ? 'Connect to the room to start sending your audio.'
                   : session.canSpeak
                     ? 'Draft text updates live and finalizes when you pause speaking.'
                     : session.detail}

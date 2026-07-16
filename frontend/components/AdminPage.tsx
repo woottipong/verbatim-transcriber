@@ -57,7 +57,7 @@ interface TranscriptLinkState {
 
 const providerLabels: Record<AgentProvider, string> = {
     google: 'Google Cloud STT',
-    gemini: 'Gemini Live STT',
+    gemini: 'Gemini Live',
     azure: 'Azure Speech',
 };
 
@@ -187,7 +187,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             setSelectedRoomName(room.name);
             setNewRoomName('');
             setIsCreateDialogOpen(false);
-            showNotice({ tone: 'success', message: `Room “${room.name}” created. Start the Agent when ready.` });
+            showNotice({ tone: 'success', message: `Room “${room.name}” created. Start the agent when ready.` });
         } catch (err) {
             setCreateRoomError(err instanceof Error ? err.message : 'Failed to create room');
         } finally {
@@ -326,8 +326,15 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                             <Settings size={19} aria-hidden="true" />
                         </span>
                         <div className="min-w-0">
-                            <h1 className="truncate text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">Thai Transcription</h1>
-                            <p className="truncate text-xs text-slate-400">Room operations</p>
+                            <h1 className="truncate text-lg font-semibold tracking-tight text-slate-55 sm:text-xl">Thai Transcription</h1>
+                            <div className="flex flex-wrap items-center gap-2 mt-0.5">
+                                <p className="truncate text-xs text-slate-400">Room operations</p>
+                                <span className="h-2 w-px bg-slate-700 hidden sm:inline" aria-hidden="true" />
+                                <div className="hidden items-center gap-1.5 text-[10px] text-slate-500 sm:flex select-none">
+                                    <span className="status-dot status-dot--live !h-1.5 !w-1.5" aria-hidden="true" />
+                                    <span>LiveKit plane</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -360,18 +367,6 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                     </div>
                 )}
 
-                <div className="mb-5 flex items-end justify-between gap-4">
-                    <div>
-                        <p className="text-sm font-medium text-violet-200">Workspace</p>
-                        <h2 className="mt-1 text-2xl font-semibold tracking-tight text-white">Rooms</h2>
-                        <p className="mt-1 max-w-2xl text-sm text-slate-400">Create a room first, then start its transcription Agent when the publisher is ready.</p>
-                    </div>
-                    <div className="hidden items-center gap-2 text-xs text-slate-500 sm:flex">
-                        <span className="status-dot status-dot--live" aria-hidden="true" />
-                        LiveKit control plane
-                    </div>
-                </div>
-
                 <div className="grid gap-5 lg:grid-cols-[19rem_minmax(0,1fr)]">
                     <aside className="app-panel flex min-h-[32rem] flex-col">
                         <div className="border-b border-slate-700/70 p-4">
@@ -402,16 +397,17 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                 <div className="space-y-1">
                                     {filteredRooms.map(room => {
                                         const isSelected = room.name === selectedRoomName;
-                                        const running = agentStatus.agents.some(agent => agent.room === room.name);
+                                        const runningAgents = agentStatus.agents.filter(agent => agent.room === room.name);
+                                        const runningCount = runningAgents.length;
                                         return (
                                             <button key={room.name} onClick={() => setSelectedRoomName(room.name)} className={`w-full rounded-lg border px-3 py-3 text-left transition-colors ${isSelected ? 'border-violet-400/55 bg-violet-400/10' : 'border-transparent hover:border-slate-700 hover:bg-slate-800/55'}`} aria-current={isSelected ? 'page' : undefined}>
                                                 <div className="flex items-start justify-between gap-3">
                                                     <span className={`min-w-0 truncate text-sm font-semibold ${isSelected ? 'text-white' : 'text-slate-200'}`}>{room.name}</span>
-                                                    <span className={`status-dot shrink-0 ${running ? 'status-dot--live' : ''}`} aria-label={running ? 'Agent running' : 'Agent stopped'} />
+                                                    <span className={`status-dot shrink-0 ${runningCount > 0 ? 'status-dot--live' : ''}`} aria-label={runningCount > 0 ? 'agent running' : 'agent stopped'} />
                                                 </div>
                                                 <div className="mt-1.5 flex items-center gap-3 text-xs text-slate-500">
                                                     <span className="inline-flex items-center gap-1"><Users size={12} /> {room.numParticipants}</span>
-                                                    <span>{running ? 'Agent active' : 'Ready'}</span>
+                                                    <span>{runningCount > 0 ? (runningCount === 1 ? '1 agent active' : `${runningCount} agents active`) : 'Ready'}</span>
                                                 </div>
                                             </button>
                                         );
@@ -427,7 +423,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                 <div className="max-w-sm">
                                     <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-violet-400/10 text-violet-200"><Plus size={22} /></span>
                                     <h3 className="mt-4 text-lg font-semibold text-white">Create your first room</h3>
-                                    <p className="mt-2 text-sm leading-6 text-slate-400">A room is the shared channel for the Stream publisher, transcription Agent, Viewer, and external transcript consumers.</p>
+                                    <p className="mt-2 text-sm leading-6 text-slate-400">A room is the shared channel for the Audio Sender, transcription agent, Viewer, and external transcript consumers.</p>
                                     <button onClick={() => setIsCreateDialogOpen(true)} className="control-button control-button--primary mt-5"><Plus size={16} /> Create room</button>
                                 </div>
                             </div>
@@ -489,9 +485,9 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                     </section>
 
                                     <section className="admin-section" aria-labelledby="share-heading">
-                                        <SectionHeading id="share-heading" icon={<Link2 size={16} />} title="Share channels" detail="Each link has one clear purpose." />
+                                        <SectionHeading id="share-heading" icon={<Link2 size={16} />} title="Room Access Links" detail="Connect to send audio or view transcripts." />
                                         <div className="mt-4 space-y-2">
-                                            <ShareRow icon={<Radio size={16} />} label="Stream" description="Publisher with microphone" onOpen={() => openLink(streamUrl)} onCopy={() => void copyText(streamUrl, 'Stream link')} />
+                                            <ShareRow icon={<Radio size={16} />} label="Audio Sender" description="Send microphone audio" onOpen={() => openLink(streamUrl)} onCopy={() => void copyText(streamUrl, 'Audio Sender link')} />
                                             <ShareRow icon={<Eye size={16} />} label="Viewer" description="Read-only live transcript" onOpen={() => openLink(viewerUrl)} onCopy={() => void copyText(viewerUrl, 'Viewer link')} />
                                         </div>
                                     </section>
@@ -558,7 +554,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={() => !isCreatingRoom && setIsCreateDialogOpen(false)}>
                     <div className="app-panel w-full max-w-md p-5" role="dialog" aria-modal="true" aria-labelledby="create-room-title" onMouseDown={event => event.stopPropagation()}>
                         <div className="flex items-start justify-between gap-4">
-                            <div><h3 id="create-room-title" className="text-lg font-semibold text-white">Create room</h3><p className="mt-1 text-sm leading-5 text-slate-400">Set up the room now. The Agent will remain stopped until you start it.</p></div>
+                            <div><h3 id="create-room-title" className="text-lg font-semibold text-white">Create room</h3><p className="mt-1 text-sm leading-5 text-slate-400">Set up the room now. The agent will remain stopped until you start it.</p></div>
                             <button onClick={() => setIsCreateDialogOpen(false)} disabled={isCreatingRoom} className="control-button control-button--quiet !min-h-8 !px-2" aria-label="Close create room dialog"><X size={16} /></button>
                         </div>
                         <form onSubmit={handleCreateRoom} className="mt-5">

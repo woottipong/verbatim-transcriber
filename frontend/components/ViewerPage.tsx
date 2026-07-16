@@ -22,8 +22,16 @@ interface RoomInfo {
     creationTime: number;
 }
 
+const formatProviderName = (provider: string): string => {
+    const p = provider.toLowerCase();
+    if (p === 'google') return 'Google Cloud STT';
+    if (p === 'gemini') return 'Gemini Live';
+    if (p === 'azure') return 'Azure Speech';
+    return provider;
+};
+
 interface ViewerPageProps {
-    onBack?: () => void;  // Callback to go back to main app
+    onBack?: () => void;
     backendUrl: string;
     initialRoomName?: string;
     autoConnect?: boolean;
@@ -267,8 +275,8 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                                 key={agent.identity}
                                                 className={`flex items-center justify-between rounded-lg border px-2.5 py-2 ${getProviderColor(agent.provider)}`}
                                             >
-                                                <span className="text-sm font-medium">{agent.provider}</span>
-                                                <span className="status-dot status-dot--live" aria-label="Connected" />
+                                                <span className="text-sm font-medium">{formatProviderName(agent.provider)}</span>
+                                                <span className="status-dot status-dot--live" aria-hidden="true" />
                                             </div>
                                         ))}
                                     </div>
@@ -345,7 +353,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                             <option value="all">All Providers</option>
                                             {availableProviders.map(provider => (
                                                 <option key={provider} value={provider}>
-                                                    {provider}
+                                                    {formatProviderName(provider)}
                                                 </option>
                                             ))}
                                         </select>
@@ -392,7 +400,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                             >
                                                 {segment.provider && (
                                                     <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(segment.provider)}`}>
-                                                        {segment.provider}
+                                                        {formatProviderName(segment.provider)}
                                                     </span>
                                                 )}
                                                 <p className="min-w-0 text-[1rem] leading-7 text-slate-100">
@@ -418,7 +426,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                                 <div className="transcript-row__content flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1">
                                                     <span className={`inline-flex shrink-0 items-center gap-1.5 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(interim.provider)}`}>
                                                         <span className="transcript-live-dot" aria-hidden="true" />
-                                                        {interim.provider} · Live draft
+                                                        {formatProviderName(interim.provider)} · Live draft
                                                     </span>
                                                     <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-violet-300/70">กำลังถอดเสียง</span>
                                                     <p className="transcript-row__text basis-full min-w-0 text-[1rem] leading-7 text-slate-300">
