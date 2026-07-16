@@ -39,7 +39,9 @@ const MicrophoneInputStrip: React.FC<MicrophoneInputStripProps> = ({
             </h2>
             {sourceLabel && <span className="microphone-strip__source">{sourceLabel}</span>}
           </div>
-          <p className="mt-0.5 text-xs text-slate-400">Input level only · Browser VAD off</p>
+          <p className="mt-0.5 text-xs text-slate-400">
+            {isListening ? 'Live microphone level' : 'Starts automatically when you join a room'}
+          </p>
         </div>
       </div>
 

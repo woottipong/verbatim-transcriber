@@ -7,7 +7,6 @@ import { useAudioDevices } from './hooks/useAudioDevices';
 import SettingsModal from './components/SettingsModal';
 import LiveKitPanel from './components/LiveKitPanel';
 import TranscriptPanel from './components/TranscriptPanel';
-import RecordButton from './components/RecordButton';
 import ViewerPage from './components/ViewerPage';
 import AdminPage from './components/AdminPage';
 import MicrophoneInputStrip from './components/MicrophoneInputStrip';
@@ -165,34 +164,24 @@ export default function App() {
               Admin
             </button>
 
-            <div className="flex items-center gap-2">
-              {audioDevices.length > 1 && (
-                <div className="hidden lg:flex items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-800/70 px-2.5 py-2">
-                  <Mic2 size={14} className="text-slate-400" />
-                  <select
-                    value={config.audioDeviceId || 'default'}
-                    onChange={(e) => handleAudioDeviceChange(e.target.value)}
-                    disabled={isAnyConnected}
-                    className="bg-transparent text-sm text-slate-200 font-medium focus:outline-none cursor-pointer disabled:opacity-50 max-w-[120px] truncate"
-                  >
-                    <option value="default" className="bg-slate-800">Default</option>
-                    {audioDevices.map((device) => (
-                      <option key={device.deviceId} value={device.deviceId} className="bg-slate-800">
-                        {device.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
-
-              {/* Record Button for LiveKit (WebRTC) */}
-              <RecordButton
-                isConnected={livekitHook.connectionState === ConnectionState.CONNECTED}
-                isConnecting={livekitHook.connectionState === ConnectionState.CONNECTING}
-                onClick={livekitHook.connectionState === ConnectionState.CONNECTED ? livekitHook.disconnect : livekitHook.connect}
-                size="sm"
-              />
-            </div>
+            {audioDevices.length > 1 && (
+              <div className="hidden lg:flex items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-800/70 px-2.5 py-2">
+                <Mic2 size={14} className="text-slate-400" />
+                <select
+                  value={config.audioDeviceId || 'default'}
+                  onChange={(e) => handleAudioDeviceChange(e.target.value)}
+                  disabled={isAnyConnected}
+                  className="bg-transparent text-sm text-slate-200 font-medium focus:outline-none cursor-pointer disabled:opacity-50 max-w-[120px] truncate"
+                >
+                  <option value="default" className="bg-slate-800">Default</option>
+                  {audioDevices.map((device) => (
+                    <option key={device.deviceId} value={device.deviceId} className="bg-slate-800">
+                      {device.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <button
               onClick={handleOpenSettings}
@@ -226,13 +215,14 @@ export default function App() {
               interimTranscripts={livekitHook.interimTranscripts}
               connectionState={livekitHook.connectionState}
               isAgentConnected={livekitHook.isAgentConnected}
-              agentName={livekitHook.agentIdentity}
+              isMicrophoneEnabled={livekitHook.isMicrophoneEnabled}
               participantCount={livekitHook.participants.length + 1}
               error={livekitHook.error}
               roomName={livekitRoomName}
               onRoomNameChange={setLivekitRoomName}
               onConnect={livekitHook.connect}
               onDisconnect={livekitHook.disconnect}
+              onToggleMicrophone={livekitHook.toggleMicrophone}
               onClear={livekitHook.clearTranscripts}
               roomPlaceholder="Enter room name..."
             />

@@ -89,6 +89,117 @@ select:focus-visible {
   background: oklch(25% 0.03 274 / 0.62);
 }
 
+.session-toolbar {
+  display: grid;
+  grid-template-columns: minmax(12rem, auto) minmax(31rem, 1fr) auto;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.session-toolbar__identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.session-toolbar__actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.session-readiness {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(10rem, 1fr) minmax(22rem, 26rem);
+  align-items: center;
+  gap: 1rem;
+}
+
+.session-health {
+  display: grid;
+  width: min(100%, 29rem);
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  padding: 0;
+}
+
+.session-health__item {
+  min-width: 0;
+  padding-inline: 0.9rem;
+}
+
+.session-health__item:first-child {
+  padding-left: 0;
+}
+
+.session-health__item:last-child {
+  padding-right: 0;
+}
+
+.session-health__item + .session-health__item {
+  border-left: 1px solid oklch(40% 0.03 274 / 0.58);
+}
+
+.session-health__item dt {
+  color: var(--subtle);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1rem;
+  white-space: nowrap;
+}
+
+.session-health__item dd {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+  margin: 0.1rem 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-health__indicator {
+  width: 0.45rem;
+  height: 0.45rem;
+  flex: 0 0 auto;
+  border-radius: 999px;
+  background: var(--subtle);
+}
+
+.session-health__item--pending dd {
+  color: oklch(88% 0.09 84);
+}
+
+.session-health__item--pending .session-health__indicator {
+  background: var(--warning);
+  animation: status-pulse 1.6s ease-in-out infinite;
+}
+
+.session-health__item--complete dd {
+  color: oklch(84% 0.1 154);
+}
+
+.session-health__item--complete .session-health__indicator {
+  background: var(--success);
+}
+
+.session-health__item--error dd {
+  color: oklch(84% 0.09 25);
+}
+
+.session-health__item--error .session-health__indicator {
+  background: var(--danger);
+}
+
 .control-button {
   display: inline-flex;
   min-height: 36px;
@@ -232,7 +343,45 @@ select:focus-visible {
   background: oklch(34% 0.075 25 / 0.7);
 }
 
+@media (max-width: 1199px) {
+  .session-toolbar {
+    grid-template-columns: minmax(12rem, 1fr) auto;
+  }
+
+  .session-readiness {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    border-top: 1px solid oklch(38% 0.028 274 / 0.55);
+    padding-top: 0.75rem;
+  }
+}
+
 @media (max-width: 767px) {
+  .session-toolbar {
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+
+  .session-toolbar__actions {
+    grid-row: 2;
+    justify-content: flex-start;
+  }
+
+  .session-readiness {
+    grid-column: 1;
+    grid-row: 3;
+    grid-template-columns: 1fr;
+    gap: 0.75rem;
+  }
+
+  .session-health {
+    width: 100%;
+  }
+
+  .session-health__item {
+    padding-inline: 0.65rem;
+  }
+
   .microphone-strip {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 0.75rem 1rem;

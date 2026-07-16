@@ -41,9 +41,11 @@ export interface UseLiveKitReturn {
     room: Room | null;
     localParticipant: LocalParticipant | null;
     mediaStream: MediaStream | null;
+    isMicrophoneEnabled: boolean;
     participants: RemoteParticipant[];
     connect: () => Promise<void>;
     disconnect: () => void;
+    toggleMicrophone: () => Promise<void>;
     clearTranscripts: () => void;
     isAgentConnected: boolean;
     agentIdentity: string | null;  // Agent identity/name
@@ -66,6 +68,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const [room, setRoom] = useState<Room | null>(null);
     const [localParticipant, setLocalParticipant] = useState<LocalParticipant | null>(null);
     const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
+    const [isMicrophoneEnabled, setIsMicrophoneEnabled] = useState(false);
     const [participants, setParticipants] = useState<RemoteParticipant[]>([]);
     const [isAgentConnected, setIsAgentConnected] = useState(false);
     const [agentIdentity, setAgentIdentity] = useState<string | null>(null);
@@ -212,7 +215,6 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             newRoom.on(RoomEvent.Connected, () => {
                 if (roomRef.current !== newRoom) return;
                 console.log('[LiveKit] ✅ Connected to room:', roomName);
-                setConnectionState(ConnectionState.CONNECTED);
                 setLocalParticipant(newRoom.localParticipant);
                 reconnectAttemptsRef.current = 0;
             });
@@ -226,6 +228,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 setRoom(null);
                 setLocalParticipant(null);
                 setMediaStream(null);
+                setIsMicrophoneEnabled(false);
                 setParticipants([]);
                 setConnectionState(ConnectionState.DISCONNECTED);
                 setIsAgentConnected(false);
@@ -258,18 +261,21 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             }
 
             // Enable microphone
-            await newRoom.localParticipant.setMicrophoneEnabled(true);
+            const microphonePublication = await newRoom.localParticipant.setMicrophoneEnabled(true);
             if (connectionAttempt !== connectionAttemptRef.current) {
                 newRoom.disconnect();
                 return;
             }
             console.log('[LiveKit] 🎤 Microphone enabled');
 
-            const microphoneTrack = newRoom.localParticipant
-                .getTrackPublication(Track.Source.Microphone)
-                ?.track
-                ?.mediaStreamTrack;
+            const microphoneTrack = microphonePublication?.track?.mediaStreamTrack
+                ?? newRoom.localParticipant
+                    .getTrackPublication(Track.Source.Microphone)
+                    ?.track
+                    ?.mediaStreamTrack;
             setMediaStream(microphoneTrack ? new MediaStream([microphoneTrack]) : null);
+            setIsMicrophoneEnabled(true);
+            setConnectionState(ConnectionState.CONNECTED);
 
             setRoom(newRoom);
 
@@ -298,9 +304,34 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             setError(err instanceof Error ? err.message : 'Connection failed');
             setLocalParticipant(null);
             setMediaStream(null);
+            setIsMicrophoneEnabled(false);
             setConnectionState(ConnectionState.ERROR);
         }
     }, [serverUrl, fetchToken, roomName, handleDataReceived, handleParticipantConnected, handleParticipantDisconnected]);
+
+    const toggleMicrophone = useCallback(async () => {
+        const currentRoom = roomRef.current;
+        if (!currentRoom || connectionState !== ConnectionState.CONNECTED) return;
+
+        const shouldEnable = !isMicrophoneEnabled;
+        try {
+            setError(null);
+            const publication = await currentRoom.localParticipant.setMicrophoneEnabled(shouldEnable);
+            if (roomRef.current !== currentRoom) return;
+
+            const microphoneTrack = publication?.track?.mediaStreamTrack
+                ?? currentRoom.localParticipant
+                    .getTrackPublication(Track.Source.Microphone)
+                    ?.track
+                    ?.mediaStreamTrack;
+
+            setIsMicrophoneEnabled(shouldEnable);
+            setMediaStream(shouldEnable && microphoneTrack ? new MediaStream([microphoneTrack]) : null);
+        } catch (microphoneError) {
+            console.error('[LiveKit] Failed to update microphone:', microphoneError);
+            setError(microphoneError instanceof Error ? microphoneError.message : 'Failed to update microphone');
+        }
+    }, [connectionState, isMicrophoneEnabled]);
 
     // Disconnect from room
     const disconnect = useCallback(() => {
@@ -316,6 +347,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         setRoom(null);
         setLocalParticipant(null);
         setMediaStream(null);
+        setIsMicrophoneEnabled(false);
         setParticipants([]);
         setIsAgentConnected(false);
         setAgentIdentity(null);
@@ -354,9 +386,11 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         room,
         localParticipant,
         mediaStream,
+        isMicrophoneEnabled,
         participants,
         connect,
         disconnect,
+        toggleMicrophone,
         clearTranscripts,
         isAgentConnected,
         agentIdentity,
