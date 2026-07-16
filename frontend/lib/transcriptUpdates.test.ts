@@ -132,7 +132,8 @@ test('keeps Gemini interim chunks as separate transcript rows', async () => {
     let rows = append([], first);
     rows = append(rows, second);
     assert.deepEqual(rows.map(row => row.text), ['ทดสอบ', 'เอาเด็กเท่านั้น']);
-    assert.deepEqual(append(rows, { ...second, id: '3' }).map(row => row.text), ['ทดสอบ', 'เอาเด็กเท่านั้น']);
+    const unchangedRows = append(rows, { ...second, id: '3' });
+    assert.strictEqual(unchangedRows, rows);
 });
 
 test('sticks to latest only while the viewport is near the bottom', async () => {

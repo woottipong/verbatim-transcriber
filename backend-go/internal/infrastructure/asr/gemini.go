@@ -2,7 +2,6 @@ package asr
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -28,7 +27,6 @@ type GeminiConfig struct {
 }
 
 type GeminiProvider struct {
-	client    *genai.Client
 	session   *genai.Session
 	results   chan domain.TranscriptResult
 	cfg       GeminiConfig
@@ -39,6 +37,7 @@ type GeminiProvider struct {
 	closeOnce sync.Once
 	doneOnce  sync.Once
 	lastErr   error
+	starting  bool
 	started   bool
 	stopped   bool
 }
@@ -89,6 +88,11 @@ func (g *GeminiProvider) Start(ctx context.Context) error {
 		g.mu.Unlock()
 		return fmt.Errorf("gemini provider is stopped")
 	}
+	if g.starting {
+		g.mu.Unlock()
+		return fmt.Errorf("gemini provider is starting")
+	}
+	g.starting = true
 	g.mu.Unlock()
 
 	client, err := genai.NewClient(ctx, &genai.ClientConfig{
@@ -100,6 +104,7 @@ func (g *GeminiProvider) Start(ctx context.Context) error {
 		},
 	})
 	if err != nil {
+		g.markStartFailed()
 		return fmt.Errorf("create Gemini client: %w", err)
 	}
 
@@ -119,11 +124,18 @@ func (g *GeminiProvider) Start(ctx context.Context) error {
 	})
 	if err != nil {
 		cancel()
+		g.markStartFailed()
 		return fmt.Errorf("connect Gemini Live session: %w", err)
 	}
 
 	g.mu.Lock()
-	g.client = client
+	g.starting = false
+	if g.stopped {
+		g.mu.Unlock()
+		cancel()
+		_ = session.Close()
+		return fmt.Errorf("gemini provider stopped while connecting")
+	}
 	g.session = session
 	g.ctx = streamCtx
 	g.cancel = cancel
@@ -217,41 +229,26 @@ func (g *GeminiProvider) receiveResponses() {
 		g.mu.Lock()
 		session := g.session
 		ctx := g.ctx
-		stopped := g.stopped
 		g.mu.Unlock()
-		if session == nil || stopped {
+		if session == nil {
 			return
 		}
 
 		message, err := session.Receive()
 		if err != nil {
+			g.mu.Lock()
+			stopped := g.stopped
 			if err != io.EOF && !stopped {
-				g.mu.Lock()
 				g.lastErr = err
-				g.mu.Unlock()
+			}
+			g.mu.Unlock()
+			if err != io.EOF && !stopped {
 				log.Printf("❌ [Gemini] Receive error: %v", err)
 			}
 			return
 		}
 
-		payload, err := json.Marshal(message)
-		if err != nil {
-			g.mu.Lock()
-			g.lastErr = err
-			g.mu.Unlock()
-			log.Printf("❌ [Gemini] Failed to decode response: %v", err)
-			return
-		}
-
-		results, err := parseGeminiServerMessage(payload)
-		if err != nil {
-			g.mu.Lock()
-			g.lastErr = err
-			g.mu.Unlock()
-			log.Printf("❌ [Gemini] Failed to parse transcript: %v", err)
-			return
-		}
-		for _, result := range results {
+		for _, result := range geminiTranscriptResults(message) {
 			select {
 			case g.results <- result:
 			case <-ctx.Done():
@@ -263,31 +260,12 @@ func (g *GeminiProvider) receiveResponses() {
 	}
 }
 
-type geminiServerMessage struct {
-	ServerContent *geminiServerContent `json:"serverContent"`
-}
-
-type geminiServerContent struct {
-	InputTranscription        *geminiTranscription `json:"inputTranscription"`
-	InterimInputTranscription *geminiTranscription `json:"interimInputTranscription"`
-	TurnComplete              bool                 `json:"turnComplete"`
-}
-
-type geminiTranscription struct {
-	Text     string `json:"text"`
-	Finished bool   `json:"finished"`
-}
-
-func parseGeminiServerMessage(message []byte) ([]domain.TranscriptResult, error) {
-	var response geminiServerMessage
-	if err := json.Unmarshal(message, &response); err != nil {
-		return nil, fmt.Errorf("decode server message: %w", err)
-	}
-	if response.ServerContent == nil {
-		return nil, nil
+func geminiTranscriptResults(message *genai.LiveServerMessage) []domain.TranscriptResult {
+	if message == nil || message.ServerContent == nil {
+		return nil
 	}
 
-	content := response.ServerContent
+	content := message.ServerContent
 	transcription := content.InterimInputTranscription
 	isFinal := false
 
@@ -304,13 +282,19 @@ func parseGeminiServerMessage(message []byte) ([]domain.TranscriptResult, error)
 		isFinal = transcription.Finished || content.TurnComplete
 	}
 	if transcription == nil || strings.TrimSpace(transcription.Text) == "" {
-		return nil, nil
+		return nil
 	}
 
 	return []domain.TranscriptResult{{
 		Text:    transcription.Text,
 		IsFinal: isFinal,
-	}}, nil
+	}}
+}
+
+func (g *GeminiProvider) markStartFailed() {
+	g.mu.Lock()
+	g.starting = false
+	g.mu.Unlock()
 }
 
 func (g *GeminiProvider) closeResults() {

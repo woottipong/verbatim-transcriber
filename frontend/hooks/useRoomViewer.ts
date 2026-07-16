@@ -21,6 +21,7 @@ import {
     InterimTranscript,
     appendTranscriptIfNew,
     clearInterimsBySource,
+    createCommittedTranscript,
     getTranscriptKey,
     isAppendOnlyInterimProvider,
     parseTranscriptMessage,
@@ -221,29 +222,22 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             }
 
             const speaker = message.speaker || agentIdentity;
-            const segment: TranscriptSegment = {
-                id: `view-${segmentIdRef.current + 1}`,
-                text: message.text,
-                // Gemini Live can emit committed input chunks with isFinal=false.
-                // Keep those chunks as normal transcript rows instead of replacing
-                // the previous chunk in the interim map.
-                isFinal: message.isFinal || isAppendOnlyInterimProvider(provider),
-                timestamp: message.timestamp || Date.now(),
-                provider,
-                speaker,
-            };
+            const isAppendOnly = isAppendOnlyInterimProvider(provider);
 
-            if (isAppendOnlyInterimProvider(provider)) {
+            if (isAppendOnly || message.isFinal) {
                 segmentIdRef.current++;
-                setTranscripts(prev => appendTranscriptIfNew(prev, segment));
+                const segment = createCommittedTranscript(
+                    `view-${segmentIdRef.current}`,
+                    message,
+                    provider,
+                    speaker,
+                );
+                setTranscripts(prev => isAppendOnly
+                    ? appendTranscriptIfNew(prev, segment)
+                    : appendBounded(prev, segment));
 
                 setInterimTranscripts(prev => removeInterim(prev, key));
-            } else if (message.isFinal) {
-                segmentIdRef.current++;
-                setTranscripts(prev => appendBounded(prev, { ...segment, isFinal: true }));
-
-                setInterimTranscripts(prev => removeInterim(prev, key));
-            } else if (!message.isFinal) {
+            } else {
                 setInterimTranscripts(prev => upsertInterim(prev, {
                     key,
                     text: message.text,

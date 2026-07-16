@@ -23,7 +23,7 @@ export function isAppendOnlyInterimProvider(provider: string): boolean {
 }
 
 export function appendTranscriptIfNew(
-    current: ReadonlyArray<TranscriptSegment>,
+    current: TranscriptSegment[],
     next: TranscriptSegment,
 ): TranscriptSegment[] {
     const previous = current[current.length - 1];
@@ -33,10 +33,26 @@ export function appendTranscriptIfNew(
         previous.provider === next.provider &&
         previous.speaker === next.speaker
     ) {
-        return [...current];
+        return current;
     }
 
     return [...current.slice(-499), next];
+}
+
+export function createCommittedTranscript(
+    id: string,
+    message: TranscriptMessage,
+    provider: string,
+    speaker: string,
+): TranscriptSegment {
+    return {
+        id,
+        text: message.text,
+        isFinal: true,
+        timestamp: message.timestamp ?? Date.now(),
+        provider,
+        speaker,
+    };
 }
 
 export function parseTranscriptMessage(value: unknown): TranscriptMessage | undefined {

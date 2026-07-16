@@ -16,6 +16,7 @@ import {
     TranscriptMessage,
     appendTranscriptIfNew,
     clearInterimsBySource,
+    createCommittedTranscript,
     getTranscriptKey,
     isAppendOnlyInterimProvider,
     parseTranscriptMessage,
@@ -85,17 +86,16 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
 
     const applyTranscriptUpdate = useCallback((message: BufferedTranscriptMessage) => {
         const provider = message.provider || 'unknown';
-        if (message.isFinal || isAppendOnlyInterimProvider(provider)) {
+        const isAppendOnly = isAppendOnlyInterimProvider(provider);
+        if (message.isFinal || isAppendOnly) {
             segmentIdRef.current++;
-            const segment: TranscriptSegment = {
-                id: `lk-${segmentIdRef.current}`,
-                text: message.text,
-                isFinal: true,
-                timestamp: message.timestamp || Date.now(),
+            const segment = createCommittedTranscript(
+                `lk-${segmentIdRef.current}`,
+                message,
                 provider,
-                speaker: message.speaker,
-            };
-            setTranscripts(prev => isAppendOnlyInterimProvider(provider)
+                message.speaker || message.sourceIdentity,
+            );
+            setTranscripts(prev => isAppendOnly
                 ? appendTranscriptIfNew(prev, segment)
                 : appendBounded(prev, segment));
             setInterimTranscripts(prev => removeInterim(prev, message.key));

@@ -4,23 +4,19 @@ import (
 	"testing"
 
 	"thai-transcriber-backend/internal/domain"
+
+	"google.golang.org/genai"
 )
 
-func TestParseGeminiServerMessageReturnsOnlyInputTranscript(t *testing.T) {
-	message := []byte(`{
-		"serverContent": {
-			"inputTranscription": {"text": "สวัสดีครับ"},
-			"outputTranscription": {"text": "Hello"},
-			"modelTurn": {"parts": [{"text": "Hello"}, {"inlineData": {"mimeType": "audio/pcm"}}]}
-		}
-	}`)
+func TestGeminiTranscriptResultsReturnsOnlyInputTranscript(t *testing.T) {
+	message := &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InputTranscription:  &genai.Transcription{Text: "สวัสดีครับ"},
+		OutputTranscription: &genai.Transcription{Text: "Hello"},
+	}}
 
-	results, err := parseGeminiServerMessage(message)
-	if err != nil {
-		t.Fatalf("parseGeminiServerMessage() error = %v", err)
-	}
+	results := geminiTranscriptResults(message)
 	if len(results) != 1 {
-		t.Fatalf("parseGeminiServerMessage() returned %d results, want 1", len(results))
+		t.Fatalf("geminiTranscriptResults() returned %d results, want 1", len(results))
 	}
 	if got, want := results[0].Text, "สวัสดีครับ"; got != want {
 		t.Fatalf("result text = %q, want %q", got, want)
@@ -30,50 +26,35 @@ func TestParseGeminiServerMessageReturnsOnlyInputTranscript(t *testing.T) {
 	}
 }
 
-func TestParseGeminiServerMessageMarksTurnCompleteAsFinal(t *testing.T) {
-	message := []byte(`{
-		"serverContent": {
-			"inputTranscription": {"text": "ทดสอบหนึ่งสองสาม"},
-			"turnComplete": true
-		}
-	}`)
+func TestGeminiTranscriptResultsMarksTurnCompleteAsFinal(t *testing.T) {
+	message := &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InputTranscription: &genai.Transcription{Text: "ทดสอบหนึ่งสองสาม"},
+		TurnComplete:       true,
+	}}
 
-	results, err := parseGeminiServerMessage(message)
-	if err != nil {
-		t.Fatalf("parseGeminiServerMessage() error = %v", err)
-	}
+	results := geminiTranscriptResults(message)
 	if len(results) != 1 || !results[0].IsFinal {
 		t.Fatalf("results = %#v, want one final input transcript", results)
 	}
 }
 
-func TestParseGeminiServerMessageMarksFinishedInputTranscriptAsFinal(t *testing.T) {
-	message := []byte(`{
-		"serverContent": {
-			"inputTranscription": {"text": "ทดสอบจบประโยค", "finished": true}
-		}
-	}`)
+func TestGeminiTranscriptResultsMarksFinishedInputTranscriptAsFinal(t *testing.T) {
+	message := &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InputTranscription: &genai.Transcription{Text: "ทดสอบจบประโยค", Finished: true},
+	}}
 
-	results, err := parseGeminiServerMessage(message)
-	if err != nil {
-		t.Fatalf("parseGeminiServerMessage() error = %v", err)
-	}
+	results := geminiTranscriptResults(message)
 	if len(results) != 1 || !results[0].IsFinal {
 		t.Fatalf("results = %#v, want one final finished input transcript", results)
 	}
 }
 
-func TestParseGeminiServerMessageSupportsLowLatencyInterimTranscript(t *testing.T) {
-	message := []byte(`{
-		"serverContent": {
-			"interimInputTranscription": {"text": "กำลังพูด"}
-		}
-	}`)
+func TestGeminiTranscriptResultsSupportsLowLatencyInterimTranscript(t *testing.T) {
+	message := &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InterimInputTranscription: &genai.Transcription{Text: "กำลังพูด"},
+	}}
 
-	results, err := parseGeminiServerMessage(message)
-	if err != nil {
-		t.Fatalf("parseGeminiServerMessage() error = %v", err)
-	}
+	results := geminiTranscriptResults(message)
 	if len(results) != 1 || results[0].IsFinal || results[0].Text != "กำลังพูด" {
 		t.Fatalf("results = %#v, want one interim input transcript", results)
 	}
