@@ -27,16 +27,16 @@ const MicrophoneInputStrip: React.FC<MicrophoneInputStripProps> = ({
   const { bars, signalState, error } = useAudioVisualizer(mediaStream, isListening);
 
   const status = error
-    ? { label: 'Microphone error', tone: 'error', icon: CircleAlert }
+    ? { label: 'Mic Error', tone: 'error', icon: CircleAlert }
     : isConnecting
-      ? { label: 'Starting microphone', tone: 'listening', icon: Mic }
+      ? { label: 'Starting Mic...', tone: 'listening', icon: Mic }
     : !isListening
-      ? { label: isConnected ? 'Mic off' : 'Ready to join', tone: 'off', icon: MicOff }
+      ? { label: isConnected ? 'Muted' : 'Ready', tone: 'off', icon: MicOff }
       : signalState === 'active'
-        ? { label: 'Audio detected', tone: 'active', icon: AudioLines }
+        ? { label: 'Audio Detected', tone: 'active', icon: AudioLines }
         : signalState === 'low'
-          ? { label: 'Input too low', tone: 'warning', icon: CircleAlert }
-          : { label: 'Listening', tone: 'listening', icon: Mic };
+          ? { label: 'Input too quiet', tone: 'warning', icon: CircleAlert }
+          : { label: 'Active', tone: 'listening', icon: Mic };
   const StatusIcon = status.icon;
 
   return (
@@ -49,16 +49,16 @@ const MicrophoneInputStrip: React.FC<MicrophoneInputStripProps> = ({
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
               <h2 id="microphone-input-heading" className="truncate text-sm font-semibold text-slate-100">
-                Microphone input
+                Microphone Status
               </h2>
               {sourceLabel && <span className="microphone-strip__source">{sourceLabel}</span>}
             </div>
             <p className="mt-0.5 text-xs text-slate-400">
               {isListening
-                ? 'Live microphone level'
+                ? 'Live Level'
                 : isConnecting
-                  ? 'Allow microphone access to continue'
-                  : 'Microphone starts when you join the room'}
+                  ? 'Allow microphone access to start'
+                  : 'Starts when you connect'}
             </p>
           </div>
         </div>

@@ -10,7 +10,7 @@ export interface LiveKitSessionPresentation {
 }
 
 export interface SessionHealthItem {
-  label: 'Room' | 'Microphone' | 'Transcription';
+  label: 'Room' | 'Microphone' | 'Transcriber';
   value: string;
   state: SessionStepState;
 }
@@ -21,9 +21,9 @@ function createSessionHealth(
   steps: [SessionStepState, SessionStepState, SessionStepState],
 ): SessionHealthItem[] {
   const values = [
-    { label: 'Room' as const, complete: 'Joined', pending: 'Joining', idle: 'Not joined' },
+    { label: 'Room' as const, complete: 'Connected', pending: 'Connecting...', idle: 'Disconnected' },
     { label: 'Microphone' as const, complete: 'On', pending: 'Starting', idle: 'Off' },
-    { label: 'Transcription' as const, complete: 'Connected', pending: 'Waiting', idle: 'Not connected' },
+    { label: 'Transcriber' as const, complete: 'Connected', pending: 'Waiting', idle: 'Disconnected' },
   ];
 
   return values.map((item, index) => {
@@ -48,8 +48,8 @@ export function getLiveKitSessionPresentation(
   if (connectionState === 'ERROR') {
     const steps: [SessionStepState, SessionStepState, SessionStepState] = ['error', 'idle', 'idle'];
     return {
-      headline: 'Unable to start session',
-      detail: 'Check the connection and microphone permission, then try again.',
+      headline: 'Connection Failed',
+      detail: 'Check your connection and microphone permission, then try again.',
       canSpeak: false,
       tone: 'error',
       steps,
@@ -60,8 +60,8 @@ export function getLiveKitSessionPresentation(
   if (connectionState === 'CONNECTING') {
     const steps: [SessionStepState, SessionStepState, SessionStepState] = ['pending', 'pending', 'idle'];
     return {
-      headline: 'Joining room and starting microphone…',
-      detail: 'Your browser may ask for microphone permission.',
+      headline: 'Connecting and starting microphone...',
+      detail: 'Please allow microphone access when prompted by your browser.',
       canSpeak: false,
       tone: 'pending',
       steps,
@@ -72,8 +72,8 @@ export function getLiveKitSessionPresentation(
   if (connectionState === 'DISCONNECTED') {
     const steps: [SessionStepState, SessionStepState, SessionStepState] = ['idle', 'idle', 'idle'];
     return {
-      headline: 'Ready to join',
-      detail: 'Join this prepared room to connect and enable your microphone.',
+      headline: 'Ready to Connect',
+      detail: 'Connect to the room to start sending your audio.',
       canSpeak: false,
       tone: 'neutral',
       steps,
@@ -89,7 +89,7 @@ export function getLiveKitSessionPresentation(
     const steps: [SessionStepState, SessionStepState, SessionStepState] = [roomStep, microphoneStep, transcriptionStep];
     return {
       headline: 'Microphone is muted',
-      detail: 'Turn on the microphone when you are ready to speak.',
+      detail: 'Unmute your microphone when you are ready to speak.',
       canSpeak: false,
       tone: 'warning',
       steps,
@@ -100,8 +100,8 @@ export function getLiveKitSessionPresentation(
   if (!isAgentConnected) {
     const steps: [SessionStepState, SessionStepState, SessionStepState] = [roomStep, microphoneStep, transcriptionStep];
     return {
-      headline: 'Waiting for transcription agent',
-      detail: 'You are in the room and your microphone is on.',
+      headline: 'Waiting for transcriber',
+      detail: 'You are connected. Waiting for the transcription service to start.',
       canSpeak: false,
       tone: 'pending',
       steps,
@@ -112,7 +112,7 @@ export function getLiveKitSessionPresentation(
   const steps: [SessionStepState, SessionStepState, SessionStepState] = [roomStep, microphoneStep, transcriptionStep];
   return {
     headline: 'Ready to speak',
-    detail: 'Your microphone is live and transcription is connected.',
+    detail: 'Your microphone is live and transcription is running.',
     canSpeak: true,
     tone: 'ready',
     steps,

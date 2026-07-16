@@ -138,6 +138,9 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
 
         if (!response.ok) {
             const errorData = await response.json().catch(() => ({}));
+            if (errorData.code === 'room_not_found') {
+                throw new Error('This room is no longer available. Ask the administrator for a new stream link.');
+            }
             throw new Error(errorData.error || `Failed to get token: ${response.status}`);
         }
 

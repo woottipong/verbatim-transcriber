@@ -73,14 +73,14 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
               <Radio size={16} aria-hidden="true" />
             </span>
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-slate-100">LiveKit / WebRTC</h3>
+              <h3 className="text-sm font-semibold text-slate-100">Audio Room Connection</h3>
               {isConnected ? (
                 <p className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
                   <Users size={13} aria-hidden="true" />
-                  {participantCount} {participantCount === 1 ? 'participant' : 'participants'}
+                  {participantCount} {participantCount === 1 ? 'user' : 'users'}
                 </p>
               ) : (
-                <p className="mt-0.5 text-xs text-slate-500">Low-latency audio session</p>
+                <p className="mt-0.5 text-xs text-slate-500">Low-latency audio stream</p>
               )}
             </div>
           </div>
@@ -109,30 +109,30 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
           <div className="session-toolbar__actions">
             {!isConnected && !isConnecting && (
               <>
-                <button onClick={onConnect} disabled={!roomName.trim()} className="control-button control-button--primary" aria-label={roomName.trim() ? 'Join room and enable microphone' : 'A room link is required'}>
-                  <Play size={14} fill="currentColor" aria-hidden="true" /> {roomName.trim() ? 'Join & enable mic' : 'Room link required'}
+                <button onClick={onConnect} disabled={!roomName.trim()} className="control-button control-button--primary" aria-label={roomName.trim() ? 'Connect microphone' : 'Room ID Required'}>
+                  <Play size={14} fill="currentColor" aria-hidden="true" /> {roomName.trim() ? 'Connect' : 'Room ID Required'}
                 </button>
               </>
             )}
             {isConnecting && (
-              <button disabled className="control-button control-button--primary" aria-label="Joining room and starting microphone">
-                <span className="status-dot status-dot--pending" aria-hidden="true" /> Joining &amp; starting mic…
+              <button disabled className="control-button control-button--primary" aria-label="Connecting microphone">
+                <span className="status-dot status-dot--pending" aria-hidden="true" /> Connecting…
               </button>
             )}
             {isConnected && (
               <>
-                <button onClick={onToggleMicrophone} className="control-button control-button--quiet" aria-label={isMicrophoneEnabled ? 'Mute microphone' : 'Turn on microphone'}>
+                <button onClick={onToggleMicrophone} className="control-button control-button--quiet" aria-label={isMicrophoneEnabled ? 'Mute microphone' : 'Unmute microphone'}>
                   {isMicrophoneEnabled ? <MicOff size={14} aria-hidden="true" /> : <Mic size={14} aria-hidden="true" />}
-                  {isMicrophoneEnabled ? 'Mute' : 'Turn on mic'}
+                  {isMicrophoneEnabled ? 'Mute' : 'Unmute'}
                 </button>
-                <button onClick={onDisconnect} className="control-button control-button--danger" aria-label="Leave LiveKit room">
-                  <LogOut size={14} aria-hidden="true" /> Leave room
+                <button onClick={onDisconnect} className="control-button control-button--danger" aria-label="Disconnect">
+                  <LogOut size={14} aria-hidden="true" /> Disconnect
                 </button>
               </>
             )}
-            <button onClick={onClear} className="control-button control-button--quiet !px-2.5 sm:!px-3" aria-label="Clear transcript" title="Clear transcript">
+            <button onClick={onClear} className="control-button control-button--quiet !px-2.5 sm:!px-3" aria-label="Clear text" title="Clear text">
               <Eraser size={14} aria-hidden="true" />
-              <span className="hidden sm:inline">Clear</span>
+              <span className="hidden sm:inline">Clear Text</span>
             </button>
           </div>
         </div>
@@ -146,8 +146,8 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
 
       {isConnected && !isAgentConnected && (
         <div className="border-b border-amber-300/25 bg-amber-300/5 px-4 py-3 sm:px-5">
-          <p className="text-sm text-amber-100">Room connected. Waiting for the transcription agent.</p>
-          <p className="mt-1 text-xs text-slate-400">An administrator can start the agent from the room workspace.</p>
+          <p className="text-sm text-amber-100">Connected. Waiting for transcriber to start...</p>
+          <p className="mt-1 text-xs text-slate-400">Ask an administrator to start the transcription service if it is waiting.</p>
         </div>
       )}
 
@@ -161,16 +161,16 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
           <div className="transcript-empty-state">
             <p className="text-base font-medium text-slate-300">
               {connectionState === ConnectionState.DISCONNECTED
-                ? 'No transcript yet'
+                ? 'Waiting for speech...'
                 : session.canSpeak
-                  ? 'Speak normally. Your transcript will appear here.'
+                  ? 'Start speaking. Your transcript will show here.'
                   : session.headline}
             </p>
             <p className="mt-2 text-sm leading-6 text-slate-500">
               {connectionState === ConnectionState.DISCONNECTED
-                ? 'Join the room to enable your microphone and start transcribing.'
+                ? 'Connect to start transcribing.'
                 : session.canSpeak
-                  ? 'Interim text updates live, then settles into a final segment.'
+                  ? 'Draft text updates live and finalizes when you pause speaking.'
                   : session.detail}
             </p>
           </div>
@@ -204,7 +204,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                     <span className="transcript-live-dot" aria-hidden="true" />
                     {interim.provider.toUpperCase()} · LIVE DRAFT
                   </span>
-                  <span className="transcript-row__hint text-[10px] font-medium uppercase tracking-[0.12em] text-violet-300/70">กำลังถอดเสียง</span>
+                  <span className="transcript-row__hint text-[10px] font-medium uppercase tracking-[0.12em] text-violet-300/70">Transcribing...</span>
                   <p className="transcript-row__text min-w-0 text-[1.05rem] leading-7 text-slate-300">{interim.text}</p>
                 </div>
               </div>
@@ -221,14 +221,14 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
             setIsFollowingLatest(true);
           }}
         >
-          Jump to latest
+          Jump to Latest
         </button>
       )}
       </div>
 
       <footer className="flex items-center justify-between border-t border-slate-700/70 px-4 py-2.5 text-xs text-slate-500 sm:px-5">
-        <span>WebRTC · target latency 200–500 ms</span>
-        <span className="tabular-nums text-violet-300">{transcripts.length} segments</span>
+        <span>Status: Connected · Low Latency Feed</span>
+        <span className="tabular-nums text-violet-300">{transcripts.length} Lines</span>
       </footer>
     </article>
   );

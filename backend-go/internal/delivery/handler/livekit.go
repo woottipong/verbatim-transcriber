@@ -50,6 +50,27 @@ func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config) error {
 			"error": "roomName is required",
 		})
 	}
+	if err := validateRoomName(req.RoomName); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+
+	ctx, cancel := context.WithTimeout(c.UserContext(), 5*time.Second)
+	defer cancel()
+	roomClient := lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
+	rooms, err := roomClient.ListRooms(ctx, &livekit.ListRoomsRequest{})
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
+			"error": "Failed to verify room availability",
+		})
+	}
+	if !containsRoom(rooms.Rooms, req.RoomName) {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"code":  "room_not_found",
+			"error": "Room does not exist or is no longer available",
+		})
+	}
 
 	// Create access token
 	at := auth.NewAccessToken(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
@@ -96,6 +117,15 @@ func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config) error {
 		Token: token,
 		WsURL: cfg.LiveKitURL,
 	})
+}
+
+func containsRoom(rooms []*livekit.Room, roomName string) bool {
+	for _, room := range rooms {
+		if room != nil && room.Name == roomName {
+			return true
+		}
+	}
+	return false
 }
 
 // HandleCreateRoom creates an empty LiveKit room. Starting an ASR agent is a

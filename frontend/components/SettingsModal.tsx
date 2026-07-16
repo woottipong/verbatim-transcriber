@@ -20,9 +20,43 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, config, 
 
   useEffect(() => {
     if (!isOpen) return undefined;
+    const modalElement = document.querySelector('[role="dialog"]');
+    if (!modalElement) return undefined;
+
+    const focusableSelector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape') {
+        onClose();
+        return;
+      }
+
+      if (event.key === 'Tab') {
+        const focusableElements = modalElement.querySelectorAll(focusableSelector);
+        if (focusableElements.length === 0) return;
+
+        const firstElement = focusableElements[0] as HTMLElement;
+        const lastElement = focusableElements[focusableElements.length - 1] as HTMLElement;
+
+        if (event.shiftKey) {
+          if (document.activeElement === firstElement) {
+            lastElement.focus();
+            event.preventDefault();
+          }
+        } else {
+          if (document.activeElement === lastElement) {
+            firstElement.focus();
+            event.preventDefault();
+          }
+        }
+      }
     };
+
+    const focusableElements = modalElement.querySelectorAll(focusableSelector);
+    if (focusableElements.length > 0) {
+      (focusableElements[0] as HTMLElement).focus();
+    }
+
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isOpen, onClose]);
@@ -49,7 +83,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, config, 
           </div>
           <button
             onClick={onClose}
-            className="control-button control-button--quiet !min-h-9 !px-2"
+            className="control-button control-button--quiet !min-h-11 !min-w-11 !p-0 flex items-center justify-center"
             aria-label="Close settings"
           >
             <X size={24} className="text-slate-400 hover:text-slate-200" />

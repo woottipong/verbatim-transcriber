@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/livekit/protocol/livekit"
 	"github.com/livekit/psrpc"
 )
 
@@ -43,5 +44,22 @@ func TestIsRoomConflictError(t *testing.T) {
 	}
 	if !isRoomConflictError(psrpc.NewError(psrpc.AlreadyExists, errors.New("room conflict"))) {
 		t.Fatal("typed already_exists error was not recognized")
+	}
+}
+
+func TestContainsRoom(t *testing.T) {
+	rooms := []*livekit.Room{
+		{Name: "daily-briefing"},
+		{Name: "test_room"},
+	}
+
+	if !containsRoom(rooms, "test_room") {
+		t.Fatal("existing room was not found")
+	}
+	if containsRoom(rooms, "missing-room") {
+		t.Fatal("missing room was reported as existing")
+	}
+	if containsRoom(append(rooms, nil), "missing-room") {
+		t.Fatal("nil room entry should not match")
 	}
 }
