@@ -18,6 +18,15 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, config, 
     }
   }, [config, isOpen]);
 
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -27,20 +36,20 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, config, 
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fadeIn">
-      <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-2xl shadow-2xl border border-slate-700 w-full max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={onClose}>
+      <div className="app-panel flex max-h-[90vh] w-full max-w-2xl flex-col" role="dialog" aria-modal="true" aria-labelledby="settings-title" onMouseDown={(event) => event.stopPropagation()}>
         {/* Header */}
-        <div className="flex justify-between items-center px-6 py-4 border-b border-slate-700 bg-slate-800/50 backdrop-blur-sm">
+        <div className="panel-header flex items-center justify-between px-5 py-4 sm:px-6">
           <div>
-            <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+            <h2 id="settings-title" className="flex items-center gap-2 text-xl font-semibold tracking-tight text-white">
               <Server size={24} className="text-indigo-400" />
               Settings
             </h2>
-            <p className="text-xs text-slate-400 mt-1">Configure your transcription settings</p>
+            <p className="mt-1 text-sm text-slate-400">Configure the connection used for transcription.</p>
           </div>
           <button
             onClick={onClose}
-            className="p-2 hover:bg-slate-700 rounded-full transition-colors"
+            className="control-button control-button--quiet !min-h-9 !px-2"
             aria-label="Close settings"
           >
             <X size={24} className="text-slate-400 hover:text-slate-200" />
@@ -48,7 +57,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, config, 
         </div>
 
         {/* Content - Scrollable */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 custom-scrollbar">
+        <div className="transcript-scroller flex-1 overflow-y-auto px-5 py-5 sm:px-6">
           <form id="settings-form" onSubmit={handleSubmit} className="space-y-6">
             {/* Backend Connection */}
             <div className="space-y-4">
@@ -57,7 +66,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, config, 
                 <h3 className="text-lg font-semibold text-slate-200">Backend Server</h3>
               </div>
 
-              <div className="p-4 rounded-xl bg-indigo-500/10 border-2 border-indigo-500/50">
+              <div className="rounded-lg border border-indigo-400/35 bg-indigo-400/10 p-4">
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
                     <Server size={16} className="text-indigo-400" />
@@ -66,13 +75,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, config, 
                   <p className="text-sm text-slate-400">Connect to the Go backend server for secure transcription</p>
 
                   <div className="space-y-2">
-                    <label className="block text-xs font-medium text-slate-300">Backend URL:</label>
+                    <label htmlFor="backend-url" className="block text-xs font-medium text-slate-300">Backend URL</label>
                     <input
+                      id="backend-url"
                       type="text"
                       value={localConfig.backendUrl}
                       onChange={(e) => setLocalConfig({ ...localConfig, backendUrl: e.target.value })}
                       placeholder="ws://localhost:3000"
-                      className="w-full px-3 py-2.5 text-sm border-2 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-slate-900 border-slate-600 text-slate-100 placeholder-slate-500"
+                      className="w-full rounded-lg border border-slate-600 bg-slate-950/50 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500"
                     />
                     <p className="text-xs text-slate-500 flex items-center gap-1">
                       <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
@@ -87,18 +97,18 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, config, 
         </div>
 
         {/* Footer */}
-        <div className="border-t border-slate-700 px-6 py-4 bg-slate-800/50 backdrop-blur-sm flex justify-between items-center">
+        <div className="panel-header flex items-center justify-between px-5 py-4 sm:px-6">
           <button
             type="button"
             onClick={onClose}
-            className="px-5 py-2.5 text-slate-300 hover:text-white hover:bg-slate-700 rounded-lg transition-colors font-medium"
+            className="control-button control-button--quiet"
           >
             Cancel
           </button>
           <button
             type="submit"
             form="settings-form"
-            className="px-6 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 text-white rounded-lg hover:from-indigo-700 hover:to-purple-700 transition-all font-medium shadow-lg shadow-indigo-500/30 hover:shadow-xl hover:shadow-indigo-500/40"
+            className="control-button control-button--primary px-4"
           >
             Save Configuration
           </button>

@@ -100,21 +100,21 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+        <div className="app-shell">
             {/* Header */}
-            <header className="border-b border-slate-700/50 backdrop-blur-sm bg-slate-900/50 sticky top-0 z-10">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex justify-between items-center">
+            <header className="app-header">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
                     <div className="flex items-center gap-3">
                         {onBack && (
                             <button
                                 onClick={onBack}
-                                className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition"
+                                className="control-button control-button--quiet !min-h-10 !px-2.5"
                                 title="Close Viewer"
                             >
                                 <X size={20} />
                             </button>
                         )}
-                        <span className="bg-gradient-to-r from-emerald-500 to-teal-500 text-white p-2 rounded-lg shadow-lg">
+                        <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-400/35 bg-emerald-400/10 text-emerald-200">
                             <Eye size={18} />
                         </span>
                         <div>
@@ -150,13 +150,13 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                 </div>
             </header>
 
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-                <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-4">
                     {/* Left Sidebar - Room List */}
                     <div className="lg:col-span-1 space-y-4">
                         {/* Room List Card */}
-                        <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-4">
-                            <div className="flex items-center justify-between mb-4">
+                        <section className="app-panel p-4">
+                            <div className="mb-4 flex items-center justify-between">
                                 <h2 className="text-sm font-semibold text-white flex items-center gap-2">
                                     <Radio size={14} className="text-emerald-400" />
                                     Active Rooms
@@ -164,7 +164,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                 <button
                                     onClick={fetchRooms}
                                     disabled={isLoadingRooms}
-                                    className="p-1.5 text-slate-400 hover:text-white hover:bg-slate-700 rounded transition disabled:opacity-50"
+                                    className="control-button control-button--quiet !min-h-8 !px-2 disabled:opacity-50"
                                     title="Refresh rooms"
                                 >
                                     <RefreshCw size={14} className={isLoadingRooms ? 'animate-spin' : ''} />
@@ -180,15 +180,15 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                     {isLoadingRooms ? 'Loading...' : 'No active rooms'}
                                 </p>
                             ) : (
-                                <div className="space-y-2">
+                                <div className="space-y-1.5">
                                     {rooms.map(room => (
                                         <button
                                             key={room.name}
                                             onClick={() => viewer.connect(room.name)}
                                             disabled={viewer.connectionState === ConnectionState.CONNECTING}
-                                            className={`w-full text-left p-3 rounded-lg border transition ${viewer.currentRoomName === room.name
-                                                ? 'bg-emerald-500/20 border-emerald-500/50 text-white'
-                                                : 'bg-slate-700/30 border-slate-600/30 text-slate-300 hover:bg-slate-700/50'
+                                            className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${viewer.currentRoomName === room.name
+                                                ? 'border-violet-400/55 bg-violet-400/10 text-white'
+                                                : 'border-slate-700 bg-slate-950/20 text-slate-300 hover:bg-slate-700/35'
                                                 }`}
                                         >
                                             <div className="font-medium text-sm">{room.name}</div>
@@ -204,16 +204,16 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                             {viewer.connectionState === ConnectionState.CONNECTED && (
                                 <button
                                     onClick={viewer.disconnect}
-                                    className="w-full mt-4 px-3 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-400 text-sm font-medium rounded-lg border border-red-500/30 transition"
+                                    className="control-button control-button--danger mt-4 w-full"
                                 >
                                     Disconnect
                                 </button>
                             )}
-                        </div>
+                        </section>
 
                         {/* Active Agents Card */}
                         {viewer.connectionState === ConnectionState.CONNECTED && (
-                            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-4">
+                            <section className="app-panel p-4">
                                 <h2 className="text-sm font-semibold text-white flex items-center gap-2 mb-3">
                                     <Bot size={14} className="text-purple-400" />
                                     Active Agents
@@ -228,20 +228,20 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                         {viewer.agents.map(agent => (
                                             <div
                                                 key={agent.identity}
-                                                className={`flex items-center justify-between p-2 rounded-lg border ${getProviderColor(agent.provider)}`}
+                                                className={`flex items-center justify-between rounded-lg border px-2.5 py-2 ${getProviderColor(agent.provider)}`}
                                             >
                                                 <span className="text-sm font-medium">{agent.provider}</span>
-                                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                                                <span className="status-dot status-dot--live" aria-label="Connected" />
                                             </div>
                                         ))}
                                     </div>
                                 )}
-                            </div>
+                            </section>
                         )}
 
                         {/* Audio Playback Card */}
                         {viewer.connectionState === ConnectionState.CONNECTED && viewer.audioParticipants.length > 0 && (
-                            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-4">
+                            <section className="app-panel p-4">
                                 <div className="flex items-center justify-between mb-3">
                                     <h2 className="text-sm font-semibold text-white flex items-center gap-2">
                                         {viewer.isAudioMuted ? (
@@ -253,9 +253,9 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                     </h2>
                                     <button
                                         onClick={viewer.toggleAudioMute}
-                                        className={`px-2 py-1 text-xs font-medium rounded transition ${viewer.isAudioMuted
-                                            ? 'bg-red-500/20 text-red-400 hover:bg-red-500/30'
-                                            : 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                                        className={`control-button !min-h-8 !px-2.5 ${viewer.isAudioMuted
+                                            ? 'control-button--danger'
+                                            : 'control-button--quiet text-emerald-200'
                                             }`}
                                     >
                                         {viewer.isAudioMuted ? 'Unmute' : 'Mute'}
@@ -268,7 +268,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                             key={participant}
                                             className="flex items-center gap-2 text-xs text-slate-300"
                                         >
-                                            <span className={`w-2 h-2 rounded-full ${viewer.isAudioMuted ? 'bg-slate-500' : 'bg-emerald-500 animate-pulse'}`} />
+                                            <span className={`status-dot ${viewer.isAudioMuted ? '' : 'status-dot--live'}`} aria-hidden="true" />
                                             <span className="truncate">{participant}</span>
                                         </div>
                                     ))}
@@ -277,15 +277,15 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                 {!viewer.isAudioMuted && (
                                     <p className="text-xs text-emerald-400 mt-2">🔊 Listening to room audio</p>
                                 )}
-                            </div>
+                            </section>
                         )}
                     </div>
 
                     {/* Main Content - Transcript Area */}
                     <div className="lg:col-span-3">
-                        <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 overflow-hidden">
+                        <section className="app-panel overflow-hidden">
                             {/* Toolbar */}
-                            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-700/50">
+                            <div className="panel-header flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                                 <div className="flex items-center gap-3">
                                     <h2 className="text-sm font-semibold text-white">
                                         Transcripts
@@ -302,7 +302,8 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                         <select
                                             value={filterProvider}
                                             onChange={(e) => setFilterProvider(e.target.value)}
-                                            className="px-3 py-1.5 text-xs font-medium bg-slate-700/50 border border-slate-600/50 rounded-lg text-white focus:outline-none focus:border-emerald-500/50"
+                                            aria-label="Filter transcripts by provider"
+                                            className="h-9 rounded-lg border border-slate-600 bg-slate-950/40 px-3 text-xs font-medium text-white"
                                         >
                                             <option value="all">All Providers</option>
                                             {availableProviders.map(provider => (
@@ -317,7 +318,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                     <button
                                         onClick={viewer.clearTranscripts}
                                         disabled={viewer.transcripts.length === 0}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-400 hover:text-white bg-slate-700/50 hover:bg-slate-700 rounded-lg border border-slate-600/50 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                                        className="control-button control-button--quiet disabled:opacity-40"
                                     >
                                         <Trash2 size={12} />
                                         Clear
@@ -326,7 +327,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                             </div>
 
                             {/* Transcript List */}
-                            <div className="h-[500px] overflow-y-auto p-4 space-y-3">
+                            <div className="transcript-scroller h-[500px] overflow-y-auto px-4 py-2">
                                 {viewer.connectionState !== ConnectionState.CONNECTED ? (
                                     <div className="flex flex-col items-center justify-center h-full text-slate-500">
                                         <Radio size={32} className="mb-3 opacity-50" />
@@ -346,14 +347,14 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                         {filteredTranscripts.map(segment => (
                                             <div
                                                 key={segment.id}
-                                                className="flex gap-3 p-3 bg-slate-700/30 rounded-lg"
+                                                className="transcript-row grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 py-3"
                                             >
                                                 {segment.provider && (
-                                                    <span className={`shrink-0 px-2 py-0.5 text-[10px] font-bold uppercase rounded ${getProviderColor(segment.provider)}`}>
+                                                    <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(segment.provider)}`}>
                                                         {segment.provider}
                                                     </span>
                                                 )}
-                                                <p className="text-sm text-slate-200 leading-relaxed flex-1">
+                                                <p className="min-w-0 text-[1rem] leading-7 text-slate-100">
                                                     {segment.text}
                                                 </p>
                                                 <span className="shrink-0 text-[10px] text-slate-500">
@@ -375,12 +376,12 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                             return (
                                                 <div
                                                     key={`interim-${agentId}`}
-                                                    className="flex gap-3 p-3 bg-slate-700/20 rounded-lg border border-dashed border-slate-600/50"
+                                                    className="my-2 grid grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-3"
                                                 >
-                                                    <span className={`shrink-0 px-2 py-0.5 text-[10px] font-bold uppercase rounded opacity-60 ${getProviderColor(provider)}`}>
+                                                    <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(provider)}`}>
                                                         {provider}
                                                     </span>
-                                                    <p className="text-sm text-slate-400 italic leading-relaxed flex-1">
+                                                    <p className="min-w-0 text-[1rem] italic leading-7 text-violet-100" aria-live="polite">
                                                         {text}
                                                     </p>
                                                 </div>
@@ -389,11 +390,11 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                     </>
                                 )}
                             </div>
-                        </div>
+                        </section>
 
                         {/* Error Display */}
                         {viewer.error && (
-                            <div className="mt-4 p-3 bg-red-500/10 border border-red-500/30 rounded-lg">
+                            <div className="mt-4 rounded-lg border border-red-400/35 bg-red-950/35 p-3" role="alert">
                                 <p className="text-sm text-red-400">{viewer.error}</p>
                             </div>
                         )}

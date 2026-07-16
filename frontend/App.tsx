@@ -124,44 +124,41 @@ export default function App() {
     azureHook.connectionState === ConnectionState.CONNECTED;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
-      {/* Header */}
-      <header className="border-b border-slate-700/50 backdrop-blur-sm bg-slate-900/50 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-3">
-            <span className="bg-gradient-to-r from-purple-500 to-pink-500 text-white p-2.5 rounded-xl shadow-lg">
-              <Radio size={20} />
+    <div className="app-shell">
+      <header className="app-header">
+        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-violet-400/45 bg-violet-500/20 text-violet-200">
+              <Radio size={19} aria-hidden="true" />
             </span>
             <div>
-              <h1 className="text-xl font-bold text-white">Thai Transcription</h1>
-              <p className="text-xs text-slate-400">LiveKit vs Traditional ASR Comparison</p>
+              <h1 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">Thai Transcription</h1>
+              <p className="text-xs text-slate-400">Live comparison workspace</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            {/* Navigation Buttons */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
             <button
               onClick={openViewerTab}
-              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 rounded-lg border border-emerald-500/30 transition"
+              className="control-button control-button--quiet hidden sm:inline-flex"
               title="Open Viewer"
             >
               <Eye size={16} />
-              <span className="hidden sm:inline">Viewer</span>
+              Viewer
             </button>
 
             <button
               onClick={openAdminTab}
-              className="flex items-center gap-2 px-3 py-2 text-sm font-medium text-orange-400 hover:text-orange-300 bg-orange-500/10 hover:bg-orange-500/20 rounded-lg border border-orange-500/30 transition"
+              className="control-button control-button--quiet hidden md:inline-flex"
               title="Open Admin"
             >
               <Wrench size={16} />
-              <span className="hidden sm:inline">Admin</span>
+              Admin
             </button>
 
-            {/* Audio Device Selector + LiveKit Record Button */}
             <div className="flex items-center gap-2">
               {audioDevices.length > 1 && (
-                <div className="hidden md:flex items-center gap-2 bg-slate-800/50 rounded-lg px-3 py-2 border border-slate-700/50">
+                <div className="hidden lg:flex items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-800/70 px-2.5 py-2">
                   <Mic2 size={14} className="text-slate-400" />
                   <select
                     value={config.audioDeviceId || 'default'}
@@ -190,8 +187,9 @@ export default function App() {
 
             <button
               onClick={handleOpenSettings}
-              className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition"
+              className="control-button control-button--quiet !min-h-10 !px-2.5"
               title="Settings"
+              aria-label="Open settings"
             >
               <Settings size={20} />
             </button>
@@ -199,17 +197,15 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-6">
-        {/* Stacked Layout */}
+      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
         <div className="space-y-8">
-          {/* Top: LiveKit Panel */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="px-2 py-1 bg-purple-500/20 text-purple-400 text-xs font-semibold rounded-full border border-purple-500/30">
-                WebRTC
-              </span>
-              <h2 className="text-lg font-semibold text-white">LiveKit Streaming</h2>
+          <section className="space-y-3" aria-labelledby="livekit-heading">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-violet-300">WebRTC stream</p>
+                <h2 id="livekit-heading" className="mt-1 text-xl font-semibold tracking-tight text-white">LiveKit transcription</h2>
+              </div>
+              <p className="hidden text-sm text-slate-400 sm:block">Low-latency streaming monitor</p>
             </div>
             <LiveKitPanel
               transcripts={livekitHook.transcripts}
@@ -226,24 +222,20 @@ export default function App() {
               onClear={livekitHook.clearTranscripts}
               roomPlaceholder="Enter room name..."
             />
-          </div>
+          </section>
 
-          {/* Bottom: Traditional ASR (Google + Azure) */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 mb-2">
-              <span className="px-2 py-1 bg-blue-500/20 text-blue-400 text-xs font-semibold rounded-full border border-blue-500/30">
-                WebSocket
-              </span>
-              <h2 className="text-lg font-semibold text-white">Traditional ASR</h2>
+          <section className="space-y-3" aria-labelledby="provider-heading">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-300">Provider comparison</p>
+                <h2 id="provider-heading" className="mt-1 text-xl font-semibold tracking-tight text-white">Traditional ASR</h2>
+              </div>
+              <p className="hidden text-sm text-slate-400 sm:block">Run a provider independently for side-by-side checks</p>
             </div>
 
-            {/* Google + Azure side by side */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Google Panel */}
-              <div className="relative">
-                <div className="absolute -top-1 left-4 px-2 py-0.5 bg-slate-800 text-xs font-medium text-blue-400 rounded z-10">
-                  Google Cloud STT
-                </div>
+            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <div className="space-y-2">
+                <h3 className="px-1 text-sm font-semibold text-sky-300">Google Cloud STT</h3>
                 <TranscriptPanel
                   transcripts={googleHook.transcripts}
                   interimTranscript={googleHook.interimTranscript}
@@ -255,11 +247,8 @@ export default function App() {
                 />
               </div>
 
-              {/* Azure Panel */}
-              <div className="relative">
-                <div className="absolute -top-1 left-4 px-2 py-0.5 bg-slate-800 text-xs font-medium text-cyan-400 rounded z-10">
-                  Azure Speech
-                </div>
+              <div className="space-y-2">
+                <h3 className="px-1 text-sm font-semibold text-cyan-300">Azure Speech</h3>
                 <TranscriptPanel
                   transcripts={azureHook.transcripts}
                   interimTranscript={azureHook.interimTranscript}
@@ -271,7 +260,7 @@ export default function App() {
                 />
               </div>
             </div>
-          </div>
+          </section>
         </div>
       </main>
 

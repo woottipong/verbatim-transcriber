@@ -10,17 +10,15 @@ interface RecordButtonProps {
 
 const RecordButton: React.FC<RecordButtonProps> = ({ isConnected, isConnecting, onClick, size = 'lg' }) => {
     const isSmall = size === 'sm';
-    const buttonSize = isSmall ? 'w-10 h-10' : 'w-20 h-20';
-    const iconSize = isSmall ? 18 : 32;
-    const ringSize = isSmall ? 'ring-2' : 'ring-4';
-    const shadowSize = isSmall ? 'shadow-lg' : 'shadow-2xl';
+    const buttonSize = isSmall ? 'h-10 min-w-10 px-2.5' : 'h-14 min-w-14 px-4';
+    const iconSize = isSmall ? 18 : 22;
 
     const buttonClasses = `
-    group relative flex items-center justify-center ${buttonSize} rounded-full ${shadowSize} 
-    transition-all transform hover:scale-110 active:scale-95
+    inline-flex items-center justify-center gap-2 ${buttonSize} rounded-lg border text-sm font-semibold
+    transition-colors duration-150
     ${isConnected
-            ? `bg-red-500 hover:bg-red-600 text-white ${ringSize} ring-red-500/30 shadow-red-500/50`
-            : `bg-indigo-600 hover:bg-indigo-700 text-white ${ringSize} ring-indigo-500/30 shadow-indigo-500/50`}
+            ? 'border-red-400/50 bg-red-500 text-white hover:bg-red-600'
+            : 'border-violet-300/40 bg-violet-600 text-white hover:bg-violet-500'}
     ${isConnecting ? 'opacity-70 cursor-wait' : 'cursor-pointer'}
   `;
 
@@ -38,6 +36,9 @@ const RecordButton: React.FC<RecordButtonProps> = ({ isConnected, isConnecting, 
             ) : (
                 <Mic size={iconSize} />
             )}
+            <span className={isSmall ? 'sr-only' : ''}>
+                {isConnecting ? 'Connecting' : isConnected ? 'Disconnect' : 'Record'}
+            </span>
         </button>
     );
 };

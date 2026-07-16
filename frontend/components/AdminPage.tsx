@@ -121,6 +121,15 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         return () => clearInterval(interval);
     }, [fetchRooms, fetchAgentStatus]);
 
+    useEffect(() => {
+        if (!deleteConfirm) return undefined;
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') setDeleteConfirm(null);
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [deleteConfirm]);
+
     // Delete room
     const deleteRoom = async (roomName: string) => {
         try {
@@ -245,21 +254,21 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     };
 
     return (
-        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
+        <div className="app-shell">
             {/* Header */}
-            <header className="border-b border-slate-700/50 backdrop-blur-sm bg-slate-900/50 sticky top-0 z-10">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 flex justify-between items-center">
+            <header className="app-header">
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
                     <div className="flex items-center gap-3">
                         {onBack && (
                             <button
                                 onClick={onBack}
-                                className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-lg transition"
+                                className="control-button control-button--quiet !min-h-10 !px-2.5"
                                 title="Back to Stream"
                             >
                                 <ArrowLeft size={20} />
                             </button>
                         )}
-                        <span className="bg-gradient-to-r from-orange-500 to-red-500 text-white p-2 rounded-lg shadow-lg">
+                        <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-orange-400/35 bg-orange-400/10 text-orange-200">
                             <Settings size={18} />
                         </span>
                         <div>
@@ -274,7 +283,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                             fetchAgentStatus();
                         }}
                         disabled={isLoading}
-                        className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-slate-300 hover:text-white bg-slate-700/50 hover:bg-slate-700 rounded-lg border border-slate-600/50 transition disabled:opacity-50"
+                        className="control-button control-button--quiet disabled:opacity-50"
                     >
                         <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
                         Refresh
@@ -282,36 +291,37 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                 </div>
             </header>
 
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+            <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
                 {/* Error Banner */}
                 {error && (
-                    <div className="mb-6 p-4 bg-red-500/10 border border-red-500/30 rounded-lg flex items-center gap-3">
+                    <div className="mb-5 flex items-center gap-3 rounded-lg border border-red-400/35 bg-red-950/35 p-4" role="alert">
                         <AlertTriangle size={20} className="text-red-400" />
                         <p className="text-sm text-red-400 flex-1">{error}</p>
                         <button
                             onClick={() => setError(null)}
-                            className="text-red-400 hover:text-red-300"
+                            className="control-button control-button--quiet !min-h-8 !px-2 text-red-200"
+                            aria-label="Dismiss error"
                         >
                             ×
                         </button>
                     </div>
                 )}
 
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
                     {/* Left: Rooms List */}
                     <div className="lg:col-span-2 space-y-4">
-                        <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 overflow-hidden">
-                            <div className="px-4 py-3 border-b border-slate-700/50 flex items-center justify-between">
+                        <section className="app-panel overflow-hidden">
+                            <div className="panel-header flex items-center justify-between px-4 py-3">
                                 <h2 className="text-sm font-semibold text-white flex items-center gap-2">
                                     <Radio size={14} className="text-emerald-400" />
                                     Active Rooms
-                                    <span className="px-2 py-0.5 text-xs bg-slate-700 rounded-full">
+                                    <span className="rounded-md border border-slate-600 bg-slate-950/30 px-1.5 py-0.5 text-xs tabular-nums text-slate-300">
                                         {rooms.length}
                                     </span>
                                 </h2>
                             </div>
 
-                            <div className="divide-y divide-slate-700/50">
+                            <div className="divide-y divide-slate-700/70">
                                 {rooms.length === 0 ? (
                                     <div className="p-8 text-center text-slate-500">
                                         {isLoading ? (
@@ -325,11 +335,13 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                     </div>
                                 ) : (
                                     rooms.map(room => (
-                                        <div key={room.name} className="bg-slate-800/30">
-                                            {/* Room Header */}
-                                            <div
-                                                className="px-4 py-3 flex items-center justify-between cursor-pointer hover:bg-slate-700/30 transition"
+                                    <div key={room.name}>
+                                            <div className="flex items-center justify-between px-2 py-2">
+                                            <button
+                                                type="button"
+                                                className="flex min-w-0 flex-1 items-center gap-3 rounded-md px-2 py-1 text-left transition-colors hover:bg-slate-700/30"
                                                 onClick={() => toggleRoom(room.name)}
+                                                aria-expanded={expandedRooms.has(room.name)}
                                             >
                                                 <div className="flex items-center gap-3">
                                                     {expandedRooms.has(room.name) ? (
@@ -352,23 +364,22 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                                     </div>
                                                 </div>
 
-                                                {/* Delete Button */}
-                                                <button
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        setDeleteConfirm(room.name);
-                                                    }}
-                                                    className="p-2 text-slate-400 hover:text-red-400 hover:bg-red-500/10 rounded-lg transition"
+                                            </button>
+                                            <button
+                                                    type="button"
+                                                    onClick={() => setDeleteConfirm(room.name)}
+                                                    className="control-button control-button--quiet !min-h-8 !px-2 text-slate-400 hover:!text-red-200"
                                                     title="Delete Room"
+                                                    aria-label={`Delete room ${room.name}`}
                                                 >
                                                     <Trash2 size={16} />
-                                                </button>
+                                            </button>
                                             </div>
 
                                             {/* Extended: Participants List */}
                                             {expandedRooms.has(room.name) && room.participants.length > 0 && (
                                                 <div className="px-4 pb-3 pl-10">
-                                                    <div className="bg-slate-700/30 rounded-lg divide-y divide-slate-600/30">
+                                                    <div className="divide-y divide-slate-700/70 rounded-lg border border-slate-700 bg-slate-950/20">
                                                         {room.participants.map(p => (
                                                             <div
                                                                 key={p.identity}
@@ -394,8 +405,9 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                                                 </div>
                                                                 <button
                                                                     onClick={() => removeParticipant(room.name, p.identity)}
-                                                                    className="p-1 text-slate-500 hover:text-red-400 transition"
+                                                                    className="control-button control-button--quiet !min-h-7 !px-1.5 text-slate-500 hover:!text-red-200"
                                                                     title="Remove Participant"
+                                                                    aria-label={`Remove ${p.identity}`}
                                                                 >
                                                                     <UserMinus size={14} />
                                                                 </button>
@@ -408,23 +420,23 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                     ))
                                 )}
                             </div>
-                        </div>
+                        </section>
                     </div>
 
                     {/* Right: Agent Control */}
                     <div className="space-y-4">
                         {/* Running Agents */}
                         {agentStatus && agentStatus.count > 0 && (
-                            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-4">
+                            <section className="app-panel p-4">
                                 <h2 className="text-sm font-semibold text-white flex items-center gap-2 mb-4">
                                     <Bot size={14} className="text-green-400" />
                                     Active Agents ({agentStatus.count})
                                 </h2>
                                 <div className="space-y-2">
                                     {agentStatus.agents.map(agent => (
-                                        <div key={agent.key} className="flex items-center justify-between p-2 bg-slate-700/30 rounded-lg">
+                                        <div key={agent.key} className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-950/20 p-2.5">
                                             <div className="flex items-center gap-2">
-                                                <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                                                <span className="status-dot status-dot--live" aria-label="Running" />
                                                 <span className="text-sm text-white">{agent.room}</span>
                                                 <span className={`px-2 py-0.5 rounded text-xs font-bold uppercase border ${getProviderColor(agent.provider)}`}>
                                                     {agent.provider}
@@ -433,19 +445,20 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                             <button
                                                 onClick={() => stopAgent(agent.room, agent.provider)}
                                                 disabled={isStoppingAgent}
-                                                className="p-1.5 text-red-400 hover:bg-red-500/20 rounded-lg transition disabled:opacity-50"
+                                                className="control-button control-button--quiet !min-h-8 !px-2 text-red-200 disabled:opacity-50"
                                                 title="Remove Agent"
+                                                aria-label={`Stop ${agent.provider} agent in ${agent.room}`}
                                             >
                                                 <UserMinus size={14} />
                                             </button>
                                         </div>
                                     ))}
                                 </div>
-                            </div>
+                            </section>
                         )}
 
                         {/* Add Agent Form - Always visible */}
-                        <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-4">
+                        <section className="app-panel p-4">
                             <h2 className="text-sm font-semibold text-white flex items-center gap-2 mb-4">
                                 <Bot size={14} className="text-purple-400" />
                                 Add Agent to Room
@@ -453,12 +466,13 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
 
                             <div className="space-y-3">
                                 <div>
-                                    <label className="block text-xs text-slate-400 mb-1">Select Room</label>
+                                    <label htmlFor="agent-room" className="mb-1 block text-xs font-medium text-slate-400">Select room</label>
                                     {rooms.length > 0 ? (
                                         <select
                                             value={agentRoom}
                                             onChange={(e) => setAgentRoom(e.target.value)}
-                                            className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 rounded-lg text-sm text-white focus:outline-none focus:border-purple-500/50"
+                                            id="agent-room"
+                                            className="h-10 w-full rounded-lg border border-slate-600 bg-slate-950/40 px-3 text-sm text-white"
                                         >
                                             <option value="">-- Select a room --</option>
                                             {rooms.map(room => (
@@ -473,16 +487,18 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                             value={agentRoom}
                                             onChange={(e) => setAgentRoom(e.target.value)}
                                             placeholder="Enter room name..."
-                                            className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 rounded-lg text-sm text-white placeholder-slate-500 focus:outline-none focus:border-purple-500/50"
+                                            id="agent-room"
+                                            className="h-10 w-full rounded-lg border border-slate-600 bg-slate-950/40 px-3 text-sm text-white placeholder-slate-500"
                                         />
                                     )}
                                 </div>
                                 <div>
-                                    <label className="block text-xs text-slate-400 mb-1">Provider</label>
+                                    <label htmlFor="agent-provider" className="mb-1 block text-xs font-medium text-slate-400">Provider</label>
                                     <select
                                         value={agentProvider}
                                         onChange={(e) => setAgentProvider(e.target.value as 'google' | 'azure')}
-                                        className="w-full px-3 py-2 bg-slate-700/50 border border-slate-600/50 rounded-lg text-sm text-white focus:outline-none focus:border-purple-500/50"
+                                        id="agent-provider"
+                                        className="h-10 w-full rounded-lg border border-slate-600 bg-slate-950/40 px-3 text-sm text-white"
                                     >
                                         <option value="google">Google Cloud STT</option>
                                         <option value="azure">Azure Speech</option>
@@ -491,7 +507,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                 <button
                                     onClick={startAgent}
                                     disabled={!agentRoom || isStartingAgent}
-                                    className="w-full flex items-center justify-center gap-2 px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-400 font-medium rounded-lg border border-purple-500/30 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="control-button control-button--primary w-full disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     {isStartingAgent ? (
                                         <RefreshCw size={14} className="animate-spin" />
@@ -501,11 +517,11 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                     Inject Agent
                                 </button>
                             </div>
-                        </div>
+                        </section>
 
                         {/* Quick Inject */}
                         {rooms.length > 0 && (
-                            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-slate-700/50 p-4">
+                            <section className="app-panel p-4">
                                 <h2 className="text-sm font-semibold text-white mb-3">Quick Inject</h2>
                                 <div className="space-y-2">
                                     {rooms.map(room => (
@@ -514,14 +530,14 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                             onClick={() => {
                                                 setAgentRoom(room.name);
                                             }}
-                                            className="w-full text-left px-3 py-2 text-sm text-slate-300 hover:text-purple-400 hover:bg-purple-500/10 rounded-lg transition flex items-center gap-2"
+                                            className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-slate-300 transition-colors hover:bg-violet-400/10 hover:text-violet-200"
                                         >
                                             <Bot size={14} />
                                             Add agent to "{room.name}"
                                         </button>
                                     ))}
                                 </div>
-                            </div>
+                            </section>
                         )}
                     </div>
                 </div>
@@ -529,9 +545,9 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
 
             {/* Delete Confirmation Modal */}
             {deleteConfirm && (
-                <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                    <div className="bg-slate-800 rounded-xl border border-slate-700 p-6 max-w-md w-full mx-4 shadow-xl">
-                        <h3 className="text-lg font-bold text-white mb-2">Delete Room</h3>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={() => setDeleteConfirm(null)}>
+                    <div className="app-panel w-full max-w-md p-5" role="dialog" aria-modal="true" aria-labelledby="delete-room-title" onMouseDown={(event) => event.stopPropagation()}>
+                        <h3 id="delete-room-title" className="mb-2 text-lg font-semibold text-white">Delete room</h3>
                         <p className="text-slate-400 mb-4">
                             Are you sure you want to delete room <span className="text-white font-medium">"{deleteConfirm}"</span>?
                             This will disconnect all participants.
@@ -539,13 +555,13 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                         <div className="flex gap-3">
                             <button
                                 onClick={() => setDeleteConfirm(null)}
-                                className="flex-1 px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition"
+                                className="control-button control-button--quiet flex-1"
                             >
                                 Cancel
                             </button>
                             <button
                                 onClick={() => deleteRoom(deleteConfirm)}
-                                className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg transition"
+                                className="control-button control-button--danger flex-1"
                             >
                                 Delete
                             </button>

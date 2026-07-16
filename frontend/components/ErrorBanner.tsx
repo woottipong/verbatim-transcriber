@@ -9,7 +9,7 @@ interface ErrorBannerProps {
 
 const ErrorBanner: React.FC<ErrorBannerProps> = ({ error, showConfigHint, onConfigClick }) => {
     return (
-        <div className="bg-red-900/20 border-l-4 border-red-500 p-4 rounded-r shadow-lg backdrop-blur-sm flex items-start gap-3">
+        <div className="flex items-start gap-3 rounded-lg border border-red-400/35 bg-red-950/35 p-4" role="alert">
             <AlertCircle className="text-red-400 flex-shrink-0 mt-0.5" size={20} />
             <div>
                 <h3 className="text-sm font-bold text-red-300">Connection Error</h3>

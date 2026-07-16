@@ -12,11 +12,11 @@ const ConnectionBadge: React.FC<ConnectionBadgeProps> = ({ state }) => {
     const isError = state === ConnectionState.ERROR;
 
     const badgeClasses = `
-    flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider shadow-lg
-    ${isConnected ? 'bg-green-500/20 text-green-400 border border-green-500/30' : ''}
-    ${isConnecting ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30' : ''}
-    ${isError ? 'bg-red-500/20 text-red-400 border border-red-500/30' : ''}
-    ${!isConnected && !isConnecting && !isError ? 'bg-slate-700 text-slate-400 border border-slate-600' : ''}
+    inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold tracking-wide
+    ${isConnected ? 'border-emerald-400/35 bg-emerald-400/10 text-emerald-200' : ''}
+    ${isConnecting ? 'border-amber-300/35 bg-amber-300/10 text-amber-100' : ''}
+    ${isError ? 'border-red-400/35 bg-red-400/10 text-red-200' : ''}
+    ${!isConnected && !isConnecting && !isError ? 'border-slate-600 bg-slate-800 text-slate-400' : ''}
   `;
 
     return (

@@ -1,280 +1,192 @@
-/**
- * LiveKitPanel Component
- * Displays LiveKit-based transcription with WebRTC connection status
- * 
- * Features:
- * - Real-time WebRTC connection status
- * - Agent connection indicator
- * - Room name selection
- * - Lower latency than WebSocket (200-500ms vs 500-2000ms)
- */
-
-import React, { useRef, useEffect, useState } from 'react';
-import { Trash2, Play, Square, Radio, Users, Copy, Check } from 'lucide-react';
-import { TranscriptSegment, ConnectionState } from '../types';
+import React, { useEffect, useRef, useState } from 'react';
+import { Check, Copy, Play, Radio, Square, Trash2, Users } from 'lucide-react';
+import { ConnectionState, TranscriptSegment } from '../types';
 
 interface LiveKitPanelProps {
-    transcripts: TranscriptSegment[];
-    interimTranscript: string;
-    connectionState: ConnectionState;
-    isAgentConnected: boolean;
-    agentName: string | null;
-    participantCount: number;
-    error: string | null;
-    roomName: string;
-    onRoomNameChange: (name: string) => void;
-    onConnect: () => void;
-    onDisconnect: () => void;
-    onClear: () => void;
-    roomPlaceholder?: string;
+  transcripts: TranscriptSegment[];
+  interimTranscript: string;
+  connectionState: ConnectionState;
+  isAgentConnected: boolean;
+  agentName: string | null;
+  participantCount: number;
+  error: string | null;
+  roomName: string;
+  onRoomNameChange: (name: string) => void;
+  onConnect: () => void;
+  onDisconnect: () => void;
+  onClear: () => void;
+  roomPlaceholder?: string;
 }
 
+const providerClasses: Record<string, string> = {
+  google: 'border-sky-400/30 bg-sky-400/10 text-sky-200',
+  azure: 'border-cyan-400/30 bg-cyan-400/10 text-cyan-200',
+};
+
 const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
-    transcripts,
-    interimTranscript,
-    connectionState,
-    isAgentConnected,
-    agentName,
-    participantCount,
-    error,
-    roomName,
-    onRoomNameChange,
-    onConnect,
-    onDisconnect,
-    onClear,
-    roomPlaceholder = 'Room name',
+  transcripts,
+  interimTranscript,
+  connectionState,
+  isAgentConnected,
+  agentName,
+  participantCount,
+  error,
+  roomName,
+  onRoomNameChange,
+  onConnect,
+  onDisconnect,
+  onClear,
+  roomPlaceholder = 'Room name',
 }) => {
-    const scrollRef = useRef<HTMLDivElement>(null);
-    const [copied, setCopied] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [copied, setCopied] = useState(false);
 
-    // Auto-scroll to bottom when new transcripts arrive
-    useEffect(() => {
-        if (scrollRef.current) {
-            scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-        }
-    }, [transcripts, interimTranscript]);
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [interimTranscript, transcripts]);
 
-    const hasContent = transcripts.length > 0 || interimTranscript;
-    const isConnected = connectionState === ConnectionState.CONNECTED;
-    const isConnecting = connectionState === ConnectionState.CONNECTING;
-    const isActive = isConnected || isConnecting;
+  const isConnected = connectionState === ConnectionState.CONNECTED;
+  const isConnecting = connectionState === ConnectionState.CONNECTING;
+  const isActive = isConnected || isConnecting;
+  const hasContent = transcripts.length > 0 || Boolean(interimTranscript);
+  const status = connectionState === ConnectionState.ERROR
+    ? { label: 'Connection error', dot: 'status-dot--error' }
+    : isConnecting
+      ? { label: 'Connecting', dot: 'status-dot--pending' }
+      : isConnected && isAgentConnected
+        ? { label: agentName ? `Agent: ${agentName}` : 'Agent ready', dot: 'status-dot--live' }
+        : isConnected
+          ? { label: 'Waiting for agent', dot: 'status-dot--pending' }
+          : { label: 'Disconnected', dot: '' };
+  const agentCommand = `curl -X POST localhost:3000/livekit/agent/start -H "Content-Type: application/json" -d '{"roomName":"${roomName}","provider":"google"}'`;
 
-    // Status color based on connection state
-    const getStatusColor = () => {
-        switch (connectionState) {
-            case ConnectionState.CONNECTED:
-                return isAgentConnected ? 'bg-green-500' : 'bg-yellow-500';
-            case ConnectionState.CONNECTING:
-                return 'bg-yellow-500 animate-pulse';
-            case ConnectionState.ERROR:
-                return 'bg-red-500';
-            default:
-                return 'bg-slate-600';
-        }
-    };
+  const copyAgentCommand = async () => {
+    try {
+      await navigator.clipboard.writeText(agentCommand);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  };
 
-    const getStatusText = () => {
-        switch (connectionState) {
-            case ConnectionState.CONNECTED:
-                if (isAgentConnected && agentName) {
-                    return `✅ Agent: ${agentName}`;
-                }
-                return isAgentConnected ? 'Connected + Agent' : 'Waiting for Agent...';
-            case ConnectionState.CONNECTING:
-                return 'Connecting...';
-            case ConnectionState.ERROR:
-                return 'Error';
-            default:
-                return 'Disconnected';
-        }
-    };
-
-    return (
-        <div className="bg-gradient-to-br from-purple-900/30 to-slate-800/50 backdrop-blur-sm rounded-2xl shadow-xl border border-purple-700/30 flex flex-col overflow-hidden">
-            {/* Header */}
-            <div className="px-6 py-3 border-b border-purple-700/30 flex justify-between items-center bg-purple-900/20 flex-shrink-0">
-                <div className="flex items-center gap-3">
-                    <h2 className="text-sm font-semibold text-slate-200 flex items-center gap-2">
-                        <Radio size={16} className="text-purple-400" />
-                        LiveKit (WebRTC)
-                    </h2>
-                    {/* Room Name Badge */}
-                    {isConnected && (
-                        <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-purple-800/50 text-xs text-purple-300 font-mono">
-                            🏠 {roomName}
-                        </div>
-                    )}
-                    {/* Status Badge */}
-                    <div className="flex items-center gap-1.5 px-2 py-1 rounded-full bg-slate-800/50 text-xs text-slate-400">
-                        <span className={`w-2 h-2 rounded-full ${getStatusColor()}`}></span>
-                        <span>{getStatusText()}</span>
-                    </div>
-                    {/* Participant Count */}
-                    {isConnected && (
-                        <div className="flex items-center gap-1 text-xs text-slate-500">
-                            <Users size={12} />
-                            <span>{participantCount}</span>
-                        </div>
-                    )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                    {/* Room Name Input (only when disconnected) */}
-                    {!isActive && (
-                        <input
-                            type="text"
-                            value={roomName}
-                            onChange={(e) => onRoomNameChange(e.target.value)}
-                            placeholder={roomPlaceholder}
-                            className="w-40 px-2 py-1 text-xs bg-slate-800/50 border border-slate-700 rounded text-slate-200 placeholder-slate-500 focus:outline-none focus:border-purple-500"
-                        />
-                    )}
-                    {/* Connect/Disconnect Button */}
-                    {isActive ? (
-                        <button
-                            onClick={onDisconnect}
-                            className="text-xs flex items-center gap-1 text-slate-300 hover:text-red-400 transition px-3 py-1.5 rounded bg-red-900/20 hover:bg-red-900/40"
-                            aria-label="Disconnect from LiveKit"
-                        >
-                            <Square size={14} fill="currentColor" /> Disconnect
-                        </button>
-                    ) : (
-                        <button
-                            onClick={onConnect}
-                            disabled={!roomName.trim()}
-                            className="text-xs flex items-center gap-1 text-slate-300 hover:text-purple-400 transition px-3 py-1.5 rounded bg-purple-900/30 hover:bg-purple-900/50 disabled:opacity-50 disabled:cursor-not-allowed"
-                            aria-label="Connect to LiveKit"
-                        >
-                            <Play size={14} fill="currentColor" /> Connect
-                        </button>
-                    )}
-                    <button
-                        onClick={onClear}
-                        className="text-xs flex items-center gap-1 text-slate-400 hover:text-red-400 transition px-3 py-1.5 rounded hover:bg-red-900/20"
-                        aria-label="Clear transcripts"
-                    >
-                        <Trash2 size={14} /> Clear
-                    </button>
-                </div>
+  return (
+    <article className="app-panel flex min-h-[390px] flex-col" aria-label="LiveKit transcription workspace">
+      <header className="panel-header flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-violet-500/15 text-violet-300">
+            <Radio size={16} aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <h3 className="text-sm font-semibold text-slate-100">LiveKit / WebRTC</h3>
+              <span className="flex items-center gap-2 text-xs text-slate-400">
+                <span className={`status-dot ${status.dot}`} aria-hidden="true" />
+                {status.label}
+              </span>
             </div>
-
-            {/* Error Banner */}
-            {error && (
-                <div className="px-4 py-2 bg-red-900/30 border-b border-red-700/30 text-red-300 text-xs">
-                    ⚠️ {error}
-                </div>
+            {isConnected && (
+              <p className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
+                <span className="font-mono text-slate-400">{roomName}</span>
+                <span aria-hidden="true">·</span>
+                <Users size={13} aria-hidden="true" />
+                {participantCount} participant{participantCount === 1 ? '' : 's'}
+              </p>
             )}
-
-            {/* Agent Status Banner */}
-            {isConnected && !isAgentConnected && (
-                <div className="px-4 py-3 bg-yellow-900/30 border-b border-yellow-700/30 text-yellow-300 text-xs">
-                    <div className="flex items-center gap-2 mb-2">
-                        <span className="animate-spin">⏳</span>
-                        <span>Waiting for ASR Agent... Start agent with:</span>
-                    </div>
-                    <div className="flex items-center gap-2 bg-slate-900/50 rounded p-2 font-mono text-[10px] text-slate-300">
-                        <code className="flex-1 overflow-x-auto whitespace-nowrap">
-                            curl -X POST localhost:3000/livekit/agent/start -H "Content-Type: application/json" -d '{`{"roomName":"${roomName}","provider":"google"}`}'
-                        </code>
-                        <button
-                            onClick={() => {
-                                navigator.clipboard.writeText(
-                                    `curl -X POST localhost:3000/livekit/agent/start -H "Content-Type: application/json" -d '{"roomName":"${roomName}","provider":"google"}'`
-                                );
-                                setCopied(true);
-                                setTimeout(() => setCopied(false), 2000);
-                            }}
-                            className="p-1 hover:bg-slate-700 rounded transition"
-                            title="Copy command"
-                        >
-                            {copied ? <Check size={14} className="text-green-400" /> : <Copy size={14} />}
-                        </button>
-                    </div>
-                </div>
-            )}
-
-            {/* Content - Fixed Height Scrollable */}
-            <div
-                ref={scrollRef}
-                className="h-[160px] p-4 overflow-y-auto custom-scrollbar"
-                style={{
-                    scrollbarWidth: 'thin',
-                    scrollbarColor: '#7c3aed #1e293b'
-                }}
-            >
-                {!hasContent ? (
-                    <div className="h-full flex flex-col items-center justify-center text-slate-500">
-                        {!isConnected ? (
-                            <p className="italic text-center text-sm">
-                                Click <span className="text-purple-400">Connect</span> to start LiveKit transcription
-                                <br />
-                                <span className="text-xs text-slate-600 mt-1 block">
-                                    Ultra-low latency via WebRTC (200-500ms)
-                                </span>
-                            </p>
-                        ) : (
-                            <p className="italic text-center text-sm">
-                                {isAgentConnected
-                                    ? 'Speak into your microphone to see transcription...'
-                                    : 'Waiting for ASR Agent to start processing...'}
-                            </p>
-                        )}
-                    </div>
-                ) : (
-                    <div className="space-y-2">
-                        {transcripts.map((segment, index) => {
-                            // Provider-specific colors
-                            const providerColors: Record<string, string> = {
-                                google: 'text-blue-400 bg-blue-900/30',
-                                azure: 'text-cyan-400 bg-cyan-900/30',
-                            };
-                            const providerColor = segment.provider
-                                ? providerColors[segment.provider] || 'text-purple-400 bg-purple-900/30'
-                                : 'text-purple-400 bg-purple-900/30';
-
-                            return (
-                                <div
-                                    key={segment.id}
-                                    className="text-slate-100 leading-relaxed p-2 rounded-lg hover:bg-purple-700/20 transition-colors border-l-2 border-purple-500/50"
-                                >
-                                    <span className="text-xs text-purple-400 mr-2">#{index + 1}</span>
-                                    {segment.provider && (
-                                        <span className={`text-[10px] px-1.5 py-0.5 rounded mr-2 ${providerColor}`}>
-                                            {segment.provider.toUpperCase()}
-                                        </span>
-                                    )}
-                                    <span className="text-base">{segment.text}</span>
-                                </div>
-                            );
-                        })}
-
-                        {/* Interim transcript */}
-                        {interimTranscript && (
-                            <div
-                                className="flex items-start gap-2 p-2 rounded-lg bg-purple-900/30 border-l-2 border-purple-400 text-purple-100"
-                                aria-live="polite"
-                                aria-label="Live interim transcript"
-                            >
-                                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-purple-400 animate-pulse" />
-                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-800/60 text-purple-300 font-semibold">
-                                    LIVE
-                                </span>
-                                <span className="text-base leading-relaxed">{interimTranscript}</span>
-                            </div>
-                        )}
-                    </div>
-                )}
-            </div>
-
-            {/* Footer - Latency Info */}
-            <div className="px-4 py-2 border-t border-purple-700/30 bg-purple-900/10 text-xs text-slate-500 flex justify-between items-center">
-                <span>🚀 WebRTC Protocol • Target Latency: 200-500ms</span>
-                <span className="text-purple-400">
-                    {transcripts.length} segments
-                </span>
-            </div>
+          </div>
         </div>
-    );
+
+        <div className="flex flex-wrap items-center gap-2">
+          {!isActive && (
+            <label className="sr-only" htmlFor="livekit-room">LiveKit room name</label>
+          )}
+          {!isActive && (
+            <input
+              id="livekit-room"
+              type="text"
+              value={roomName}
+              onChange={(event) => onRoomNameChange(event.target.value)}
+              placeholder={roomPlaceholder}
+              className="h-9 w-full rounded-lg border border-slate-600 bg-slate-950/40 px-3 text-sm text-slate-100 placeholder:text-slate-500 sm:w-44"
+            />
+          )}
+          {isActive ? (
+            <button onClick={onDisconnect} className="control-button control-button--danger" aria-label="Disconnect from LiveKit">
+              <Square size={14} fill="currentColor" aria-hidden="true" /> Disconnect
+            </button>
+          ) : (
+            <button onClick={onConnect} disabled={!roomName.trim()} className="control-button control-button--primary" aria-label="Connect to LiveKit">
+              <Play size={14} fill="currentColor" aria-hidden="true" /> Connect
+            </button>
+          )}
+          <button onClick={onClear} className="control-button control-button--quiet" aria-label="Clear LiveKit transcripts">
+            <Trash2 size={14} aria-hidden="true" /> <span className="hidden sm:inline">Clear</span>
+          </button>
+        </div>
+      </header>
+
+      {error && (
+        <div className="border-b border-red-400/30 bg-red-950/35 px-4 py-2.5 text-sm text-red-200" role="alert">
+          {error}
+        </div>
+      )}
+
+      {isConnected && !isAgentConnected && (
+        <div className="border-b border-amber-300/25 bg-amber-300/5 px-4 py-3 sm:px-5">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-amber-100">Waiting for the ASR agent. Start it for this room to begin recognition.</p>
+            <button onClick={copyAgentCommand} className="control-button control-button--quiet shrink-0 text-amber-100" aria-label="Copy agent start command">
+              {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
+              {copied ? 'Copied' : 'Copy command'}
+            </button>
+          </div>
+          <code className="mt-2 block overflow-x-auto rounded-md border border-amber-200/15 bg-slate-950/35 px-3 py-2 text-xs text-slate-300">{agentCommand}</code>
+        </div>
+      )}
+
+      <div ref={scrollRef} className="transcript-scroller min-h-[250px] flex-1 overflow-y-auto px-4 py-2 sm:px-5">
+        {!hasContent ? (
+          <div className="flex h-full min-h-[230px] max-w-sm flex-col justify-center">
+            <p className="text-base font-medium text-slate-300">
+              {!isConnected ? 'Connect a room to begin monitoring.' : isAgentConnected ? 'Listening for Thai speech.' : 'The stream is ready; waiting for the ASR agent.'}
+            </p>
+            <p className="mt-2 text-sm leading-6 text-slate-500">Final segments stay here for comparison. New interim text appears separately so it never disrupts your reading flow.</p>
+          </div>
+        ) : (
+          <div>
+            {transcripts.map((segment, index) => (
+              <div key={segment.id} className="transcript-row grid grid-cols-[2.25rem_1fr] gap-3 py-3.5">
+                <span className="pt-0.5 text-xs tabular-nums text-slate-500">{String(index + 1).padStart(2, '0')}</span>
+                <div className="min-w-0">
+                  {segment.provider && (
+                    <span className={`mb-1.5 inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${providerClasses[segment.provider] ?? 'border-violet-400/30 bg-violet-400/10 text-violet-200'}`}>
+                      {segment.provider.toUpperCase()}
+                    </span>
+                  )}
+                  <p className="text-[1.05rem] leading-8 text-slate-100">{segment.text}</p>
+                </div>
+              </div>
+            ))}
+            {interimTranscript && (
+              <div className="my-2 rounded-lg border border-violet-400/35 bg-violet-500/10 px-3.5 py-3" aria-label="Live interim transcript" aria-live="polite">
+                <div className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-violet-200">
+                  <span className="status-dot status-dot--pending" aria-hidden="true" /> Live preview
+                </div>
+                <p className="text-[1.05rem] leading-8 text-violet-50">{interimTranscript}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <footer className="flex items-center justify-between border-t border-slate-700/70 px-4 py-2.5 text-xs text-slate-500 sm:px-5">
+        <span>WebRTC · target latency 200–500 ms</span>
+        <span className="tabular-nums text-violet-300">{transcripts.length} segments</span>
+      </footer>
+    </article>
+  );
 };
 
 export default LiveKitPanel;
