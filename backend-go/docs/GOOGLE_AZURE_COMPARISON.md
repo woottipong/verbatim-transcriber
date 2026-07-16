@@ -11,13 +11,14 @@
 ```go
 // internal/infrastructure/asr/google.go
 RecognitionConfig{
-    Model:                      "latest_long",
-    LanguageCode:               "th-TH",
-    SampleRateHertz:            48000,
-    UseEnhanced:                true,
-    EnableAutomaticPunctuation: false,  // configurable via config.go
-    AudioChannelCount:          1,
-    ProfanityFilter:            false,
+    Model:         "chirp_2",
+    LanguageCodes: []string{"th-TH"},
+    DecodingConfig: &RecognitionConfig_ExplicitDecodingConfig{
+        ExplicitDecodingConfig: &ExplicitDecodingConfig{
+            Encoding: LINEAR16, SampleRateHertz: 48000, AudioChannelCount: 1,
+        },
+    },
+    Features: &RecognitionFeatures{EnableAutomaticPunctuation: false},
 }
 ```
 
@@ -93,12 +94,9 @@ AzureConfig{
 
 | Model                | Best For                       | Thai Support |
 | -------------------- | ------------------------------ | ------------ |
-| **`latest_long`** ✅  | Long-form audio, conversations | ✅ ดีมาก       |
-| `latest_short`       | Short commands (< 15 sec)      | ✅ ดี          |
-| `command_and_search` | Voice commands                 | ✅ ดี          |
-| `default`            | General purpose                | ✅ พอใช้       |
+| **`chirp_2`** ✅ | Real-time Thai conversations | ✅ ดีมาก |
 
-**❌ ห้ามใช้:** `chirp` (ต้องใช้ Vertex AI)
+ใช้ Speech-to-Text V2 กับ regional endpoint `asia-southeast1-speech.googleapis.com`.
 
 ---
 
@@ -133,7 +131,7 @@ Backend:  🎤 [Google] Using sample rate from frontend: 48000 Hz
 ❌ Invalid recognition 'config': Incorrect model specified
 ```
 
-**แก้:** ใช้ `latest_long`, `latest_short`, `command_and_search`, `default` เท่านั้น
+**แก้:** ใช้ `chirp_2` ผ่าน Speech-to-Text V2 และตั้ง `GOOGLE_CLOUD_PROJECT`
 
 ### Azure: ช้า
 

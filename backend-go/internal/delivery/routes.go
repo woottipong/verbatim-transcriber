@@ -79,7 +79,7 @@ func setupASRRoutes(app *fiber.App, cfg *config.Config) {
 		registerWSRoute(app, "/google", func(c *websocket.Conn) { handler.HandleASR(c, cfg, "Google") })
 		enabled = append(enabled, "Google")
 	} else {
-		log.Println("⚠️  [Google] Disabled - GOOGLE_APPLICATION_CREDENTIALS not configured")
+		log.Println("⚠️  [Google] Disabled - GOOGLE_CLOUD_PROJECT and Google credentials not configured")
 	}
 
 	if cfg.HasAzureKey() {

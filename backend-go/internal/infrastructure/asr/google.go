@@ -2,6 +2,7 @@ package asr
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"sync"
@@ -9,8 +10,8 @@ import (
 
 	"thai-transcriber-backend/internal/domain"
 
-	speech "cloud.google.com/go/speech/apiv1"
-	"cloud.google.com/go/speech/apiv1/speechpb"
+	speech "cloud.google.com/go/speech/apiv2"
+	"cloud.google.com/go/speech/apiv2/speechpb"
 	"google.golang.org/api/option"
 )
 
@@ -25,9 +26,10 @@ import (
 //	  │                └─ "Reconnect Zone" — wait for silence → reconnect ✅
 //	  └─ Normal streaming
 const (
-	reconnectZoneStart = 4 * time.Minute                // เริ่มรอ isFinal เพื่อ reconnect
-	forceReconnectAt   = 4*time.Minute + 50*time.Second // บังคับ reconnect (ก่อน limit 10 วินาที)
-	ringBufferDuration = 1 * time.Second                // เก็บ audio ล่าสุดไว้ replay ตอน reconnect
+	reconnectZoneStart     = 4 * time.Minute                // เริ่มรอ isFinal เพื่อ reconnect
+	forceReconnectAt       = 4*time.Minute + 50*time.Second // บังคับ reconnect (ก่อน limit 10 วินาที)
+	ringBufferDuration     = 1 * time.Second                // เก็บ audio ล่าสุดไว้ replay ตอน reconnect
+	maxV2AudioRequestBytes = 15 * 1024
 )
 
 // ringBuffer is a circular buffer that keeps the last N bytes of audio.
@@ -86,6 +88,8 @@ type GoogleProvider struct {
 	closeOnce       sync.Once
 	credentials     string
 	apiKey          string
+	projectID       string
+	location        string
 	isRunning       bool
 	stopped         bool // user explicitly called Stop()
 	sampleRate      int
@@ -105,22 +109,34 @@ type GoogleProvider struct {
 type GoogleConfig struct {
 	CredentialsFile       string
 	APIKey                string
+	ProjectID             string
+	Location              string
 	SampleRate            int
 	LanguageCode          string
 	EnableAutoPunctuation bool
 }
 
 func NewGoogleProvider(ctx context.Context, cfg GoogleConfig) (*GoogleProvider, error) {
+	if cfg.ProjectID == "" {
+		return nil, fmt.Errorf("Google Cloud project ID is required for Speech-to-Text V2")
+	}
+
 	var client *speech.Client
 	var err error
+	location := cfg.Location
+	if location == "" {
+		location = "asia-southeast1"
+	}
+	clientOptions := []option.ClientOption{
+		option.WithEndpoint(location + "-speech.googleapis.com:443"),
+	}
 
 	if cfg.CredentialsFile != "" {
-		client, err = speech.NewClient(ctx, option.WithCredentialsFile(cfg.CredentialsFile))
+		clientOptions = append(clientOptions, option.WithCredentialsFile(cfg.CredentialsFile))
 	} else if cfg.APIKey != "" {
-		client, err = speech.NewClient(ctx, option.WithAPIKey(cfg.APIKey))
-	} else {
-		client, err = speech.NewClient(ctx)
+		clientOptions = append(clientOptions, option.WithAPIKey(cfg.APIKey))
 	}
+	client, err = speech.NewClient(ctx, clientOptions...)
 
 	if err != nil {
 		return nil, err
@@ -145,11 +161,55 @@ func NewGoogleProvider(ctx context.Context, cfg GoogleConfig) (*GoogleProvider, 
 		results:         make(chan domain.TranscriptResult, 100),
 		credentials:     cfg.CredentialsFile,
 		apiKey:          cfg.APIKey,
+		projectID:       cfg.ProjectID,
+		location:        location,
 		sampleRate:      sampleRate,
 		languageCode:    langCode,
 		autoPunctuation: cfg.EnableAutoPunctuation,
 		audioBuf:        newRingBuffer(bufSize),
 	}, nil
+}
+
+func buildV2StreamingConfigRequest(cfg GoogleConfig) *speechpb.StreamingRecognizeRequest {
+	return &speechpb.StreamingRecognizeRequest{
+		Recognizer: fmt.Sprintf("projects/%s/locations/%s/recognizers/_", cfg.ProjectID, cfg.Location),
+		StreamingRequest: &speechpb.StreamingRecognizeRequest_StreamingConfig{
+			StreamingConfig: &speechpb.StreamingRecognitionConfig{
+				Config: &speechpb.RecognitionConfig{
+					DecodingConfig: &speechpb.RecognitionConfig_ExplicitDecodingConfig{
+						ExplicitDecodingConfig: &speechpb.ExplicitDecodingConfig{
+							Encoding:          speechpb.ExplicitDecodingConfig_LINEAR16,
+							SampleRateHertz:   int32(cfg.SampleRate),
+							AudioChannelCount: 1,
+						},
+					},
+					LanguageCodes: []string{cfg.LanguageCode},
+					Model:         "chirp_2",
+					Features: &speechpb.RecognitionFeatures{
+						EnableAutomaticPunctuation: cfg.EnableAutoPunctuation,
+						MaxAlternatives:            1,
+					},
+				},
+				StreamingFeatures: &speechpb.StreamingRecognitionFeatures{
+					InterimResults: true,
+				},
+			},
+		},
+	}
+}
+
+func audioChunks(audio []byte) [][]byte {
+	if len(audio) == 0 {
+		return nil
+	}
+
+	chunks := make([][]byte, 0, (len(audio)+maxV2AudioRequestBytes-1)/maxV2AudioRequestBytes)
+	for len(audio) > 0 {
+		chunkSize := min(len(audio), maxV2AudioRequestBytes)
+		chunks = append(chunks, audio[:chunkSize])
+		audio = audio[chunkSize:]
+	}
+	return chunks
 }
 
 func (g *GoogleProvider) Name() string {
@@ -193,24 +253,13 @@ func (g *GoogleProvider) startStreamLocked() error {
 
 	g.stream = stream
 
-	err = stream.Send(&speechpb.StreamingRecognizeRequest{
-		StreamingRequest: &speechpb.StreamingRecognizeRequest_StreamingConfig{
-			StreamingConfig: &speechpb.StreamingRecognitionConfig{
-				Config: &speechpb.RecognitionConfig{
-					Encoding:                   speechpb.RecognitionConfig_LINEAR16,
-					SampleRateHertz:            int32(g.sampleRate),
-					AudioChannelCount:          1,
-					LanguageCode:               g.languageCode,
-					Model:                      "latest_long",
-					UseEnhanced:                true,
-					EnableAutomaticPunctuation: g.autoPunctuation,
-					ProfanityFilter:            false,
-					MaxAlternatives:            1,
-				},
-				InterimResults: true,
-			},
-		},
-	})
+	err = stream.Send(buildV2StreamingConfigRequest(GoogleConfig{
+		ProjectID:             g.projectID,
+		Location:              g.location,
+		SampleRate:            g.sampleRate,
+		LanguageCode:          g.languageCode,
+		EnableAutoPunctuation: g.autoPunctuation,
+	}))
 	if err != nil {
 		return err
 	}
@@ -320,11 +369,18 @@ func (g *GoogleProvider) SendAudio(data []byte) error {
 	}
 
 	// ส่ง audio ไป Google ตามปกติ
-	return g.stream.Send(&speechpb.StreamingRecognizeRequest{
-		StreamingRequest: &speechpb.StreamingRecognizeRequest_AudioContent{
-			AudioContent: data,
-		},
-	})
+	return g.sendAudioLocked(data)
+}
+
+func (g *GoogleProvider) sendAudioLocked(data []byte) error {
+	for _, chunk := range audioChunks(data) {
+		if err := g.stream.Send(&speechpb.StreamingRecognizeRequest{
+			StreamingRequest: &speechpb.StreamingRecognizeRequest_Audio{Audio: chunk},
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // triggerReconnect closes the current stream and creates a new one,
@@ -382,11 +438,7 @@ func (g *GoogleProvider) triggerReconnect(reason string) {
 
 	// 4. Replay buffered audio ไปยัง stream ใหม่
 	if len(bufferedAudio) > 0 {
-		err := g.stream.Send(&speechpb.StreamingRecognizeRequest{
-			StreamingRequest: &speechpb.StreamingRecognizeRequest_AudioContent{
-				AudioContent: bufferedAudio,
-			},
-		})
+		err := g.sendAudioLocked(bufferedAudio)
 		if err != nil {
 			log.Printf("⚠️  [Google] Failed to replay buffer: %v", err)
 		} else {

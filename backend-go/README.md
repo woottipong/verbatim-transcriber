@@ -82,7 +82,7 @@ Endpoints เปิดใช้งานตาม API keys ที่ configure:
 
 | Path      | Required Config                           |
 | --------- | ----------------------------------------- |
-| `/google` | `GOOGLE_APPLICATION_CREDENTIALS`          |
+| `/google` | `GOOGLE_CLOUD_PROJECT` + Google credentials |
 | `/azure`  | `AZURE_SUBSCRIPTION_KEY` + `AZURE_REGION` |
 
 ### LiveKit Endpoints (Optional)
@@ -140,6 +140,9 @@ PORT=3000
 
 # ASR Providers (optional - enable only what you need)
 GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
+GOOGLE_CLOUD_PROJECT=your-google-cloud-project-id
+# Optional; defaults to asia-southeast1 for Thai Chirp 2
+GOOGLE_CLOUD_LOCATION=asia-southeast1
 AZURE_SUBSCRIPTION_KEY=your_key
 AZURE_REGION=southeastasia
 

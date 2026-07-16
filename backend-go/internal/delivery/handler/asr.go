@@ -159,6 +159,8 @@ func createASRProvider(ctx context.Context, cfg *config.Config, providerName str
 		return asr.NewGoogleProvider(ctx, asr.GoogleConfig{
 			CredentialsFile:       credFile,
 			APIKey:                apiKey,
+			ProjectID:             cfg.GoogleCloudProject,
+			Location:              cfg.GoogleConfig.Location,
 			SampleRate:            sampleRate,
 			LanguageCode:          cfg.GoogleConfig.LanguageCode,
 			EnableAutoPunctuation: cfg.GoogleConfig.EnableAutoPunctuation,

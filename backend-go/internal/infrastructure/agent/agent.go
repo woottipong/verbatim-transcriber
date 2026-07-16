@@ -216,7 +216,10 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 			provider, err = asr.NewGoogleProvider(ctx, asr.GoogleConfig{
 				CredentialsFile:       a.config.GoogleApplicationCredentials,
 				APIKey:                a.config.GoogleAPIKey,
+				ProjectID:             a.config.GoogleCloudProject,
+				Location:              a.config.GoogleConfig.Location,
 				SampleRate:            48000, // Google can handle 48kHz
+				LanguageCode:          a.config.GoogleConfig.LanguageCode,
 				EnableAutoPunctuation: a.config.GoogleConfig.EnableAutoPunctuation,
 			})
 			if err != nil {
@@ -231,7 +234,10 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 			provider, err = asr.NewGoogleProvider(ctx, asr.GoogleConfig{
 				CredentialsFile:       a.config.GoogleApplicationCredentials,
 				APIKey:                a.config.GoogleAPIKey,
+				ProjectID:             a.config.GoogleCloudProject,
+				Location:              a.config.GoogleConfig.Location,
 				SampleRate:            48000,
+				LanguageCode:          a.config.GoogleConfig.LanguageCode,
 				EnableAutoPunctuation: a.config.GoogleConfig.EnableAutoPunctuation,
 			})
 			if err != nil {

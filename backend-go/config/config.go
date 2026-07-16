@@ -8,6 +8,7 @@ type Config struct {
 	AllowedOrigins               string // Comma-separated list of allowed origins
 	GoogleAPIKey                 string
 	GoogleApplicationCredentials string
+	GoogleCloudProject           string
 	AzureSubscriptionKey         string
 	AzureRegion                  string
 	LiveKitAPIKey                string
@@ -19,10 +20,9 @@ type Config struct {
 }
 
 type GoogleConfig struct {
-	Model                 string
+	Location              string
 	LanguageCode          string
 	SampleRate            int
-	UseEnhanced           bool
 	EnableAutoPunctuation bool // false = faster finalization (no waiting for context)
 }
 
@@ -46,16 +46,16 @@ func Load() *Config {
 		AllowedOrigins:               getEnv("ALLOWED_ORIGINS", "http://localhost:5173,http://localhost:3000"),
 		GoogleAPIKey:                 os.Getenv("GOOGLE_API_KEY"),
 		GoogleApplicationCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
+		GoogleCloudProject:           os.Getenv("GOOGLE_CLOUD_PROJECT"),
 		AzureSubscriptionKey:         os.Getenv("AZURE_SUBSCRIPTION_KEY"),
 		AzureRegion:                  getEnv("AZURE_REGION", "southeastasia"),
 		LiveKitAPIKey:                os.Getenv("LIVEKIT_API_KEY"),
 		LiveKitAPISecret:             os.Getenv("LIVEKIT_API_SECRET"),
 		LiveKitURL:                   getEnv("LIVEKIT_WS_URL", "ws://localhost:7880"),
 		GoogleConfig: GoogleConfig{
-			Model:                 "latest_long", // Best for continuous speech & conversations
+			Location:              getEnv("GOOGLE_CLOUD_LOCATION", "asia-southeast1"),
 			LanguageCode:          "th-TH",
 			SampleRate:            48000,
-			UseEnhanced:           true,  // Enhanced model for better accuracy
 			EnableAutoPunctuation: false, // Disable for faster finalization (add punctuation in Editor Mode)
 		},
 		AzureConfig: AzureConfig{
@@ -81,7 +81,7 @@ func getEnv(key, fallback string) string {
 
 // Provider availability checks
 func (c *Config) HasGoogleKey() bool {
-	return c.GoogleAPIKey != "" || c.GoogleApplicationCredentials != ""
+	return c.GoogleCloudProject != "" && (c.GoogleAPIKey != "" || c.GoogleApplicationCredentials != "")
 }
 
 func (c *Config) HasAzureKey() bool {

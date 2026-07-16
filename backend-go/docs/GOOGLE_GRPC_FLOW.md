@@ -36,13 +36,13 @@ Frontend                    Backend                         Google
 Frontend                    Backend                         Google
    │                           │                              │
    │──── Binary (PCM) ────────►│                              │
-   │                           │──── AudioContent (Proto) ───►│
+   │                           │──── Audio (Proto) ──────────►│
    │                           │                              │
    │                           │◄─── StreamingResponse ───────│  (interim)
    │◄─── {"isFinal":false}  ───│     IsFinal: false           │
    │                           │                              │
    │──── Binary (PCM) ────────►│                              │
-   │                           │──── AudioContent (Proto) ───►│
+   │                           │──── Audio (Proto) ──────────►│
    │                           │                              │
    │                           │◄─── StreamingResponse ───────│  (final)
    │◄─── {"isFinal":true}  ────│     IsFinal: true            │
@@ -70,26 +70,28 @@ Frontend                    Backend                         Google
 
 ```protobuf
 StreamingRecognizeRequest {
+  recognizer: "projects/PROJECT_ID/locations/asia-southeast1/recognizers/_"
   streaming_config: StreamingRecognitionConfig {
     config: RecognitionConfig {
-      encoding: LINEAR16
-      sample_rate_hertz: 48000
-      language_code: "th-TH"
-      model: "latest_long"
-      use_enhanced: true
+      explicit_decoding_config {
+        encoding: LINEAR16
+        sample_rate_hertz: 48000
+        audio_channel_count: 1
+      }
+      language_codes: "th-TH"
+      model: "chirp_2"
       enable_automatic_punctuation: false
-      audio_channel_count: 1
     }
-    interim_results: true
+    streaming_features { interim_results: true }
   }
 }
 ```
 
-**AudioContent (Subsequent messages):**
+**Audio (Subsequent messages, maximum 15 KB each):**
 
 ```protobuf
 StreamingRecognizeRequest {
-  audio_content: bytes  // Raw PCM audio data
+  audio: bytes  // Raw PCM audio data
 }
 ```
 
@@ -138,7 +140,7 @@ Stream Created ──►  StreamingRecognize() called
 Config Sent ──►  StreamingConfig message
        │
        ▼
-Audio Streaming ──►  AudioContent messages (continuous)
+Audio Streaming ──►  Audio messages (continuous)
        │
        ▼
 Interim Results ──►  StreamingResponse (IsFinal: false)
@@ -192,8 +194,8 @@ err = stream.Send(&speechpb.StreamingRecognizeRequest{
 
 ```go
 err := stream.Send(&speechpb.StreamingRecognizeRequest{
-    StreamingRequest: &speechpb.StreamingRecognizeRequest_AudioContent{
-        AudioContent: audioData,
+    StreamingRequest: &speechpb.StreamingRecognizeRequest_Audio{
+        Audio: audioData,
     },
 })
 ```
