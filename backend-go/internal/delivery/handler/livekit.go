@@ -66,7 +66,7 @@ func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config) error {
 	}
 
 	// Set token properties
-	at.AddGrant(grant).
+	at.SetVideoGrant(grant).
 		SetIdentity(req.Identity).
 		SetValidFor(time.Duration(cfg.LiveKitConfig.TokenExpiry) * time.Second)
 

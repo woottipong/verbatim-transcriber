@@ -9,6 +9,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"thai-transcriber-backend/internal/domain"
 
@@ -19,8 +20,6 @@ import (
 type AzureProvider struct {
 	conn                           *websocket.Conn
 	results                        chan domain.TranscriptResult
-	ctx                            context.Context
-	cancel                         context.CancelFunc
 	mu                             sync.Mutex
 	closeOnce                      sync.Once
 	subscriptionKey                string
@@ -34,6 +33,7 @@ type AzureProvider struct {
 	segmentationSilenceTimeout     int    // milliseconds
 	segmentationMaxSilenceDuration int    // milliseconds
 	lastErr                        error
+	stopped                        bool
 }
 
 type AzureConfig struct {
@@ -89,7 +89,6 @@ func (a *AzureProvider) Start(ctx context.Context) error {
 		return nil
 	}
 
-	a.ctx, a.cancel = context.WithCancel(ctx)
 	a.requestID = strings.ReplaceAll(uuid.New().String(), "-", "")
 
 	wsURL := fmt.Sprintf(
@@ -100,7 +99,7 @@ func (a *AzureProvider) Start(ctx context.Context) error {
 	log.Printf("🔗 [Azure] Connecting to: %s", wsURL)
 
 	dialer := websocket.Dialer{}
-	conn, resp, err := dialer.Dial(wsURL, map[string][]string{
+	conn, resp, err := dialer.DialContext(ctx, wsURL, map[string][]string{
 		"Ocp-Apim-Subscription-Key": {a.subscriptionKey},
 		"X-ConnectionId":            {a.connectionID},
 	})
@@ -108,19 +107,23 @@ func (a *AzureProvider) Start(ctx context.Context) error {
 		if resp != nil {
 			log.Printf("❌ [Azure] Response status: %d", resp.StatusCode)
 		}
-		return fmt.Errorf("websocket dial failed: %v", err)
+		return fmt.Errorf("websocket dial failed: %w", err)
 	}
 
 	a.conn = conn
 
 	if err := a.sendSpeechConfig(); err != nil {
-		conn.Close()
-		return fmt.Errorf("failed to send speech config: %v", err)
+		if closeErr := conn.Close(); closeErr != nil {
+			log.Printf("⚠️ [Azure] Failed to close connection after config error: %v", closeErr)
+		}
+		return fmt.Errorf("failed to send speech config: %w", err)
 	}
 
 	if err := a.sendAudioConfig(); err != nil {
-		conn.Close()
-		return fmt.Errorf("failed to send audio config: %v", err)
+		if closeErr := conn.Close(); closeErr != nil {
+			log.Printf("⚠️ [Azure] Failed to close connection after audio config error: %v", closeErr)
+		}
+		return fmt.Errorf("failed to send audio config: %w", err)
 	}
 
 	a.isRunning = true
@@ -173,7 +176,9 @@ func (a *AzureProvider) sendAudioConfig() error {
 	headerLen := uint16(len(headerText))
 
 	var buf bytes.Buffer
-	binary.Write(&buf, binary.BigEndian, headerLen)
+	var headerLenBytes [2]byte
+	binary.BigEndian.PutUint16(headerLenBytes[:], headerLen)
+	buf.Write(headerLenBytes[:])
 	buf.WriteString(headerText)
 	buf.Write(riffHeader)
 
@@ -181,29 +186,23 @@ func (a *AzureProvider) sendAudioConfig() error {
 }
 
 func (a *AzureProvider) createRIFFHeader() []byte {
-	var buf bytes.Buffer
-
-	buf.WriteString("RIFF")
-	binary.Write(&buf, binary.LittleEndian, uint32(0))
-	buf.WriteString("WAVE")
-
-	buf.WriteString("fmt ")
-	binary.Write(&buf, binary.LittleEndian, uint32(16))
-	binary.Write(&buf, binary.LittleEndian, uint16(1))
-	binary.Write(&buf, binary.LittleEndian, uint16(1))
-	binary.Write(&buf, binary.LittleEndian, uint32(a.sampleRate))
-	binary.Write(&buf, binary.LittleEndian, uint32(a.sampleRate*2))
-	binary.Write(&buf, binary.LittleEndian, uint16(2))
-	binary.Write(&buf, binary.LittleEndian, uint16(16))
-
-	buf.WriteString("data")
-	binary.Write(&buf, binary.LittleEndian, uint32(0))
-
-	return buf.Bytes()
+	header := make([]byte, 44)
+	copy(header[0:4], "RIFF")
+	copy(header[8:12], "WAVE")
+	copy(header[12:16], "fmt ")
+	binary.LittleEndian.PutUint32(header[16:20], 16)
+	binary.LittleEndian.PutUint16(header[20:22], 1)
+	binary.LittleEndian.PutUint16(header[22:24], 1)
+	binary.LittleEndian.PutUint32(header[24:28], uint32(a.sampleRate))
+	binary.LittleEndian.PutUint32(header[28:32], uint32(a.sampleRate*2))
+	binary.LittleEndian.PutUint16(header[32:34], 2)
+	binary.LittleEndian.PutUint16(header[34:36], 16)
+	copy(header[36:40], "data")
+	return header
 }
 
 func (a *AzureProvider) getTimestamp() string {
-	return fmt.Sprintf("%d", uuid.New().ID())
+	return time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 }
 
 func (a *AzureProvider) receiveResponses() {
@@ -245,12 +244,10 @@ func (a *AzureProvider) parseTextMessage(message string) {
 			Text string `json:"Text"`
 		}
 		if err := json.Unmarshal([]byte(body), &hypothesis); err == nil && hypothesis.Text != "" {
-			select {
-			case a.results <- domain.TranscriptResult{
+			if !a.emitResult(domain.TranscriptResult{
 				Text:    hypothesis.Text,
 				IsFinal: false,
-			}:
-			default:
+			}) {
 				log.Println("⚠️ [Azure] Results channel full, dropping interim")
 			}
 		}
@@ -273,18 +270,30 @@ func (a *AzureProvider) parseTextMessage(message string) {
 				}
 				if text != "" {
 					log.Printf("✅ [Azure] Final: %s (conf: %.2f)", text, confidence)
-					select {
-					case a.results <- domain.TranscriptResult{
+					if !a.emitResult(domain.TranscriptResult{
 						Text:       text,
 						IsFinal:    true,
 						Confidence: confidence,
-					}:
-					default:
+					}) {
 						log.Println("⚠️ [Azure] Results channel full, dropping final")
 					}
 				}
 			}
 		}
+	}
+}
+
+func (a *AzureProvider) emitResult(result domain.TranscriptResult) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.isRunning {
+		return false
+	}
+	select {
+	case a.results <- result:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -310,7 +319,9 @@ func (a *AzureProvider) SendAudio(data []byte) error {
 	headerLen := uint16(len(headerText))
 
 	var buf bytes.Buffer
-	binary.Write(&buf, binary.BigEndian, headerLen)
+	var headerLenBytes [2]byte
+	binary.BigEndian.PutUint16(headerLenBytes[:], headerLen)
+	buf.Write(headerLenBytes[:])
 	buf.WriteString(headerText)
 	buf.Write(a.audioBuffer)
 
@@ -332,22 +343,21 @@ func (a *AzureProvider) Err() error {
 
 func (a *AzureProvider) Stop() error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if !a.isRunning {
+	if a.stopped {
+		a.mu.Unlock()
 		return nil
 	}
-
-	if a.cancel != nil {
-		a.cancel()
-	}
-
-	if a.conn != nil {
-		a.conn.Close()
-	}
-
+	a.stopped = true
 	a.isRunning = false
+	conn := a.conn
 	a.closeOnce.Do(func() { close(a.results) })
+	a.mu.Unlock()
+
+	var closeErr error
+	if conn != nil {
+		closeErr = conn.Close()
+	}
+
 	log.Println("🛑 [Azure] WebSocket connection closed")
-	return nil
+	return closeErr
 }

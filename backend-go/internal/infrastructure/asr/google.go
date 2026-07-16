@@ -86,8 +86,6 @@ type GoogleProvider struct {
 	streamCancel    context.CancelFunc // per-stream cancel
 	mu              sync.Mutex
 	closeOnce       sync.Once
-	credentials     string
-	apiKey          string
 	projectID       string
 	location        string
 	isRunning       bool
@@ -118,7 +116,7 @@ type GoogleConfig struct {
 
 func NewGoogleProvider(ctx context.Context, cfg GoogleConfig) (*GoogleProvider, error) {
 	if cfg.ProjectID == "" {
-		return nil, fmt.Errorf("Google Cloud project ID is required for Speech-to-Text V2")
+		return nil, fmt.Errorf("google cloud project ID is required for Speech-to-Text V2")
 	}
 
 	var client *speech.Client
@@ -132,7 +130,7 @@ func NewGoogleProvider(ctx context.Context, cfg GoogleConfig) (*GoogleProvider, 
 	}
 
 	if cfg.CredentialsFile != "" {
-		clientOptions = append(clientOptions, option.WithCredentialsFile(cfg.CredentialsFile))
+		clientOptions = append(clientOptions, option.WithAuthCredentialsFile(option.ServiceAccount, cfg.CredentialsFile))
 	} else if cfg.APIKey != "" {
 		clientOptions = append(clientOptions, option.WithAPIKey(cfg.APIKey))
 	}
@@ -159,8 +157,6 @@ func NewGoogleProvider(ctx context.Context, cfg GoogleConfig) (*GoogleProvider, 
 	return &GoogleProvider{
 		client:          client,
 		results:         make(chan domain.TranscriptResult, 100),
-		credentials:     cfg.CredentialsFile,
-		apiKey:          cfg.APIKey,
 		projectID:       cfg.ProjectID,
 		location:        location,
 		sampleRate:      sampleRate,
@@ -281,6 +277,7 @@ func (g *GoogleProvider) receiveResponses() {
 	for {
 		resp, err := g.stream.Recv()
 		if err == io.EOF {
+			g.finishWithError(io.EOF)
 			log.Println("📭 [Google] Stream ended (EOF)")
 			return
 		}
@@ -301,8 +298,8 @@ func (g *GoogleProvider) receiveResponses() {
 				return
 			}
 
-			g.lastErr = err
 			g.mu.Unlock()
+			g.finishWithError(err)
 			log.Printf("❌ [Google] Receive error: %v", err)
 			return
 		}
@@ -319,9 +316,7 @@ func (g *GoogleProvider) receiveResponses() {
 				Confidence: float64(alt.Confidence),
 			}
 
-			select {
-			case g.results <- transcript:
-			default:
+			if !g.emitResult(transcript) {
 				log.Println("⚠️ [Google] Results channel full")
 			}
 
@@ -338,6 +333,31 @@ func (g *GoogleProvider) receiveResponses() {
 				}
 			}
 		}
+	}
+}
+
+func (g *GoogleProvider) finishWithError(err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.stopped || g.reconnecting {
+		return
+	}
+	g.lastErr = err
+	g.isRunning = false
+	g.closeOnce.Do(func() { close(g.results) })
+}
+
+func (g *GoogleProvider) emitResult(result domain.TranscriptResult) bool {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if !g.isRunning || g.stopped {
+		return false
+	}
+	select {
+	case g.results <- result:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -404,7 +424,9 @@ func (g *GoogleProvider) triggerReconnect(reason string) {
 		g.streamCancel()
 	}
 	if g.stream != nil {
-		g.stream.CloseSend()
+		if err := g.stream.CloseSend(); err != nil {
+			log.Printf("⚠️ [Google] Failed to close stream before reconnect: %v", err)
+		}
 	}
 	g.mu.Unlock()
 
@@ -506,32 +528,37 @@ func (g *GoogleProvider) Err() error {
 
 func (g *GoogleProvider) Stop() error {
 	g.mu.Lock()
-	defer g.mu.Unlock()
-
-	if !g.isRunning {
+	if g.stopped {
+		g.mu.Unlock()
 		return nil
 	}
-
 	g.stopped = true
-
-	if g.streamCancel != nil {
-		g.streamCancel()
-	}
-
-	if g.cancel != nil {
-		g.cancel()
-	}
-
-	if g.stream != nil {
-		g.stream.CloseSend()
-	}
-
-	if g.client != nil {
-		g.client.Close()
-	}
-
 	g.isRunning = false
+	streamCancel := g.streamCancel
+	cancel := g.cancel
+	stream := g.stream
+	client := g.client
+	reconnectCount := g.reconnectCount
 	g.closeOnce.Do(func() { close(g.results) })
-	log.Printf("🛑 [Google] STT stream stopped (reconnected %d times)", g.reconnectCount)
-	return nil
+	g.mu.Unlock()
+
+	if streamCancel != nil {
+		streamCancel()
+	}
+	if cancel != nil {
+		cancel()
+	}
+
+	var closeErr error
+	if stream != nil {
+		closeErr = stream.CloseSend()
+	}
+	if client != nil {
+		if err := client.Close(); err != nil && closeErr == nil {
+			closeErr = err
+		}
+	}
+
+	log.Printf("🛑 [Google] STT stream stopped (reconnected %d times)", reconnectCount)
+	return closeErr
 }

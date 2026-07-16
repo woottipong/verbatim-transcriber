@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -35,17 +34,8 @@ func main() {
 	})
 
 	// Middleware - CORS with restricted origins
-	allowedOrigins := strings.Split(cfg.AllowedOrigins, ",")
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     allowedOrigins[0],
-		AllowOriginsFunc: func(origin string) bool {
-			for _, allowed := range allowedOrigins {
-				if strings.TrimSpace(allowed) == origin {
-					return true
-				}
-			}
-			return false
-		},
+		AllowOrigins:     cfg.AllowedOrigins,
 		AllowMethods:     "GET,POST,HEAD,PUT,DELETE,PATCH,OPTIONS",
 		AllowHeaders:     "Origin, Content-Type, Accept, Authorization",
 		AllowCredentials: true,

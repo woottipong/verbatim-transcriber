@@ -4,7 +4,6 @@ package models
 // Used to start/stop transcription sessions.
 type Message struct {
 	Type       string `json:"type"`                 // "start" or "stop"
-	APIKey     string `json:"apiKey,omitempty"`     // Optional API key override
 	SampleRate int    `json:"sampleRate,omitempty"` // Audio sample rate from frontend
 }
 

@@ -1,6 +1,12 @@
 package asr
 
-import "testing"
+import (
+	"errors"
+	"testing"
+	"time"
+
+	"thai-transcriber-backend/internal/domain"
+)
 
 func TestBuildV2StreamingConfigRequest(t *testing.T) {
 	request := buildV2StreamingConfigRequest(GoogleConfig{
@@ -45,5 +51,54 @@ func TestAudioChunksStayWithinV2Limit(t *testing.T) {
 	}
 	if got, want := len(chunks[1]), 1; got != want {
 		t.Fatalf("second chunk length = %d, want %d", got, want)
+	}
+}
+
+func TestGoogleProviderDoesNotEmitWhenStopped(t *testing.T) {
+	provider := &GoogleProvider{
+		results: make(chan domain.TranscriptResult, 1),
+		stopped: true,
+	}
+
+	if provider.emitResult(domain.TranscriptResult{Text: "late result"}) {
+		t.Fatal("emitResult() emitted after provider stopped")
+	}
+}
+
+func TestGoogleProviderStopClosesResultsBeforeStart(t *testing.T) {
+	provider := &GoogleProvider{results: make(chan domain.TranscriptResult)}
+
+	if err := provider.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	select {
+	case _, ok := <-provider.Results():
+		if ok {
+			t.Fatal("results channel remained open after Stop()")
+		}
+	case <-time.After(10 * time.Millisecond):
+		t.Fatal("results channel remained open after Stop()")
+	}
+}
+
+func TestGoogleProviderTerminalErrorClosesResults(t *testing.T) {
+	wantErr := errors.New("stream failed")
+	provider := &GoogleProvider{
+		results:   make(chan domain.TranscriptResult),
+		isRunning: true,
+	}
+
+	provider.finishWithError(wantErr)
+
+	if !errors.Is(provider.Err(), wantErr) {
+		t.Fatalf("Err() = %v, want %v", provider.Err(), wantErr)
+	}
+	select {
+	case _, ok := <-provider.Results():
+		if ok {
+			t.Fatal("results channel remained open after terminal error")
+		}
+	case <-time.After(10 * time.Millisecond):
+		t.Fatal("results channel remained open after terminal error")
 	}
 }

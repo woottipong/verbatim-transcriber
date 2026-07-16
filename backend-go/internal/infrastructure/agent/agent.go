@@ -79,7 +79,14 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 	a.mu.Unlock()
 
 	ctx, cancel := context.WithCancel(ctx)
+	a.mu.Lock()
+	if !a.isRunning {
+		a.mu.Unlock()
+		cancel()
+		return fmt.Errorf("agent stopped before connecting")
+	}
 	a.cancel = cancel
+	a.mu.Unlock()
 
 	log.Println("🚀 [LiveKit Agent] Starting...")
 	log.Printf("📡 LiveKit URL: %s", a.config.LiveKitURL)
@@ -140,13 +147,23 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 		roomCallback,
 	)
 	if err != nil {
+		cancel()
 		a.mu.Lock()
 		a.isRunning = false
+		a.cancel = nil
 		a.mu.Unlock()
 		return fmt.Errorf("failed to connect to room: %w", err)
 	}
 
+	a.mu.Lock()
+	if !a.isRunning {
+		a.mu.Unlock()
+		cancel()
+		room.Disconnect()
+		return fmt.Errorf("agent stopped while connecting")
+	}
 	a.room = room
+	a.mu.Unlock()
 
 	// Note: Auto-subscribe is enabled by default in LiveKit
 	// Tracks will be subscribed automatically via OnTrackSubscribed callback
@@ -158,25 +175,33 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 // Stop disconnects from the room
 func (a *Agent) Stop() {
 	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	if !a.isRunning {
+		a.mu.Unlock()
 		return
 	}
-
-	if a.cancel != nil {
-		a.cancel()
-	}
-
-	if a.room != nil {
-		a.room.Disconnect()
-	}
-
-	if a.asrProvider != nil {
-		a.asrProvider.Stop()
-	}
-
+	cancel := a.cancel
+	room := a.room
+	provider := a.asrProvider
+	a.cancel = nil
+	a.room = nil
+	a.asrProvider = nil
 	a.isRunning = false
+	a.mu.Unlock()
+
+	if cancel != nil {
+		cancel()
+	}
+
+	if room != nil {
+		room.Disconnect()
+	}
+
+	if provider != nil {
+		if err := provider.Stop(); err != nil {
+			log.Printf("⚠️ [Agent] Failed to stop ASR provider: %v", err)
+		}
+	}
+
 	log.Println("🛑 [LiveKit Agent] Stopped")
 }
 
@@ -268,14 +293,22 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 	log.Printf("🎯 [Agent] Using %s for transcription (resample: %v)", provider.Name(), needsResample)
 
 	a.mu.Lock()
+	if !a.isRunning {
+		a.mu.Unlock()
+		if err := provider.Stop(); err != nil {
+			log.Printf("⚠️ [Agent] Failed to stop provider after agent shutdown: %v", err)
+		}
+		return
+	}
 	a.asrProvider = provider
 	a.mu.Unlock()
 
-	// Start ASR provider
-	if err := provider.Start(ctx); err != nil {
+	cleanupProvider, err := startProvider(ctx, provider)
+	if err != nil {
 		log.Printf("❌ [Agent] Failed to start ASR provider: %v", err)
 		return
 	}
+	defer cleanupProvider()
 
 	// Handle transcription results
 	go a.handleTranscriptionResults(provider, participant)
@@ -304,7 +337,9 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		case <-ctx.Done():
 			// Flush remaining audio before exit
 			if len(audioBatch) > 0 {
-				provider.SendAudio(audioBatch)
+				if err := provider.SendAudio(audioBatch); err != nil {
+					log.Printf("⚠️ [Agent] Failed to flush audio: %v", err)
+				}
 			}
 			return
 		default:
@@ -368,7 +403,21 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		}
 	}
 
-	provider.Stop()
+}
+
+func startProvider(ctx context.Context, provider domain.ASRProvider) (func(), error) {
+	if err := provider.Start(ctx); err != nil {
+		if stopErr := provider.Stop(); stopErr != nil {
+			log.Printf("⚠️ [Agent] Failed to clean up ASR provider after start error: %v", stopErr)
+		}
+		return nil, err
+	}
+
+	return func() {
+		if err := provider.Stop(); err != nil {
+			log.Printf("⚠️ [Agent] Failed to stop ASR provider: %v", err)
+		}
+	}, nil
 }
 
 func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, participant *lksdk.RemoteParticipant) {
@@ -406,11 +455,14 @@ func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, particip
 }
 
 func (a *Agent) publishTranscript(data []byte) error {
-	if a.room == nil || a.room.LocalParticipant == nil {
+	a.mu.Lock()
+	room := a.room
+	a.mu.Unlock()
+	if room == nil || room.LocalParticipant == nil {
 		log.Println("⚠️ [Agent] Cannot publish - room or local participant is nil")
 		return nil
 	}
 
 	// Publish to all participants via reliable data channel
-	return a.room.LocalParticipant.PublishData(data, lksdk.WithDataPublishReliable(true))
+	return room.LocalParticipant.PublishDataPacket(lksdk.UserData(data), lksdk.WithDataPublishReliable(true))
 }

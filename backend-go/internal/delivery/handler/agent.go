@@ -3,6 +3,8 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log"
+	"strings"
 	"sync"
 
 	"thai-transcriber-backend/config"
@@ -37,12 +39,13 @@ func HandleAgentStart(c *fiber.Ctx, cfg *config.Config) error {
 		req.RoomName = "transcription-room" // default room
 	}
 
-	// Provider is required for multiple agents
-	if req.Provider == "" {
+	provider, err := validateAgentProvider(cfg, req.Provider)
+	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "Provider is required (google or azure)",
+			"error": err.Error(),
 		})
 	}
+	req.Provider = provider
 
 	key := agentKey(req.RoomName, req.Provider)
 
@@ -64,6 +67,7 @@ func HandleAgentStart(c *fiber.Ctx, cfg *config.Config) error {
 	go func() {
 		ctx := context.Background()
 		if err := newAgent.Start(ctx, req.RoomName); err != nil {
+			log.Printf("❌ [Agent] Failed to start %s agent in room %s: %v", req.Provider, req.RoomName, err)
 			// Log error and remove from map
 			agentsMu.Lock()
 			delete(agents, key)
@@ -88,11 +92,18 @@ func HandleAgentStop(c *fiber.Ctx, cfg *config.Config) error {
 		})
 	}
 
-	if req.RoomName == "" || req.Provider == "" {
+	if req.RoomName == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "roomName and provider are required",
 		})
 	}
+	provider, err := validateAgentProvider(cfg, req.Provider)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": err.Error(),
+		})
+	}
+	req.Provider = provider
 
 	key := agentKey(req.RoomName, req.Provider)
 
@@ -140,4 +151,21 @@ func HandleAgentStatus(c *fiber.Ctx, cfg *config.Config) error {
 		"count":  len(runningAgents),
 		"agents": runningAgents,
 	})
+}
+
+func validateAgentProvider(cfg *config.Config, provider string) (string, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	switch provider {
+	case "google":
+		if !cfg.HasGoogleKey() {
+			return "", fmt.Errorf("google provider is not configured")
+		}
+	case "azure":
+		if !cfg.HasAzureKey() {
+			return "", fmt.Errorf("azure provider is not configured")
+		}
+	default:
+		return "", fmt.Errorf("provider must be google or azure")
+	}
+	return provider, nil
 }

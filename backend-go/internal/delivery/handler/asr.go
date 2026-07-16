@@ -33,16 +33,24 @@ import (
 // providerName: "Google" or "Azure" (used for logging and provider selection)
 func HandleASR(conn *websocketFiber.Conn, cfg *config.Config, providerName string) {
 	logConnection(providerName)
-	sendConnected(conn)
+	conn.SetReadLimit(1 << 20)
+	writer := newSafeJSONWriter(conn)
+	if err := sendConnected(writer); err != nil {
+		log.Printf("❌ [%s] Failed to send connection status: %v", providerName, err)
+		return
+	}
 
 	var provider domain.ASRProvider
 	var cancel context.CancelFunc
-	var stoppedByUser atomic.Bool
+	var sessionStopped *atomic.Bool
 	isProcessing := false
 
 	defer func() {
+		if sessionStopped != nil {
+			sessionStopped.Store(true)
+		}
 		if provider != nil {
-			provider.Stop()
+			stopProvider(provider, providerName)
 		}
 		if cancel != nil {
 			cancel()
@@ -53,7 +61,7 @@ func HandleASR(conn *websocketFiber.Conn, cfg *config.Config, providerName strin
 	for {
 		msgType, message, err := conn.ReadMessage()
 		if err != nil {
-			sendError(conn, providerName, "Read error", err)
+			_ = sendError(writer, providerName, "Read error", err)
 			break
 		}
 
@@ -66,8 +74,11 @@ func HandleASR(conn *websocketFiber.Conn, cfg *config.Config, providerName strin
 					logStarting(providerName)
 
 					// Clean up previous session if exists
+					if sessionStopped != nil {
+						sessionStopped.Store(true)
+					}
 					if provider != nil {
-						provider.Stop()
+						stopProvider(provider, providerName)
 						provider = nil
 					}
 					if cancel != nil {
@@ -76,18 +87,19 @@ func HandleASR(conn *websocketFiber.Conn, cfg *config.Config, providerName strin
 
 					ctx, c := context.WithCancel(context.Background())
 					cancel = c
-					stoppedByUser.Store(false)
+					sessionStopped = &atomic.Bool{}
 
 					// Create ASR provider
 					provider, err = createASRProvider(ctx, cfg, providerName, msg)
 					if err != nil {
-						sendError(conn, providerName, fmt.Sprintf("%s init failed", providerName), err)
+						_ = sendError(writer, providerName, fmt.Sprintf("%s init failed", providerName), err)
 						continue
 					}
 
 					// Start the provider (connects to ASR service + starts receiving results)
 					if err := provider.Start(ctx); err != nil {
-						sendError(conn, providerName, "Failed to start streaming", err)
+						_ = sendError(writer, providerName, "Failed to start streaming", err)
+						stopProvider(provider, providerName)
 						provider = nil
 						continue
 					}
@@ -95,19 +107,21 @@ func HandleASR(conn *websocketFiber.Conn, cfg *config.Config, providerName strin
 					isProcessing = true
 
 					// Forward ASR results to frontend via WebSocket
-					go forwardResults(conn, provider, providerName, &stoppedByUser)
+					go forwardResults(writer, provider, providerName, sessionStopped)
 
-					sendStarted(conn)
+					_ = sendStarted(writer)
 
 				case "stop":
 					logStopping(providerName)
-					stoppedByUser.Store(true)
+					if sessionStopped != nil {
+						sessionStopped.Store(true)
+					}
 					isProcessing = false
 					if provider != nil {
-						provider.Stop()
+						stopProvider(provider, providerName)
 						provider = nil
 					}
-					sendStopped(conn)
+					_ = sendStopped(writer)
 				}
 			}
 		} else if msgType == websocketFiber.BinaryMessage {
@@ -120,11 +134,14 @@ func HandleASR(conn *websocketFiber.Conn, cfg *config.Config, providerName strin
 						strings.Contains(errMsg, "closed") {
 						log.Printf("⚠️  [%s] Stream closed - stopping session\n", providerName)
 						isProcessing = false
-						provider.Stop()
+						if sessionStopped != nil {
+							sessionStopped.Store(true)
+						}
+						stopProvider(provider, providerName)
 						provider = nil
-						sendError(conn, providerName, "Stream closed. Please restart.", nil)
+						_ = sendError(writer, providerName, "Stream closed. Please restart.", nil)
 					} else {
-						sendError(conn, providerName, "Failed to send audio", err)
+						_ = sendError(writer, providerName, "Failed to send audio", err)
 					}
 				}
 			}
@@ -137,6 +154,9 @@ func HandleASR(conn *websocketFiber.Conn, cfg *config.Config, providerName strin
 func createASRProvider(ctx context.Context, cfg *config.Config, providerName string, msg models.Message) (domain.ASRProvider, error) {
 	switch strings.ToLower(providerName) {
 	case "google":
+		if err := validateSampleRate(msg.SampleRate); err != nil {
+			return nil, err
+		}
 		// Use sample rate from frontend if provided, otherwise use config default
 		sampleRate := cfg.GoogleConfig.SampleRate
 		if msg.SampleRate > 0 {
@@ -146,12 +166,9 @@ func createASRProvider(ctx context.Context, cfg *config.Config, providerName str
 			log.Printf("🎤 [Google] Using default sample rate: %d Hz\n", sampleRate)
 		}
 
-		// Determine credentials (priority: frontend API key > config API key > credentials file > ADC)
-		apiKey := msg.APIKey
+		// Credentials are backend-only and must never be accepted from WebSocket clients.
+		apiKey := cfg.GoogleAPIKey
 		credFile := ""
-		if apiKey == "" {
-			apiKey = cfg.GoogleAPIKey
-		}
 		if apiKey == "" {
 			credFile = cfg.GoogleApplicationCredentials
 		}
@@ -168,7 +185,7 @@ func createASRProvider(ctx context.Context, cfg *config.Config, providerName str
 
 	case "azure":
 		if cfg.AzureSubscriptionKey == "" || cfg.AzureRegion == "" {
-			return nil, fmt.Errorf("Azure credentials not configured")
+			return nil, fmt.Errorf("azure credentials not configured")
 		}
 
 		return asr.NewAzureProvider(ctx, asr.AzureConfig{
@@ -184,13 +201,32 @@ func createASRProvider(ctx context.Context, cfg *config.Config, providerName str
 	}
 }
 
+func stopProvider(provider domain.ASRProvider, providerName string) {
+	if err := provider.Stop(); err != nil {
+		log.Printf("⚠️ [%s] Failed to stop provider: %v", providerName, err)
+	}
+}
+
+func validateSampleRate(sampleRate int) error {
+	if sampleRate == 0 {
+		return nil
+	}
+	if sampleRate < 8000 || sampleRate > 96000 {
+		return fmt.Errorf("sample rate must be between 8000 and 96000 Hz")
+	}
+	return nil
+}
+
 // forwardResults reads transcription results from the ASR provider channel
 // and sends them to the frontend via WebSocket.
 // When the results channel closes (stream ended), it sends an error to the frontend
 // unless the user explicitly stopped the session.
-func forwardResults(conn *websocketFiber.Conn, provider domain.ASRProvider, providerName string, stoppedByUser *atomic.Bool) {
+func forwardResults(conn jsonWriter, provider domain.ASRProvider, providerName string, stoppedByUser *atomic.Bool) {
 	for result := range provider.Results() {
-		sendTranscript(conn, result.Text, result.IsFinal, result.Confidence)
+		if err := sendTranscript(conn, result.Text, result.IsFinal, result.Confidence); err != nil {
+			log.Printf("❌ [%s] Failed to send transcript: %v", providerName, err)
+			return
+		}
 		if result.IsFinal {
 			logFinalTranscript(providerName, result.Text, result.Confidence)
 		}
@@ -210,6 +246,6 @@ func forwardResults(conn *websocketFiber.Conn, provider domain.ASRProvider, prov
 			}
 		}
 
-		sendError(conn, providerName, errMsg, nil)
+		_ = sendError(conn, providerName, errMsg, nil)
 	}
 }

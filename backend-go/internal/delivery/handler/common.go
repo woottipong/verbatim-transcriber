@@ -9,26 +9,44 @@ package handler
 import (
 	"fmt"
 	"log"
+	"sync"
 
 	"thai-transcriber-backend/models"
-
-	websocketFiber "github.com/gofiber/websocket/v2"
 )
 
+type jsonWriter interface {
+	WriteJSON(any) error
+}
+
+type safeJSONWriter struct {
+	mu     sync.Mutex
+	writer jsonWriter
+}
+
+func newSafeJSONWriter(writer jsonWriter) *safeJSONWriter {
+	return &safeJSONWriter{writer: writer}
+}
+
+func (w *safeJSONWriter) WriteJSON(value any) error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.writer.WriteJSON(value)
+}
+
 // Helper functions for WebSocket communication
-func sendConnected(conn *websocketFiber.Conn) error {
+func sendConnected(conn jsonWriter) error {
 	return conn.WriteJSON(models.StatusResponse{Type: "connected"})
 }
 
-func sendStarted(conn *websocketFiber.Conn) error {
+func sendStarted(conn jsonWriter) error {
 	return conn.WriteJSON(models.StatusResponse{Type: "started"})
 }
 
-func sendStopped(conn *websocketFiber.Conn) error {
+func sendStopped(conn jsonWriter) error {
 	return conn.WriteJSON(models.StatusResponse{Type: "stopped"})
 }
 
-func sendError(conn *websocketFiber.Conn, provider, message string, err error) error {
+func sendError(conn jsonWriter, provider, message string, err error) error {
 	errorMsg := message
 	if err != nil {
 		errorMsg = fmt.Sprintf("%s: %v", message, err)
@@ -40,7 +58,7 @@ func sendError(conn *websocketFiber.Conn, provider, message string, err error) e
 	})
 }
 
-func sendTranscript(conn *websocketFiber.Conn, text string, isFinal bool, confidence float64) error {
+func sendTranscript(conn jsonWriter, text string, isFinal bool, confidence float64) error {
 	return conn.WriteJSON(models.TranscriptResponse{
 		Type:    "transcript",
 		Text:    text,
