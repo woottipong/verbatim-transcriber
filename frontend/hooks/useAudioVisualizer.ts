@@ -7,7 +7,7 @@ import {
   toFrequencyBars,
 } from '../lib/audioSignal';
 
-const BAR_COUNT = 20;
+const BAR_COUNT = 64;
 const FRAME_INTERVAL_MS = 1000 / 18;
 const EMPTY_BARS = new Array<number>(BAR_COUNT).fill(0);
 
@@ -51,7 +51,7 @@ export function useAudioVisualizer(
       const AudioContextConstructor = window.AudioContext;
       audioContext = new AudioContextConstructor();
       analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
+      analyser.fftSize = 512;
       analyser.smoothingTimeConstant = 0.88;
 
       source = audioContext.createMediaStreamSource(mediaStream);
