@@ -52,3 +52,15 @@ func TestStartProviderCleansUpAfterStartFailure(t *testing.T) {
 		t.Fatalf("Stop() calls = %d, want 1", provider.stopCalls)
 	}
 }
+
+func TestNewTranscriptMessageNormalizesThaiSpacing(t *testing.T) {
+	message := newTranscriptMessage(
+		domain.TranscriptResult{Text: "ทด สอบ ถอด ความ 1 2 3 4", IsFinal: true},
+		"google",
+		"speaker-1",
+	)
+
+	if got, want := message.Text, "ทดสอบถอดความ 1 2 3 4"; got != want {
+		t.Fatalf("message text = %q, want %q", got, want)
+	}
+}

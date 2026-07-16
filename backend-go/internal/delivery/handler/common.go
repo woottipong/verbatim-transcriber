@@ -11,6 +11,7 @@ import (
 	"log"
 	"sync"
 
+	"thai-transcriber-backend/internal/domain"
 	"thai-transcriber-backend/models"
 )
 
@@ -59,6 +60,7 @@ func sendError(conn jsonWriter, provider, message string, err error) error {
 }
 
 func sendTranscript(conn jsonWriter, text string, isFinal bool, confidence float64) error {
+	text = domain.NormalizeThaiSpacing(text)
 	return conn.WriteJSON(models.TranscriptResponse{
 		Type:    "transcript",
 		Text:    text,

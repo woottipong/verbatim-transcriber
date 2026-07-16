@@ -5,6 +5,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"thai-transcriber-backend/models"
 )
 
 type overlapDetectWriter struct {
@@ -39,5 +41,32 @@ func TestSafeJSONWriterSerializesWrites(t *testing.T) {
 
 	if underlying.overlap.Load() {
 		t.Fatal("underlying writer received concurrent writes")
+	}
+}
+
+type captureWriter struct {
+	value any
+}
+
+func (w *captureWriter) WriteJSON(value any) error {
+	w.value = value
+	return nil
+}
+
+func TestSendTranscriptNormalizesThaiSpacing(t *testing.T) {
+	writer := &captureWriter{}
+	if err := sendTranscript(writer, "ทด สอบ ถอด ความ 1 2 3 4", true, 0.9); err != nil {
+		t.Fatalf("sendTranscript() error = %v", err)
+	}
+
+	response, ok := writer.value.(models.TranscriptResponse)
+	if !ok {
+		t.Fatalf("WriteJSON() value type = %T, want models.TranscriptResponse", writer.value)
+	}
+	if got, want := response.Text, "ทดสอบถอดความ 1 2 3 4"; got != want {
+		t.Fatalf("response text = %q, want %q", got, want)
+	}
+	if got, want := response.Channel.Alternatives[0].Transcript, response.Text; got != want {
+		t.Fatalf("alternative transcript = %q, want %q", got, want)
 	}
 }

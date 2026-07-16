@@ -424,16 +424,7 @@ func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, particip
 	results := provider.Results()
 
 	for result := range results {
-		// Create transcript message
-		msg := TranscriptMessage{
-			Type:       "transcript",
-			Text:       result.Text,
-			IsFinal:    result.IsFinal,
-			Confidence: result.Confidence,
-			Provider:   provider.Name(),
-			Timestamp:  time.Now().UnixMilli(),
-			Speaker:    participant.Identity(),
-		}
+		msg := newTranscriptMessage(result, provider.Name(), participant.Identity())
 
 		// Convert to JSON
 		data, err := json.Marshal(msg)
@@ -444,13 +435,25 @@ func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, particip
 
 		// Log final transcripts only
 		if result.IsFinal {
-			log.Printf("📝 [%s] %s", participant.Identity(), result.Text)
+			log.Printf("📝 [%s] %s", participant.Identity(), msg.Text)
 		}
 
 		// Publish via Data Channel to all participants
 		if err := a.publishTranscript(data); err != nil {
 			log.Printf("❌ [Agent] Error publishing transcript: %v", err)
 		}
+	}
+}
+
+func newTranscriptMessage(result domain.TranscriptResult, provider, speaker string) TranscriptMessage {
+	return TranscriptMessage{
+		Type:       "transcript",
+		Text:       domain.NormalizeThaiSpacing(result.Text),
+		IsFinal:    result.IsFinal,
+		Confidence: result.Confidence,
+		Provider:   provider,
+		Timestamp:  time.Now().UnixMilli(),
+		Speaker:    speaker,
 	}
 }
 
