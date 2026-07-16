@@ -8,7 +8,8 @@ LiveKit-based real-time Thai speech transcription for publishers, viewers, and o
 - Selectable Google, Gemini, or Azure room agents.
 - Interim and committed transcript presentation optimized for Thai text.
 - Read-only viewer with room audio playback and provider filtering.
-- Admin UI for rooms, participants, provider availability, and agent lifecycle.
+- Admin-first room workspace for rooms, participants, share links, and agent lifecycle.
+- Secure, read-only transcript WebSocket links for external integrations.
 - Microphone-level visualization and explicit session state.
 
 ## Contents
@@ -137,16 +138,16 @@ pnpm dev
 
 Open:
 
-- Publisher: [http://localhost:5173](http://localhost:5173)
-- Viewer: [http://localhost:5173/#viewer](http://localhost:5173/#viewer)
-- Admin: [http://localhost:5173/#admin](http://localhost:5173/#admin)
+- Admin: [http://localhost:5173](http://localhost:5173)
+- Stream publisher: `http://localhost:5173/#stream?room=test`
+- Viewer: `http://localhost:5173/#viewer?room=test&autoconnect=1`
 - Health: [http://localhost:3000/health](http://localhost:3000/health)
 
 ## Application pages
 
-- **Publisher:** joins a room, enables the microphone, monitors input level, and renders transcript packets. Joining automatically attempts to enable the microphone.
-- **Viewer:** joins without publishing, subscribes to room audio, and filters transcript rows by provider.
-- **Admin:** lists rooms/participants and starts or stops a configured provider agent per room.
+- **Admin:** the root workspace creates/selects rooms, starts or stops a configured provider Agent, and generates Stream, Viewer, and external transcript links.
+- **Stream:** publishes microphone audio through LiveKit after the operator explicitly connects; a room query parameter pre-fills the room and never requests microphone permission by itself.
+- **Viewer:** joins without publishing, subscribes to room audio, and filters transcript rows by provider. A Viewer link with `autoconnect=1` connects automatically.
 
 ## ASR providers
 
@@ -170,6 +171,7 @@ Latency and interim frequency depend on service, model, region, network, and spe
 | `LIVEKIT_API_KEY` | For LiveKit routes | — | LiveKit API key |
 | `LIVEKIT_API_SECRET` | For LiveKit routes | — | LiveKit API secret |
 | `LIVEKIT_WS_URL` | No | `ws://localhost:7880` | LiveKit server URL |
+| `TRANSCRIPT_WS_SECRET` | For external transcript links | — | Server-side HS256 signing secret; use at least 32 random bytes |
 | `GOOGLE_CLOUD_PROJECT` | For Google | — | Google Cloud project |
 | `GOOGLE_APPLICATION_CREDENTIALS` | Google service account | — | Credential JSON path |
 | `GOOGLE_API_KEY` | Alternative Google auth | — | Google API key |
@@ -196,8 +198,11 @@ Latency and interim frequency depend on service, model, region, network, and spe
 | `GET` | `/health` | Health check |
 | `GET` | `/providers` | Provider and LiveKit availability |
 | `POST` | `/livekit/token` | Create a participant token |
+| `POST` | `/livekit/rooms/` | Create an empty room; does not start an Agent |
 | `GET` | `/livekit/rooms/` | List rooms |
 | `GET` | `/livekit/rooms/detailed` | List rooms with participants |
+| `POST` | `/livekit/rooms/:room/transcript-token` | Issue a 24-hour room-scoped transcript WebSocket URL |
+| `GET` | `/livekit/rooms/:room/transcripts/ws?token=...` | Read-only interim/final transcript stream |
 | `GET` / `DELETE` | `/livekit/rooms/:name` | Inspect or delete a room |
 | `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove a participant |
 | `POST` | `/livekit/agent/start` | Start a room agent |
@@ -211,6 +216,38 @@ curl -X POST http://localhost:3000/livekit/agent/start \
 ```
 
 Valid providers are `google`, `gemini`, and `azure` when configured.
+
+### External transcript WebSocket
+
+The Admin workspace generates a signed URL for a room after `TRANSCRIPT_WS_SECRET` is configured. The socket carries text only; it cannot publish audio or control the room. There is no history/replay, and events are delivered only after the client connects.
+
+The first event is:
+
+```json
+{"schemaVersion":"1.0","type":"session.ready","room":"test","timestamp":"2026-07-16T10:00:00.000Z"}
+```
+
+Transcript events use a room-scoped sequence:
+
+```json
+{
+  "schemaVersion": "1.0",
+  "type": "transcript.interim",
+  "id": "event-id",
+  "sequence": 1,
+  "room": "test",
+  "timestamp": "2026-07-16T10:00:00.123Z",
+  "transcript": {
+    "text": "กำลังทดสอบ",
+    "isFinal": false,
+    "confidence": 0.91,
+    "provider": "google",
+    "speaker": "user-123"
+  }
+}
+```
+
+`transcript.final` events have `isFinal: true`. The gateway consumes the same normalized messages published to LiveKit, so interim and final behavior stays consistent across the Viewer and external integration.
 
 ## Transcript message contract
 

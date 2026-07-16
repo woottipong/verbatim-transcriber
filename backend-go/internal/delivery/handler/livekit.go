@@ -2,6 +2,9 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"regexp"
+	"strings"
 	"time"
 
 	"thai-transcriber-backend/config"
@@ -12,6 +15,15 @@ import (
 	"github.com/livekit/protocol/livekit"
 	lksdk "github.com/livekit/server-sdk-go/v2"
 )
+
+var roomNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+
+func validateRoomName(name string) error {
+	if name == "" || name != strings.TrimSpace(name) || !roomNamePattern.MatchString(name) {
+		return errors.New("room name must be 1-128 characters using letters, numbers, hyphens, or underscores")
+	}
+	return nil
+}
 
 // HandleLiveKitToken generates a LiveKit access token
 func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config) error {
@@ -83,6 +95,43 @@ func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config) error {
 		Token: token,
 		WsURL: cfg.LiveKitURL,
 	})
+}
+
+// HandleCreateRoom creates an empty LiveKit room. Starting an ASR agent is a
+// separate operator action so room provisioning never requests provider work.
+func HandleCreateRoom(c *fiber.Ctx, cfg *config.Config) error {
+	var req models.RoomCreateRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
+	}
+	if err := validateRoomName(req.Name); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+
+	ctx, cancel := context.WithTimeout(c.UserContext(), 5*time.Second)
+	defer cancel()
+	roomClient := lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
+	room, err := roomClient.CreateRoom(ctx, &livekit.CreateRoomRequest{Name: req.Name})
+	if err != nil {
+		if isRoomConflictError(err) {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Room already exists"})
+		}
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Failed to create room"})
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(models.RoomInfo{
+		Name:            room.Name,
+		NumParticipants: int(room.NumParticipants),
+		CreationTime:    room.CreationTime,
+	})
+}
+
+func isRoomConflictError(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "already exists") ||
+		strings.Contains(message, "room exists") ||
+		strings.Contains(message, "already_present") ||
+		strings.Contains(message, "already present")
 }
 
 // HandleListRooms returns list of active rooms

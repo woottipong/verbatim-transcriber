@@ -19,9 +19,9 @@ pnpm dev
 
 Open:
 
-- Publisher: `http://localhost:5173`
-- Viewer: `http://localhost:5173/#viewer`
-- Admin: `http://localhost:5173/#admin`
+- Admin: `http://localhost:5173`
+- Stream publisher: `http://localhost:5173/#stream?room=test`
+- Viewer: `http://localhost:5173/#viewer?room=test&autoconnect=1`
 
 ## Environment
 
@@ -36,7 +36,7 @@ These values are embedded by Vite at build time. Use HTTPS/WSS for remote deploy
 
 ```text
 frontend/
-├── App.tsx                     # Hash routing and publisher workspace
+├── App.tsx                     # Admin-first hash routing and Stream workspace
 ├── components/
 │   ├── LiveKitPanel.tsx        # Session controls and transcript list
 │   ├── MicrophoneInputStrip.tsx # Input-level visualization
@@ -54,7 +54,9 @@ frontend/
 │   ├── transcriptViewport.ts   # Scroll-to-latest behavior
 │   ├── liveKitSession.ts       # Session status presentation
 │   ├── audioSignal.ts          # Waveform calculations
-│   └── runtime.ts              # Config and bounded-state helpers
+│   ├── runtime.ts              # Config and bounded-state helpers
+│   ├── appRoutes.ts            # Admin, Stream, and Viewer deep links
+│   └── adminRooms.ts           # Room validation and selection helpers
 └── types.ts
 ```
 
@@ -71,6 +73,8 @@ The frontend has no direct provider microphone hooks and does not stream audio t
 ## Session UX
 
 The publisher joins a named room and then enables the microphone. Readiness is derived from room connection, microphone state, and agent presence. Keep these states explicit in UI changes and do not rely on color alone.
+
+The root route is the Admin workspace. Admin creates a room first and starts its Agent separately. Stream links prefill the room but do not connect or request microphone permission automatically. Viewer links with `autoconnect=1` connect once without publishing microphone audio.
 
 The microphone strip uses the browser's Web Audio analyser only to communicate input level; it is not browser VAD and does not gate audio publication.
 

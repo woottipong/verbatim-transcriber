@@ -2,7 +2,41 @@
  * API utilities for checking backend provider availability
  */
 
-import { toHttpUrl } from './runtime';
+import { toHttpUrl } from './runtime.ts';
+
+export interface ParticipantInfo {
+    identity: string;
+    name: string;
+    isAgent: boolean;
+    state: string;
+}
+
+export interface RoomDetails {
+    name: string;
+    numParticipants: number;
+    maxParticipants: number;
+    creationTime: number;
+    emptyTimeout: number;
+    participants: ParticipantInfo[];
+}
+
+export interface RunningAgent {
+    key: string;
+    running: boolean;
+    provider: string;
+    room: string;
+}
+
+export interface AgentStatus {
+    count: number;
+    agents: RunningAgent[];
+}
+
+export interface TranscriptTokenResponse {
+    token: string;
+    expiresAt: string;
+    websocketUrl: string;
+}
 
 export interface ProviderStatus {
     enabled: boolean;
@@ -63,4 +97,43 @@ export function isProviderEnabled(
     );
 
     return provider?.enabled ?? false;
+}
+
+export async function createRoom(backendUrl: string, name: string): Promise<RoomDetails> {
+    const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/rooms/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+    });
+    return parseApiResponse<RoomDetails>(response, 'Failed to create room');
+}
+
+export async function createTranscriptToken(
+    backendUrl: string,
+    roomName: string,
+): Promise<TranscriptTokenResponse> {
+    const response = await fetch(
+        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/transcript-token`,
+        { method: 'POST' },
+    );
+    return parseApiResponse<TranscriptTokenResponse>(response, 'Failed to generate transcript link');
+}
+
+export async function fetchDetailedRooms(backendUrl: string): Promise<RoomDetails[]> {
+    const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/rooms/detailed`);
+    const data = await parseApiResponse<{ rooms?: RoomDetails[] }>(response, 'Failed to load rooms');
+    return data.rooms || [];
+}
+
+export async function fetchAgentStatus(backendUrl: string): Promise<AgentStatus> {
+    const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/agent/status`);
+    return parseApiResponse<AgentStatus>(response, 'Failed to load agent status');
+}
+
+async function parseApiResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(typeof data.error === 'string' ? data.error : `${fallbackMessage}: ${response.status}`);
+    }
+    return data as T;
 }

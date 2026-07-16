@@ -15,6 +15,7 @@ type Config struct {
 	LiveKitAPIKey                string
 	LiveKitAPISecret             string
 	LiveKitURL                   string
+	TranscriptWSSecret           string
 	GoogleConfig                 GoogleConfig
 	GeminiConfig                 GeminiConfig
 	AzureConfig                  AzureConfig
@@ -63,6 +64,7 @@ func Load() *Config {
 		LiveKitAPIKey:                os.Getenv("LIVEKIT_API_KEY"),
 		LiveKitAPISecret:             os.Getenv("LIVEKIT_API_SECRET"),
 		LiveKitURL:                   getEnv("LIVEKIT_WS_URL", "ws://localhost:7880"),
+		TranscriptWSSecret:           os.Getenv("TRANSCRIPT_WS_SECRET"),
 		GoogleConfig: GoogleConfig{
 			Location:              getEnv("GOOGLE_CLOUD_LOCATION", "asia-southeast1"),
 			Model:                 getEnv("GOOGLE_SPEECH_MODEL", "chirp_2"),

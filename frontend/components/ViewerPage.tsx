@@ -13,6 +13,7 @@ import { useRoomViewer } from '../hooks/useRoomViewer';
 import { ConnectionState } from '../types';
 import { toHttpUrl } from '../lib/runtime';
 import { shouldStickToLatest } from '../lib/transcriptViewport';
+import { shouldAutoConnectViewer } from '../lib/viewerLaunch';
 import ConnectionBadge from './ConnectionBadge';
 
 interface RoomInfo {
@@ -24,9 +25,11 @@ interface RoomInfo {
 interface ViewerPageProps {
     onBack?: () => void;  // Callback to go back to main app
     backendUrl: string;
+    initialRoomName?: string;
+    autoConnect?: boolean;
 }
 
-export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
+export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', autoConnect = false }: ViewerPageProps) {
     // Room list state
     const [rooms, setRooms] = useState<RoomInfo[]>([]);
     const [isLoadingRooms, setIsLoadingRooms] = useState(false);
@@ -36,6 +39,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
     const [filterProvider, setFilterProvider] = useState<string>('all');
     const [isFollowingLatest, setIsFollowingLatest] = useState(true);
     const transcriptScrollRef = useRef<HTMLDivElement>(null);
+    const autoConnectAttemptedRef = useRef<string | null>(null);
 
     // Convert backend URL to HTTP
     const httpBackendUrl = toHttpUrl(backendUrl);
@@ -44,6 +48,21 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
     const viewer = useRoomViewer({
         tokenEndpoint: `${httpBackendUrl}/livekit/token`,
     });
+
+    useEffect(() => {
+        const attempted = autoConnectAttemptedRef.current === initialRoomName;
+        if (!shouldAutoConnectViewer({
+            autoConnect,
+            roomName: initialRoomName,
+            attempted,
+            connected: viewer.connectionState !== ConnectionState.DISCONNECTED,
+        })) {
+            return;
+        }
+
+        autoConnectAttemptedRef.current = initialRoomName;
+        void viewer.connect(initialRoomName);
+    }, [autoConnect, initialRoomName, viewer.connect, viewer.connectionState]);
 
     // Fetch available rooms
     const fetchRooms = useCallback(async () => {

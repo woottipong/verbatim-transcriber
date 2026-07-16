@@ -69,6 +69,7 @@ Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `g
 | `LIVEKIT_API_KEY` | — | Required with secret for LiveKit routes |
 | `LIVEKIT_API_SECRET` | — | Keep server-side only |
 | `LIVEKIT_WS_URL` | `ws://localhost:7880` | LiveKit URL used by SDK clients |
+| `TRANSCRIPT_WS_SECRET` | — | At least 32 random bytes; enables signed external transcript links |
 | `GOOGLE_CLOUD_PROJECT` | — | Required for Google |
 | `GOOGLE_APPLICATION_CREDENTIALS` | — | Service-account JSON path |
 | `GOOGLE_API_KEY` | — | Alternative Google authentication |
@@ -90,8 +91,11 @@ Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `g
 | `GET` | `/health` | Service health |
 | `GET` | `/providers` | Boolean provider and LiveKit availability |
 | `POST` | `/livekit/token` | Generate a participant JWT |
+| `POST` | `/livekit/rooms/` | Create an empty LiveKit room; does not start an Agent |
 | `GET` | `/livekit/rooms/` | List rooms |
 | `GET` | `/livekit/rooms/detailed` | Rooms with participant details |
+| `POST` | `/livekit/rooms/:room/transcript-token` | Issue a 24-hour room-bound transcript token and WebSocket URL |
+| `GET` | `/livekit/rooms/:room/transcripts/ws?token=...` | Read-only transcript WebSocket |
 | `GET` | `/livekit/rooms/:name` | Room participants |
 | `DELETE` | `/livekit/rooms/:name` | Delete room |
 | `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove participant |
@@ -108,6 +112,26 @@ curl -X POST http://localhost:3000/livekit/agent/start \
 ```
 
 There are no public `/google`, `/azure`, or `/gemini` audio WebSocket routes.
+
+The transcript WebSocket is text-only and separate from the upstream Azure provider WebSocket. It authenticates with a signed HS256 JWT containing the room, issuer and subject `transcript:subscribe`, and an expiry 24 hours from issuance. It sends `session.ready`, `transcript.interim`, and `transcript.final` events. It has no history/replay and does not accept audio or commands.
+
+```json
+{"schemaVersion":"1.0","type":"session.ready","room":"test","timestamp":"2026-07-16T10:00:00.000Z"}
+```
+
+```json
+{
+  "schemaVersion": "1.0",
+  "type": "transcript.final",
+  "id": "event-id",
+  "sequence": 2,
+  "room": "test",
+  "timestamp": "2026-07-16T10:00:00.123Z",
+  "transcript": {"text":"ข้อความภาษาไทย", "isFinal":true, "provider":"google", "speaker":"user-123"}
+}
+```
+
+Sequences are monotonic per room while subscribers are connected. A slow subscriber is disconnected so it cannot block the realtime ASR pipeline.
 
 ## Transcript data channel
 

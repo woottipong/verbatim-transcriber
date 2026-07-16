@@ -6,6 +6,7 @@ import (
 	"thai-transcriber-backend/internal/delivery/handler"
 
 	"github.com/gofiber/fiber/v2"
+	websocket "github.com/gofiber/websocket/v2"
 )
 
 // SetupRoutes configures all routes for the application
@@ -48,8 +49,11 @@ func setupLiveKitRoutes(app *fiber.App, cfg *config.Config) {
 
 	// Room management
 	rooms := app.Group("/livekit/rooms")
+	rooms.Post("/", func(c *fiber.Ctx) error { return handler.HandleCreateRoom(c, cfg) })
 	rooms.Get("/", func(c *fiber.Ctx) error { return handler.HandleListRooms(c, cfg) })
 	rooms.Get("/detailed", func(c *fiber.Ctx) error { return handler.HandleGetRoomsDetailed(c, cfg) })
+	rooms.Post("/:room/transcript-token", func(c *fiber.Ctx) error { return handler.HandleCreateTranscriptToken(c, cfg) })
+	rooms.Get("/:room/transcripts/ws", handler.TranscriptWebSocketMiddleware(cfg), websocket.New(handler.HandleTranscriptWebSocket(handler.TranscriptHub())))
 	rooms.Get("/:name", func(c *fiber.Ctx) error { return handler.HandleGetRoom(c, cfg) })
 	rooms.Delete("/:name", func(c *fiber.Ctx) error { return handler.HandleDeleteRoom(c, cfg) })
 	rooms.Delete("/:room/participants/:identity", func(c *fiber.Ctx) error { return handler.HandleRemoveParticipant(c, cfg) })

@@ -11,17 +11,7 @@ import { AppConfig, ConnectionState } from './types';
 import { STORAGE_KEYS, DEFAULT_CONFIG } from './lib/constants';
 import { safeJsonParse } from './lib/utils';
 import { normalizeAppConfig, toHttpUrl } from './lib/runtime';
-
-// Page types for routing
-type PageType = 'main' | 'viewer' | 'admin';
-
-// Check URL hash to determine initial page
-const getInitialPage = (): PageType => {
-  const hash = window.location.hash;
-  if (hash === '#viewer') return 'viewer';
-  if (hash === '#admin') return 'admin';
-  return 'main';
-};
+import { AppRoute, buildViewerUrl, parseAppRoute } from './lib/appRoutes';
 
 // Load initial config from localStorage or use defaults
 const getInitialConfig = (): AppConfig => {
@@ -38,12 +28,12 @@ const getInitialConfig = (): AppConfig => {
 export default function App() {
   const [config, setConfig] = useState<AppConfig>(getInitialConfig);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [currentPage, setCurrentPage] = useState<PageType>(getInitialPage);
+  const [route, setRoute] = useState<AppRoute>(() => parseAppRoute(window.location.hash));
 
   // Handle hash change for routing
   useEffect(() => {
     const handleHashChange = () => {
-      setCurrentPage(getInitialPage());
+      setRoute(parseAppRoute(window.location.hash));
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
@@ -53,7 +43,9 @@ export default function App() {
   const { devices: audioDevices } = useAudioDevices();
 
   // LiveKit room name state
-  const [livekitRoomName, setLivekitRoomName] = useState('');
+  const [livekitRoomName, setLivekitRoomName] = useState(() => (
+    route.page === 'stream' ? route.roomName : ''
+  ));
 
   // LiveKit WebRTC hook for ultra-low latency transcription
   const livekitHook = useLiveKit({
@@ -62,6 +54,12 @@ export default function App() {
     roomName: livekitRoomName,
     autoConnect: false,
   });
+
+  useEffect(() => {
+    if (route.page === 'stream' && livekitHook.connectionState === ConnectionState.DISCONNECTED) {
+      setLivekitRoomName(route.roomName);
+    }
+  }, [route.page, route.roomName, livekitHook.connectionState]);
 
   // Handlers
   const handleConfigSave = useCallback((newConfig: AppConfig) => {
@@ -82,29 +80,31 @@ export default function App() {
 
   // Open viewer in new tab
   const openViewerTab = useCallback(() => {
-    window.open(`${window.location.origin}${window.location.pathname}#viewer`, '_blank');
+    window.open(buildViewerUrl(`${window.location.origin}${window.location.pathname}`, ''), '_blank');
   }, []);
 
   // Open admin in new tab
   const openAdminTab = useCallback(() => {
-    window.open(`${window.location.origin}${window.location.pathname}#admin`, '_blank');
+    window.open(`${window.location.origin}${window.location.pathname}`, '_blank');
   }, []);
 
   // Render Viewer Page
-  if (currentPage === 'viewer') {
+  if (route.page === 'viewer') {
     return (
       <ViewerPage
-        onBack={() => window.close()}
+        onBack={window.opener ? () => window.close() : undefined}
         backendUrl={config.backendUrl}
+        initialRoomName={route.roomName}
+        autoConnect={route.autoConnect}
       />
     );
   }
 
   // Render Admin Page
-  if (currentPage === 'admin') {
+  if (route.page === 'admin') {
     return (
       <AdminPage
-        onBack={() => window.close()}
+        onBack={window.opener ? () => window.close() : undefined}
         backendUrl={config.backendUrl}
       />
     );

@@ -1,5 +1,17 @@
 package models
 
+// RoomCreateRequest represents a request to create a named LiveKit room.
+type RoomCreateRequest struct {
+	Name string `json:"name"`
+}
+
+// TranscriptTokenResponse represents a room-scoped external transcript link.
+type TranscriptTokenResponse struct {
+	Token        string `json:"token"`
+	ExpiresAt    string `json:"expiresAt"`
+	WebSocketURL string `json:"websocketUrl"`
+}
+
 // TokenRequest represents the request body for LiveKit token generation.
 type TokenRequest struct {
 	Identity string `json:"identity"`

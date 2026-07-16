@@ -61,7 +61,7 @@ func HandleAgentStart(c *fiber.Ctx, cfg *config.Config) error {
 	}
 
 	// Create and start agent with provider preference
-	newAgent := agent.New(cfg, req.Provider)
+	newAgent := agent.New(cfg, req.Provider, TranscriptHub())
 	agents[key] = newAgent
 
 	go func() {

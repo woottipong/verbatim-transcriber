@@ -34,6 +34,12 @@ type TranscriptMessage struct {
 	Speaker    string  `json:"speaker,omitempty"`
 }
 
+// TranscriptSink receives the same normalized transcript messages that are
+// published to the LiveKit data channel.
+type TranscriptSink interface {
+	Publish(room string, message TranscriptMessage)
+}
+
 const liveAudioBatchDuration = 40 * time.Millisecond
 
 func audioBatchTargetBytes(sampleRate int, duration time.Duration) int {
@@ -56,14 +62,21 @@ type Agent struct {
 	cancel            context.CancelFunc
 	preferredProvider string // "google", "gemini", "azure", or "" for auto
 	roomName          string // store room name for status
+	transcriptSink    TranscriptSink
 }
 
 // New creates a new LiveKit ASR Agent
 // provider can be "google", "gemini", "azure", or "" for auto-detect
-func New(cfg *config.Config, provider string) *Agent {
+func New(cfg *config.Config, provider string, sinks ...TranscriptSink) *Agent {
+	var sink TranscriptSink
+	if len(sinks) > 0 {
+		sink = sinks[0]
+	}
+
 	return &Agent{
 		config:            cfg,
 		preferredProvider: provider,
+		transcriptSink:    sink,
 	}
 }
 
@@ -490,6 +503,10 @@ func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, particip
 		// Publish via Data Channel to all participants
 		if err := a.publishTranscript(data, transcriptDeliveryReliable(result.IsFinal)); err != nil {
 			log.Printf("❌ [Agent] Error publishing transcript: %v", err)
+		}
+
+		if a.transcriptSink != nil {
+			a.transcriptSink.Publish(a.GetRoom(), msg)
 		}
 	}
 }
