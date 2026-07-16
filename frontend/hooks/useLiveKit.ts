@@ -7,21 +7,23 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Room, RoomEvent, DataPacket_Kind, LocalParticipant, RemoteParticipant } from 'livekit-client';
+import { Room, RoomEvent, DataPacket_Kind, LocalParticipant, RemoteParticipant, Track } from 'livekit-client';
 import { ConnectionState, TranscriptSegment } from '../types';
-import { cleanThaiText } from '../lib/audio';
 import { TranscriptUpdateBuffer } from '../lib/transcriptUpdates';
 import { appendBounded } from '../lib/runtime';
+import {
+    InterimTranscript,
+    TranscriptMessage,
+    clearInterimsBySource,
+    getTranscriptKey,
+    parseTranscriptMessage,
+    removeInterim,
+    upsertInterim,
+} from '../lib/transcriptMessages';
 
-// LiveKit Transcript Message from Agent (via Data Channel)
-export interface LiveKitTranscriptMessage {
-    type?: string;
-    text: string;
-    isFinal: boolean;  // matches backend JSON field
-    confidence?: number;
-    timestamp?: number;
-    provider?: string;
-    speaker?: string;
+interface BufferedTranscriptMessage extends TranscriptMessage {
+    key: string;
+    sourceIdentity: string;
 }
 
 export interface UseLiveKitOptions {
@@ -34,10 +36,11 @@ export interface UseLiveKitOptions {
 export interface UseLiveKitReturn {
     connectionState: ConnectionState;
     transcripts: TranscriptSegment[];
-    interimTranscript: string;
+    interimTranscripts: Map<string, InterimTranscript>;
     error: string | null;
     room: Room | null;
     localParticipant: LocalParticipant | null;
+    mediaStream: MediaStream | null;
     participants: RemoteParticipant[];
     connect: () => Promise<void>;
     disconnect: () => void;
@@ -58,10 +61,11 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     // State
     const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
     const [transcripts, setTranscripts] = useState<TranscriptSegment[]>([]);
-    const [interimTranscript, setInterimTranscript] = useState<string>('');
+    const [interimTranscripts, setInterimTranscripts] = useState<Map<string, InterimTranscript>>(new Map());
     const [error, setError] = useState<string | null>(null);
     const [room, setRoom] = useState<Room | null>(null);
     const [localParticipant, setLocalParticipant] = useState<LocalParticipant | null>(null);
+    const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
     const [participants, setParticipants] = useState<RemoteParticipant[]>([]);
     const [isAgentConnected, setIsAgentConnected] = useState(false);
     const [agentIdentity, setAgentIdentity] = useState<string | null>(null);
@@ -72,7 +76,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const segmentIdRef = useRef(0);
     const connectionAttemptRef = useRef(0);
 
-    const applyTranscriptUpdate = useCallback((message: LiveKitTranscriptMessage) => {
+    const applyTranscriptUpdate = useCallback((message: BufferedTranscriptMessage) => {
         if (message.isFinal) {
             segmentIdRef.current++;
             const segment: TranscriptSegment = {
@@ -84,16 +88,29 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 speaker: message.speaker,
             };
             setTranscripts(prev => appendBounded(prev, segment));
-            setInterimTranscript('');
+            setInterimTranscripts(prev => removeInterim(prev, message.key));
             return;
         }
 
-        setInterimTranscript(message.text);
+        setInterimTranscripts(prev => upsertInterim(prev, {
+            key: message.key,
+            text: message.text,
+            provider: message.provider || 'unknown',
+            speaker: message.speaker || message.sourceIdentity,
+            sourceIdentity: message.sourceIdentity,
+        }));
     }, []);
 
-    const transcriptUpdatesRef = useRef<TranscriptUpdateBuffer<LiveKitTranscriptMessage> | null>(null);
+    const transcriptUpdatesRef = useRef<TranscriptUpdateBuffer<BufferedTranscriptMessage> | null>(null);
     if (transcriptUpdatesRef.current === null) {
-        transcriptUpdatesRef.current = new TranscriptUpdateBuffer(applyTranscriptUpdate);
+        transcriptUpdatesRef.current = new TranscriptUpdateBuffer<BufferedTranscriptMessage>(
+            applyTranscriptUpdate,
+            50,
+            undefined,
+            undefined,
+            message => message.isFinal,
+            message => message.key,
+        );
     }
 
     // Fetch token from backend
@@ -118,16 +135,19 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     // Handle incoming transcript data from Agent
     const handleDataReceived = useCallback((
         payload: Uint8Array,
-        _participant?: RemoteParticipant,
+        participant?: RemoteParticipant,
         _kind?: DataPacket_Kind
     ) => {
         try {
             const decoder = new TextDecoder();
-            const message: LiveKitTranscriptMessage = JSON.parse(decoder.decode(payload));
-            const text = cleanThaiText(message.text);
-            if (!text) return;
-
-            transcriptUpdatesRef.current?.push({ ...message, text });
+            const message = parseTranscriptMessage(JSON.parse(decoder.decode(payload)));
+            if (!message) return;
+            const sourceIdentity = participant?.identity || 'unknown';
+            transcriptUpdatesRef.current?.push({
+                ...message,
+                key: getTranscriptKey(message, sourceIdentity),
+                sourceIdentity,
+            });
         } catch (err) {
             console.error('[LiveKit] Failed to parse transcript data:', err);
         }
@@ -154,6 +174,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         if (participant.identity.startsWith('agent-') || participant.identity === 'asr-agent') {
             setIsAgentConnected(false);
             setAgentIdentity(null);
+            setInterimTranscripts(prev => clearInterimsBySource(prev, participant.identity));
             console.log('[LiveKit] 🤖 Agent disconnected');
         }
     }, []);
@@ -201,9 +222,10 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 console.log('[LiveKit] ❌ Disconnected from room');
                 roomRef.current = null;
                 transcriptUpdatesRef.current?.clear();
-                setInterimTranscript('');
+                setInterimTranscripts(new Map());
                 setRoom(null);
                 setLocalParticipant(null);
+                setMediaStream(null);
                 setParticipants([]);
                 setConnectionState(ConnectionState.DISCONNECTED);
                 setIsAgentConnected(false);
@@ -243,6 +265,12 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             }
             console.log('[LiveKit] 🎤 Microphone enabled');
 
+            const microphoneTrack = newRoom.localParticipant
+                .getTrackPublication(Track.Source.Microphone)
+                ?.track
+                ?.mediaStreamTrack;
+            setMediaStream(microphoneTrack ? new MediaStream([microphoneTrack]) : null);
+
             setRoom(newRoom);
 
             // Check for existing participants (agent might already be there)
@@ -268,6 +296,8 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             if (connectionAttempt !== connectionAttemptRef.current) return;
             console.error('[LiveKit] Connection failed:', err);
             setError(err instanceof Error ? err.message : 'Connection failed');
+            setLocalParticipant(null);
+            setMediaStream(null);
             setConnectionState(ConnectionState.ERROR);
         }
     }, [serverUrl, fetchToken, roomName, handleDataReceived, handleParticipantConnected, handleParticipantDisconnected]);
@@ -276,7 +306,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const disconnect = useCallback(() => {
         connectionAttemptRef.current++;
         transcriptUpdatesRef.current?.clear();
-        setInterimTranscript('');
+        setInterimTranscripts(new Map());
         const currentRoom = roomRef.current;
         roomRef.current = null;
         if (currentRoom) {
@@ -285,6 +315,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         }
         setRoom(null);
         setLocalParticipant(null);
+        setMediaStream(null);
         setParticipants([]);
         setIsAgentConnected(false);
         setAgentIdentity(null);
@@ -295,7 +326,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const clearTranscripts = useCallback(() => {
         transcriptUpdatesRef.current?.clear();
         setTranscripts([]);
-        setInterimTranscript('');
+        setInterimTranscripts(new Map());
         segmentIdRef.current = 0;
     }, []);
 
@@ -318,10 +349,11 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     return {
         connectionState,
         transcripts,
-        interimTranscript,
+        interimTranscripts,
         error,
         room,
         localParticipant,
+        mediaStream,
         participants,
         connect,
         disconnect,

@@ -12,6 +12,7 @@ import {
     shouldSendAudio,
 } from '../lib/audio';
 import { getErrorMessage, shouldUseVAD, stopMediaStream } from '../lib/runtime';
+import { parseTranscriptMessage } from '../lib/transcriptMessages';
 
 interface BackendASROptions {
     providerName: string;
@@ -92,11 +93,13 @@ export function useBackendASR(
                 setConnectionState(ConnectionState.ERROR);
                 return;
             }
-            if (message.type !== 'transcript' || typeof message.text !== 'string') return;
+            if (message.type !== 'transcript') return;
+            const transcript = parseTranscriptMessage(data);
+            if (!transcript) return;
 
-            const text = cleanThaiText(message.text);
+            const text = cleanThaiText(transcript.text);
             if (!text) return;
-            if (message.isFinal === true) {
+            if (transcript.isFinal) {
                 addFinalTranscript(setTranscripts, text);
                 setInterimTranscript('');
             } else {

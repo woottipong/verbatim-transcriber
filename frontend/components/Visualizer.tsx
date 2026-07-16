@@ -1,28 +1,28 @@
 import React from 'react';
-import { useAudioVisualizer } from '../hooks/useAudioVisualizer';
 
 interface VisualizerProps {
-  mediaStream: MediaStream | null;
+  bars: number[];
+  isActive: boolean;
   isListening: boolean;
 }
 
-const Visualizer: React.FC<VisualizerProps> = ({ mediaStream, isListening }) => {
-  const audioData = useAudioVisualizer(mediaStream, isListening);
-
-  return (
-    <div className="flex items-center justify-center gap-[2px] h-12 w-full max-w-xs mx-auto">
-      {audioData.map((value, index) => (
-        <div
-          key={index}
-          className="w-2 rounded-full transition-all duration-75 ease-in-out bg-indigo-500"
-          style={{
-            height: `${Math.max(4, value * 100)}%`,
-            opacity: isListening ? 0.6 + (value * 0.4) : 0.2
-          }}
-        />
-      ))}
-    </div>
-  );
-};
+const Visualizer: React.FC<VisualizerProps> = ({ bars, isActive, isListening }) => (
+  <div
+    className={`audio-waveform${isListening ? ' audio-waveform--listening' : ''}`}
+    role="img"
+    aria-label={isListening ? 'Live microphone input level' : 'Microphone input is off'}
+  >
+    <span className="audio-waveform__axis" aria-hidden="true" />
+    {bars.map((value, index) => (
+      <span
+        // The positions are stable and have no semantic identity.
+        key={index}
+        className={`audio-waveform__bar${isActive ? ' audio-waveform__bar--active' : ''}`}
+        style={{ transform: `scaleY(${isListening ? Math.max(0.12, value) : 0})` }}
+        aria-hidden="true"
+      />
+    ))}
+  </div>
+);
 
 export default Visualizer;

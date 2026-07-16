@@ -1,85 +1,109 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
+import {
+  InputSignalState,
+  calculateRms,
+  createInputSignalMonitor,
+  smoothWaveformBars,
+  toFrequencyBars,
+} from '../lib/audioSignal';
 
-export const useAudioVisualizer = (mediaStream: MediaStream | null, isListening: boolean) => {
-  const [audioData, setAudioData] = useState<number[]>(new Array(20).fill(0));
-  const animationRef = useRef<number | undefined>(undefined);
-  const audioContextRef = useRef<AudioContext | undefined>(undefined);
-  const analyserRef = useRef<AnalyserNode | undefined>(undefined);
-  const sourceRef = useRef<MediaStreamAudioSourceNode | undefined>(undefined);
+const BAR_COUNT = 20;
+const FRAME_INTERVAL_MS = 1000 / 18;
+const EMPTY_BARS = new Array<number>(BAR_COUNT).fill(0);
+
+export interface AudioVisualizerState {
+  bars: number[];
+  level: number;
+  signalState: InputSignalState;
+  error: string | null;
+}
+
+const INITIAL_STATE: AudioVisualizerState = {
+  bars: EMPTY_BARS,
+  level: 0,
+  signalState: 'listening',
+  error: null,
+};
+
+export function useAudioVisualizer(
+  mediaStream: MediaStream | null,
+  isListening: boolean,
+): AudioVisualizerState {
+  const [visualizerState, setVisualizerState] = useState<AudioVisualizerState>(INITIAL_STATE);
 
   useEffect(() => {
-    const cleanupAudio = () => {
-      if (animationRef.current) {
-        cancelAnimationFrame(animationRef.current);
-        animationRef.current = undefined;
-      }
-      
-      if (audioContextRef.current) {
-        // Only call close if the context is not already closed
-        if (audioContextRef.current.state !== 'closed') {
-          audioContextRef.current.close().catch(e => console.warn("Error closing AudioContext:", e));
-        }
-        audioContextRef.current = undefined;
-      }
-      
-      analyserRef.current = undefined;
-      sourceRef.current = undefined;
-    };
-
     if (!mediaStream || !isListening) {
-      cleanupAudio();
-      setAudioData(new Array(20).fill(0));
+      setVisualizerState(INITIAL_STATE);
       return;
     }
 
-    const initAudio = async () => {
-      // Ensure any previous instance is cleaned up
-      cleanupAudio();
+    let cancelled = false;
+    let animationFrame: number | null = null;
+    let lastFrameAt = 0;
+    let source: MediaStreamAudioSourceNode | null = null;
+    let analyser: AnalyserNode | null = null;
+    let audioContext: AudioContext | null = null;
+    let smoothedBars = EMPTY_BARS;
 
-      try {
-        const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-        const audioContext = new AudioContextClass();
-        audioContextRef.current = audioContext;
+    const monitor = createInputSignalMonitor();
 
-        const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 64; // Low resolution for simple visualizer
-        analyser.smoothingTimeConstant = 0.8;
-        analyserRef.current = analyser;
+    try {
+      const AudioContextConstructor = window.AudioContext;
+      audioContext = new AudioContextConstructor();
+      analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyser.smoothingTimeConstant = 0.88;
 
-        const source = audioContext.createMediaStreamSource(mediaStream);
-        source.connect(analyser);
-        sourceRef.current = source;
+      source = audioContext.createMediaStreamSource(mediaStream);
+      source.connect(analyser);
 
-        const bufferLength = analyser.frequencyBinCount;
-        const dataArray = new Uint8Array(bufferLength);
+      const timeSamples = new Uint8Array(analyser.fftSize);
+      // Speech energy is concentrated in the lower frequencies. Ignoring the
+      // mostly-empty upper range gives every bar useful visual resolution.
+      const frequencySamples = new Uint8Array(
+        Math.max(BAR_COUNT, Math.floor(analyser.frequencyBinCount / 3)),
+      );
+      const draw = (timestamp: number) => {
+        if (cancelled || !analyser) return;
 
-        const draw = () => {
-          if (!analyserRef.current) return;
-          
-          analyserRef.current.getByteFrequencyData(dataArray);
-          
-          // Normalize and pick a subset for the visualizer
-          const bars = [];
-          const step = Math.floor(bufferLength / 20); 
-          for (let i = 0; i < 20; i++) {
-            const val = dataArray[i * step];
-            bars.push(val / 255); // Normalize 0-1
-          }
-          
-          setAudioData(bars);
-          animationRef.current = requestAnimationFrame(draw);
-        };
+        if (timestamp - lastFrameAt >= FRAME_INTERVAL_MS) {
+          analyser.getByteTimeDomainData(timeSamples);
+          analyser.getByteFrequencyData(frequencySamples);
+          const level = calculateRms(timeSamples);
+          smoothedBars = smoothWaveformBars(
+            smoothedBars,
+            toFrequencyBars(frequencySamples, BAR_COUNT),
+          );
+          setVisualizerState({
+            bars: smoothedBars,
+            level,
+            signalState: monitor.update(level, timestamp),
+            error: null,
+          });
+          lastFrameAt = timestamp;
+        }
 
-        draw();
-      } catch (err) {
-        console.error("Audio visualizer initialization failed:", err);
+        animationFrame = requestAnimationFrame(draw);
+      };
+
+      animationFrame = requestAnimationFrame(draw);
+    } catch (error) {
+      setVisualizerState({
+        ...INITIAL_STATE,
+        error: error instanceof Error ? error.message : 'Unable to monitor microphone input',
+      });
+    }
+
+    return () => {
+      cancelled = true;
+      if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+      source?.disconnect();
+      analyser?.disconnect();
+      if (audioContext && audioContext.state !== 'closed') {
+        void audioContext.close();
       }
     };
+  }, [isListening, mediaStream]);
 
-    initAudio();
-
-    return cleanupAudio;
-  }, [mediaStream, isListening]);
-
-  return audioData;
-};
+  return visualizerState;
+}

@@ -7,11 +7,12 @@
  * - Read-only (no microphone)
  */
 
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Users, Radio, Trash2, X, Bot, Eye, Volume2, VolumeX } from 'lucide-react';
 import { useRoomViewer } from '../hooks/useRoomViewer';
 import { ConnectionState } from '../types';
 import { toHttpUrl } from '../lib/runtime';
+import { shouldStickToLatest } from '../lib/transcriptViewport';
 import ConnectionBadge from './ConnectionBadge';
 
 interface RoomInfo {
@@ -33,6 +34,8 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
 
     // Provider filter - simple select: 'all' or specific provider name
     const [filterProvider, setFilterProvider] = useState<string>('all');
+    const [isFollowingLatest, setIsFollowingLatest] = useState(true);
+    const transcriptScrollRef = useRef<HTMLDivElement>(null);
 
     // Convert backend URL to HTTP
     const httpBackendUrl = toHttpUrl(backendUrl);
@@ -79,8 +82,9 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
         viewer.transcripts.forEach(t => {
             if (t.provider) providers.add(t.provider);
         });
+        viewer.interimTranscripts.forEach(interim => providers.add(interim.provider));
         return Array.from(providers).sort();
-    }, [viewer.agents, viewer.transcripts]);
+    }, [viewer.agents, viewer.interimTranscripts, viewer.transcripts]);
 
     // Filter transcripts by selected provider
     const filteredTranscripts = useMemo(() => {
@@ -89,6 +93,19 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
         }
         return viewer.transcripts.filter(t => t.provider === filterProvider);
     }, [viewer.transcripts, filterProvider]);
+
+    const filteredInterims = useMemo(() => {
+        const interims = Array.from(viewer.interimTranscripts.values());
+        return filterProvider === 'all'
+            ? interims
+            : interims.filter(interim => interim.provider === filterProvider);
+    }, [filterProvider, viewer.interimTranscripts]);
+
+    useEffect(() => {
+        if (transcriptScrollRef.current && isFollowingLatest) {
+            transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
+        }
+    }, [filteredInterims, filteredTranscripts, isFollowingLatest]);
 
     // Provider color mapping
     const getProviderColor = (provider: string) => {
@@ -283,7 +300,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
 
                     {/* Main Content - Transcript Area */}
                     <div className="lg:col-span-3">
-                        <section className="app-panel overflow-hidden">
+                        <section className="app-panel relative overflow-hidden">
                             {/* Toolbar */}
                             <div className="panel-header flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                                 <div className="flex items-center gap-3">
@@ -317,7 +334,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                     {/* Clear Button */}
                                     <button
                                         onClick={viewer.clearTranscripts}
-                                        disabled={viewer.transcripts.length === 0}
+                                        disabled={viewer.transcripts.length === 0 && viewer.interimTranscripts.size === 0}
                                         className="control-button control-button--quiet disabled:opacity-40"
                                     >
                                         <Trash2 size={12} />
@@ -327,13 +344,17 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                             </div>
 
                             {/* Transcript List */}
-                            <div className="transcript-scroller h-[500px] overflow-y-auto px-4 py-2">
+                            <div
+                                ref={transcriptScrollRef}
+                                className="transcript-scroller h-[500px] overflow-y-auto px-4 py-2"
+                                onScroll={(event) => setIsFollowingLatest(shouldStickToLatest(event.currentTarget))}
+                            >
                                 {viewer.connectionState !== ConnectionState.CONNECTED ? (
                                     <div className="flex flex-col items-center justify-center h-full text-slate-500">
                                         <Radio size={32} className="mb-3 opacity-50" />
                                         <p className="text-sm">Select a room to start viewing</p>
                                     </div>
-                                ) : filteredTranscripts.length === 0 && viewer.interimTranscripts.size === 0 ? (
+                                ) : filteredTranscripts.length === 0 && filteredInterims.length === 0 ? (
                                     <div className="flex flex-col items-center justify-center h-full text-slate-500">
                                         <Bot size={32} className="mb-3 opacity-50" />
                                         <p className="text-sm">Waiting for transcripts...</p>
@@ -364,32 +385,36 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                         ))}
 
                                         {/* Interim transcripts (per agent) */}
-                                        {Array.from(viewer.interimTranscripts.entries()).map(([agentId, text]) => {
-                                            const agent = viewer.agents.find(a => a.identity === agentId);
-                                            const provider = agent?.provider || 'unknown';
-
-                                            // Skip if filtered out
-                                            if (filterProvider !== 'all' && provider !== filterProvider) {
-                                                return null;
-                                            }
-
-                                            return (
+                                        {filteredInterims.map(interim => (
                                                 <div
-                                                    key={`interim-${agentId}`}
+                                                    key={interim.key}
                                                     className="my-2 grid grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-3"
                                                 >
-                                                    <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(provider)}`}>
-                                                        {provider}
+                                                    <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(interim.provider)}`}>
+                                                        {interim.provider}<span className="ml-1 normal-case opacity-75">· {interim.speaker}</span>
                                                     </span>
                                                     <p className="min-w-0 text-[1rem] italic leading-7 text-violet-100" aria-live="polite">
-                                                        {text}
+                                                        {interim.text}
                                                     </p>
                                                 </div>
-                                            );
-                                        })}
+                                        ))}
                                     </>
                                 )}
                             </div>
+                            {!isFollowingLatest && (filteredTranscripts.length > 0 || filteredInterims.length > 0) && (
+                                <button
+                                    type="button"
+                                    className="control-button control-button--quiet absolute bottom-3 right-4 bg-slate-900/95 shadow-lg"
+                                    onClick={() => {
+                                        if (transcriptScrollRef.current) {
+                                            transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
+                                        }
+                                        setIsFollowingLatest(true);
+                                    }}
+                                >
+                                    Jump to latest
+                                </button>
+                            )}
                         </section>
 
                         {/* Error Display */}

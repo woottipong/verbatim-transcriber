@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Play, Square, Trash2 } from 'lucide-react';
 import { ConnectionState, TranscriptSegment } from '../types';
+import { shouldStickToLatest } from '../lib/transcriptViewport';
 
 interface TranscriptPanelProps {
   transcripts: TranscriptSegment[];
@@ -22,12 +23,13 @@ const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
   microphoneActive,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [isFollowingLatest, setIsFollowingLatest] = React.useState(true);
 
   useEffect(() => {
-    if (scrollRef.current) {
+    if (scrollRef.current && isFollowingLatest) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [interimTranscript, transcripts]);
+  }, [interimTranscript, isFollowingLatest, transcripts]);
 
   const isConnected = connectionState === ConnectionState.CONNECTED;
   const isConnecting = connectionState === ConnectionState.CONNECTING;
@@ -70,7 +72,12 @@ const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
         </div>
       </header>
 
-      <div ref={scrollRef} className="transcript-scroller min-h-[238px] flex-1 overflow-y-auto px-4 py-2">
+      <div className="relative min-h-[238px] flex-1">
+      <div
+        ref={scrollRef}
+        className="transcript-scroller absolute inset-0 overflow-y-auto px-4 py-2"
+        onScroll={(event) => setIsFollowingLatest(shouldStickToLatest(event.currentTarget))}
+      >
         {!hasContent ? (
           <div className="flex h-full min-h-[214px] items-center">
             <p className="max-w-xs text-sm leading-6 text-slate-500">Start this provider to review its Thai transcript alongside the live stream.</p>
@@ -84,15 +91,28 @@ const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
               </div>
             ))}
             {interimTranscript && (
-              <div className="my-2 rounded-lg border border-indigo-400/30 bg-indigo-400/10 px-3 py-2.5" aria-label="Live interim transcript" aria-live="polite">
-                <span className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-indigo-200">
+              <div className="my-2 flex items-baseline gap-2.5 rounded-lg border border-indigo-400/30 bg-indigo-400/10 px-3 py-2.5" aria-label="Live interim transcript" aria-live="polite">
+                <span className="flex shrink-0 items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-indigo-200">
                   <span className="status-dot status-dot--pending" aria-hidden="true" /> Interim
                 </span>
-                <p className="mt-1 text-base leading-7 text-indigo-50">{interimTranscript}</p>
+                <p className="min-w-0 text-base leading-7 text-indigo-50">{interimTranscript}</p>
               </div>
             )}
           </div>
         )}
+      </div>
+      {!isFollowingLatest && hasContent && (
+        <button
+          type="button"
+          className="control-button control-button--quiet absolute bottom-3 right-3 bg-slate-900/95 shadow-lg"
+          onClick={() => {
+            if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            setIsFollowingLatest(true);
+          }}
+        >
+          Jump to latest
+        </button>
+      )}
       </div>
     </article>
   );

@@ -10,6 +10,7 @@ import TranscriptPanel from './components/TranscriptPanel';
 import RecordButton from './components/RecordButton';
 import ViewerPage from './components/ViewerPage';
 import AdminPage from './components/AdminPage';
+import MicrophoneInputStrip from './components/MicrophoneInputStrip';
 import { AppConfig, ConnectionState } from './types';
 import { STORAGE_KEYS, DEFAULT_CONFIG } from './lib/constants';
 import { safeJsonParse } from './lib/utils';
@@ -123,6 +124,14 @@ export default function App() {
     googleHook.connectionState === ConnectionState.CONNECTED ||
     azureHook.connectionState === ConnectionState.CONNECTED;
 
+  const microphoneSource = livekitHook.mediaStream
+    ? { mediaStream: livekitHook.mediaStream, label: 'LiveKit' }
+    : googleHook.mediaStream
+      ? { mediaStream: googleHook.mediaStream, label: 'Google' }
+      : azureHook.mediaStream
+        ? { mediaStream: azureHook.mediaStream, label: 'Azure' }
+        : { mediaStream: null, label: null };
+
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -131,16 +140,16 @@ export default function App() {
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-violet-400/45 bg-violet-500/20 text-violet-200">
               <Radio size={19} aria-hidden="true" />
             </span>
-            <div>
-              <h1 className="text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">Thai Transcription</h1>
-              <p className="text-xs text-slate-400">Live comparison workspace</p>
+            <div className="min-w-0">
+              <h1 className="truncate text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">Thai Transcription</h1>
+              <p className="truncate text-xs text-slate-400">Live comparison workspace</p>
             </div>
           </div>
 
           <div className="flex items-center gap-1.5 sm:gap-2">
             <button
               onClick={openViewerTab}
-              className="control-button control-button--quiet hidden sm:inline-flex"
+              className="control-button control-button--quiet !hidden sm:!inline-flex"
               title="Open Viewer"
             >
               <Eye size={16} />
@@ -149,7 +158,7 @@ export default function App() {
 
             <button
               onClick={openAdminTab}
-              className="control-button control-button--quiet hidden md:inline-flex"
+              className="control-button control-button--quiet !hidden md:!inline-flex"
               title="Open Admin"
             >
               <Wrench size={16} />
@@ -199,6 +208,11 @@ export default function App() {
 
       <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
         <div className="space-y-8">
+          <MicrophoneInputStrip
+            mediaStream={microphoneSource.mediaStream}
+            sourceLabel={microphoneSource.label}
+          />
+
           <section className="space-y-3" aria-labelledby="livekit-heading">
             <div className="flex items-end justify-between gap-4">
               <div>
@@ -209,7 +223,7 @@ export default function App() {
             </div>
             <LiveKitPanel
               transcripts={livekitHook.transcripts}
-              interimTranscript={livekitHook.interimTranscript}
+              interimTranscripts={livekitHook.interimTranscripts}
               connectionState={livekitHook.connectionState}
               isAgentConnected={livekitHook.isAgentConnected}
               agentName={livekitHook.agentIdentity}

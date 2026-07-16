@@ -17,17 +17,14 @@ import {
 } from 'livekit-client';
 import { ConnectionState, TranscriptSegment } from '../types';
 import { appendBounded } from '../lib/runtime';
-
-// Transcript Message from Agent
-export interface TranscriptMessage {
-    type?: string;
-    text: string;
-    isFinal: boolean;
-    confidence?: number;
-    timestamp?: number;
-    provider?: string;
-    speaker?: string;
-}
+import {
+    InterimTranscript,
+    clearInterimsBySource,
+    getTranscriptKey,
+    parseTranscriptMessage,
+    removeInterim,
+    upsertInterim,
+} from '../lib/transcriptMessages';
 
 // Agent info with provider
 export interface AgentInfo {
@@ -43,7 +40,7 @@ export interface UseRoomViewerOptions {
 export interface UseRoomViewerReturn {
     connectionState: ConnectionState;
     transcripts: TranscriptSegment[];
-    interimTranscripts: Map<string, string>;  // Per-agent interim transcripts
+    interimTranscripts: Map<string, InterimTranscript>;
     error: string | null;
     room: Room | null;
     currentRoomName: string | null;
@@ -63,7 +60,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     // State
     const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
     const [transcripts, setTranscripts] = useState<TranscriptSegment[]>([]);
-    const [interimTranscripts, setInterimTranscripts] = useState<Map<string, string>>(new Map());
+    const [interimTranscripts, setInterimTranscripts] = useState<Map<string, InterimTranscript>>(new Map());
     const [error, setError] = useState<string | null>(null);
     const [room, setRoom] = useState<Room | null>(null);
     const [currentRoomName, setCurrentRoomName] = useState<string | null>(null);
@@ -201,9 +198,11 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     ) => {
         try {
             const decoder = new TextDecoder();
-            const message: TranscriptMessage = JSON.parse(decoder.decode(payload));
+            const message = parseTranscriptMessage(JSON.parse(decoder.decode(payload)));
+            if (!message) return;
             const agentIdentity = participant?.identity || 'unknown';
             const provider = message.provider || getProviderFromIdentity(agentIdentity);
+            const key = getTranscriptKey(message, agentIdentity);
 
             console.log('[Viewer] 📝 Transcript:', {
                 text: message.text,
@@ -232,19 +231,15 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
                 };
                 setTranscripts(prev => appendBounded(prev, segment));
 
-                // Clear interim for this agent
-                setInterimTranscripts(prev => {
-                    const next = new Map(prev);
-                    next.delete(agentIdentity);
-                    return next;
-                });
-            } else if (!message.isFinal && message.text.trim()) {
-                // Interim transcript - store per agent
-                setInterimTranscripts(prev => {
-                    const next = new Map(prev);
-                    next.set(agentIdentity, message.text);
-                    return next;
-                });
+                setInterimTranscripts(prev => removeInterim(prev, key));
+            } else if (!message.isFinal) {
+                setInterimTranscripts(prev => upsertInterim(prev, {
+                    key,
+                    text: message.text,
+                    provider,
+                    speaker: message.speaker || agentIdentity,
+                    sourceIdentity: agentIdentity,
+                }));
             }
         } catch (err) {
             console.error('[Viewer] Failed to parse transcript data:', err);
@@ -271,11 +266,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
 
         if (isAgent(participant.identity)) {
             setAgents(prev => prev.filter(a => a.identity !== participant.identity));
-            setInterimTranscripts(prev => {
-                const next = new Map(prev);
-                next.delete(participant.identity);
-                return next;
-            });
+            setInterimTranscripts(prev => clearInterimsBySource(prev, participant.identity));
             console.log('[Viewer] 🤖 Agent disconnected:', participant.identity);
         }
     }, [isAgent]);
@@ -292,6 +283,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             previousRoom?.disconnect();
             cleanupAudioElements();
             setAudioParticipants([]);
+            setInterimTranscripts(new Map());
 
             setConnectionState(ConnectionState.CONNECTING);
             setError(null);
@@ -322,6 +314,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
                 setRoom(null);
                 setConnectionState(ConnectionState.DISCONNECTED);
                 setAgents([]);
+                setInterimTranscripts(new Map());
                 cleanupAudioElements();
                 setAudioParticipants([]);
             });
@@ -397,6 +390,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         }
         setRoom(null);
         setAgents([]);
+        setInterimTranscripts(new Map());
         setCurrentRoomName(null);
         setConnectionState(ConnectionState.DISCONNECTED);
         cleanupAudioElements();

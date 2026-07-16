@@ -95,21 +95,6 @@ export interface ASRErrorResponse {
 }
 
 // ============================================
-// LiveKit Types
-// ============================================
-
-/**
- * LiveKit transcript message from Agent (via Data Channel)
- */
-export interface LiveKitTranscriptMessage {
-  text: string;
-  is_final: boolean;
-  confidence?: number;
-  timestamp?: number;
-  provider?: string;
-}
-
-// ============================================
 // Connection Types
 // ============================================
 

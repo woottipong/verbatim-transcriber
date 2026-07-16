@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Check, Copy, Play, Radio, Square, Trash2, Users } from 'lucide-react';
 import { ConnectionState, TranscriptSegment } from '../types';
+import { InterimTranscript } from '../lib/transcriptMessages';
+import { shouldStickToLatest } from '../lib/transcriptViewport';
 
 interface LiveKitPanelProps {
   transcripts: TranscriptSegment[];
-  interimTranscript: string;
+  interimTranscripts: ReadonlyMap<string, InterimTranscript>;
   connectionState: ConnectionState;
   isAgentConnected: boolean;
   agentName: string | null;
@@ -25,7 +27,7 @@ const providerClasses: Record<string, string> = {
 
 const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
   transcripts,
-  interimTranscript,
+  interimTranscripts,
   connectionState,
   isAgentConnected,
   agentName,
@@ -40,17 +42,18 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState(false);
+  const [isFollowingLatest, setIsFollowingLatest] = useState(true);
 
   useEffect(() => {
-    if (scrollRef.current) {
+    if (scrollRef.current && isFollowingLatest) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [interimTranscript, transcripts]);
+  }, [interimTranscripts, isFollowingLatest, transcripts]);
 
   const isConnected = connectionState === ConnectionState.CONNECTED;
   const isConnecting = connectionState === ConnectionState.CONNECTING;
   const isActive = isConnected || isConnecting;
-  const hasContent = transcripts.length > 0 || Boolean(interimTranscript);
+  const hasContent = transcripts.length > 0 || interimTranscripts.size > 0;
   const status = connectionState === ConnectionState.ERROR
     ? { label: 'Connection error', dot: 'status-dot--error' }
     : isConnecting
@@ -146,7 +149,12 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
         </div>
       )}
 
-      <div ref={scrollRef} className="transcript-scroller min-h-[250px] flex-1 overflow-y-auto px-4 py-2 sm:px-5">
+      <div className="relative min-h-[250px] flex-1">
+      <div
+        ref={scrollRef}
+        className="transcript-scroller absolute inset-0 overflow-y-auto px-4 py-2 sm:px-5"
+        onScroll={(event) => setIsFollowingLatest(shouldStickToLatest(event.currentTarget))}
+      >
         {!hasContent ? (
           <div className="flex h-full min-h-[230px] max-w-sm flex-col justify-center">
             <p className="text-base font-medium text-slate-300">
@@ -157,28 +165,42 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
         ) : (
           <div>
             {transcripts.map((segment, index) => (
-              <div key={segment.id} className="transcript-row grid grid-cols-[2.25rem_1fr] gap-3 py-3.5">
+              <div key={segment.id} className="transcript-row grid grid-cols-[2.25rem_minmax(0,1fr)] items-baseline gap-3 py-2.5">
                 <span className="pt-0.5 text-xs tabular-nums text-slate-500">{String(index + 1).padStart(2, '0')}</span>
-                <div className="min-w-0">
+                <div className="flex min-w-0 items-baseline gap-2.5">
                   {segment.provider && (
-                    <span className={`mb-1.5 inline-flex rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${providerClasses[segment.provider] ?? 'border-violet-400/30 bg-violet-400/10 text-violet-200'}`}>
+                    <span className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${providerClasses[segment.provider] ?? 'border-violet-400/30 bg-violet-400/10 text-violet-200'}`}>
                       {segment.provider.toUpperCase()}
                     </span>
                   )}
-                  <p className="text-[1.05rem] leading-8 text-slate-100">{segment.text}</p>
+                  <p className="min-w-0 text-[1.05rem] leading-7 text-slate-100">{segment.text}</p>
                 </div>
               </div>
             ))}
-            {interimTranscript && (
-              <div className="my-2 rounded-lg border border-violet-400/35 bg-violet-500/10 px-3.5 py-3" aria-label="Live interim transcript" aria-live="polite">
-                <div className="mb-1.5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-violet-200">
-                  <span className="status-dot status-dot--pending" aria-hidden="true" /> Live preview
-                </div>
-                <p className="text-[1.05rem] leading-8 text-violet-50">{interimTranscript}</p>
+            {Array.from<InterimTranscript>(interimTranscripts.values()).map(interim => (
+              <div key={interim.key} className="my-2 flex items-baseline gap-2.5 rounded-lg border border-violet-400/35 bg-violet-500/10 px-3.5 py-2.5" aria-label={`Live interim transcript from ${interim.speaker}`}>
+                <span className="flex shrink-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-violet-200">
+                  <span className="status-dot status-dot--pending" aria-hidden="true" /> Live
+                </span>
+                <span className="shrink-0 text-xs text-violet-300/80">{interim.provider}</span>
+                <p className="min-w-0 text-[1.05rem] leading-7 text-violet-50">{interim.text}</p>
               </div>
-            )}
+            ))}
           </div>
         )}
+      </div>
+      {!isFollowingLatest && hasContent && (
+        <button
+          type="button"
+          className="control-button control-button--quiet absolute bottom-3 right-4 bg-slate-900/95 shadow-lg"
+          onClick={() => {
+            if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            setIsFollowingLatest(true);
+          }}
+        >
+          Jump to latest
+        </button>
+      )}
       </div>
 
       <footer className="flex items-center justify-between border-t border-slate-700/70 px-4 py-2.5 text-xs text-slate-500 sm:px-5">
