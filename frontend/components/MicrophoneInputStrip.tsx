@@ -6,13 +6,15 @@ import Visualizer from './Visualizer';
 interface MicrophoneInputStripProps {
   mediaStream: MediaStream | null;
   sourceLabel: string | null;
+  isMicrophoneEnabled: boolean;
 }
 
 const MicrophoneInputStrip: React.FC<MicrophoneInputStripProps> = ({
   mediaStream,
   sourceLabel,
+  isMicrophoneEnabled,
 }) => {
-  const isListening = mediaStream !== null;
+  const isListening = mediaStream !== null && isMicrophoneEnabled;
   const { bars, signalState, error } = useAudioVisualizer(mediaStream, isListening);
 
   const status = error

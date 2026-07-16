@@ -326,7 +326,9 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                     ?.mediaStreamTrack;
 
             setIsMicrophoneEnabled(shouldEnable);
-            setMediaStream(shouldEnable && microphoneTrack ? new MediaStream([microphoneTrack]) : null);
+            if (shouldEnable && microphoneTrack) {
+                setMediaStream(new MediaStream([microphoneTrack]));
+            }
         } catch (microphoneError) {
             console.error('[LiveKit] Failed to update microphone:', microphoneError);
             setError(microphoneError instanceof Error ? microphoneError.message : 'Failed to update microphone');

@@ -123,13 +123,15 @@ export default function App() {
     googleHook.connectionState === ConnectionState.CONNECTED ||
     azureHook.connectionState === ConnectionState.CONNECTED;
 
-  const microphoneSource = livekitHook.mediaStream
-    ? { mediaStream: livekitHook.mediaStream, label: 'LiveKit' }
+  const microphoneSource = livekitHook.mediaStream && livekitHook.isMicrophoneEnabled
+    ? { mediaStream: livekitHook.mediaStream, label: 'LiveKit', isMicrophoneEnabled: true }
     : googleHook.mediaStream
-      ? { mediaStream: googleHook.mediaStream, label: 'Google' }
+      ? { mediaStream: googleHook.mediaStream, label: 'Google', isMicrophoneEnabled: true }
       : azureHook.mediaStream
-        ? { mediaStream: azureHook.mediaStream, label: 'Azure' }
-        : { mediaStream: null, label: null };
+        ? { mediaStream: azureHook.mediaStream, label: 'Azure', isMicrophoneEnabled: true }
+        : livekitHook.mediaStream
+          ? { mediaStream: livekitHook.mediaStream, label: 'LiveKit', isMicrophoneEnabled: false }
+          : { mediaStream: null, label: null, isMicrophoneEnabled: false };
 
   return (
     <div className="app-shell">
@@ -200,6 +202,7 @@ export default function App() {
           <MicrophoneInputStrip
             mediaStream={microphoneSource.mediaStream}
             sourceLabel={microphoneSource.label}
+            isMicrophoneEnabled={microphoneSource.isMicrophoneEnabled}
           />
 
           <section className="space-y-3" aria-labelledby="livekit-heading">
