@@ -1,178 +1,149 @@
-# Thai Verbatim Transcriber - Go Backend
+# Go backend and LiveKit agent
 
-Go backend สำหรับ Real-time Thai Speech-to-Text ด้วย Fiber + WebSocket
+The Go service exposes HTTP endpoints for provider status, LiveKit tokens, room management, and room-agent lifecycle. Audio does not pass through Fiber: the agent subscribes to LiveKit audio tracks, decodes Opus, invokes one ASR provider, and publishes transcript JSON through the room data channel.
 
-## Overview
+## Requirements
 
-| Feature       | Description                                                           |
-| ------------- | --------------------------------------------------------------------- |
-| Framework     | Go + Fiber v2 (High-performance)                                      |
-| Protocol      | WebSocket real-time streaming                                         |
-| ASR Providers | Google Cloud STT, Azure Speech                                        |
-| Language      | Thai (th-TH) verbatim transcription                                   |
-| Architecture  | Clean Architecture (domain, delivery, infrastructure)                 |
-| Dependencies  | Pure Go (WebSocket ASR), CGO required for LiveKit Agent (Opus decode) |
+- Go 1.24.4+
+- CGO enabled
+- A C compiler, `pkg-config`, and Opus development library
+- Reachable LiveKit server
+- Credentials for Google, Gemini, or Azure
+
+```bash
+# macOS
+brew install opus pkg-config
+
+# Debian/Ubuntu
+sudo apt-get install -y build-essential pkg-config libopus-dev
+```
+
+## Run locally
+
+```bash
+cp .env.example .env
+go mod download
+go run .
+```
+
+The service listens at `http://localhost:3000` by default. LiveKit must be running separately.
 
 ## Architecture
 
-```
-backend-go/
-├── main.go                 # Entry point
-├── config/                 # Configuration management
-├── models/                 # Request/Response DTOs
-└── internal/
-    ├── domain/             # Core interfaces & entities
-    ├── delivery/           # HTTP/WebSocket handlers & routes
-    │   ├── routes.go
-    │   └── handler/
-    ├── infrastructure/     # External services
-    │   ├── asr/            # ASR provider implementations
-    │   └── agent/          # LiveKit agent
-    └── pkg/audio/          # Audio utilities (PCM→WAV)
-```
+```text
+main.go
+  └── internal/delivery/routes.go
+        ├── handler/livekit.go   # tokens, rooms, participants
+        └── handler/agent.go     # agent start/stop/status
 
-## Quick Start
-
-### 1. Install & Configure
-
-```bash
-cd backend-go
-go mod download
-cp .env.example .env   # แก้ไข API keys ที่ต้องการใช้
+LiveKit room audio
+  └── internal/infrastructure/agent/agent.go
+        ├── Opus decode at 48 kHz mono
+        ├── 40 ms PCM batching
+        ├── optional 48→16 kHz decimation
+        └── internal/infrastructure/asr/
+              ├── google.go
+              ├── gemini.go
+              └── azure.go
 ```
 
-### 2. Run
+Provider-independent types and Thai spacing normalization live in `internal/domain`. Request/response DTOs live in `models`.
 
-```bash
-go run main.go
-```
+## Provider behavior
 
-Startup logs จะแสดง providers ที่เปิดใช้งาน:
-```
-✅ Enabled ASR providers: [Google]
-⚠️  [Azure] Disabled - AZURE_SUBSCRIPTION_KEY or AZURE_REGION not configured
-```
+| Provider | Input from agent | Important behavior |
+| --- | --- | --- |
+| Google | 48 kHz Linear16 PCM | Speech-to-Text V2 streaming, interim enabled, automatic punctuation, pre-limit reconnect and one-second replay buffer |
+| Gemini | 16 kHz PCM | Source input transcription only; required model audio response is discarded |
+| Azure | 16 kHz PCM/WAV stream | Azure upstream WebSocket conversation recognition with interim hypotheses and endpointing settings |
 
-### 3. Build for Production
+Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `gemini-3.5-live-translate-preview` with `th` source and `en` target by default.
 
-```bash
-go build -o transcriber-backend
-./transcriber-backend
-```
+## Environment variables
 
-## ASR Providers
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `HOST` | `localhost` | Fiber bind host |
+| `PORT` | `3000` | Fiber HTTP port |
+| `ALLOWED_ORIGINS` | Local origins | Comma-separated CORS allowlist |
+| `LIVEKIT_API_KEY` | — | Required with secret for LiveKit routes |
+| `LIVEKIT_API_SECRET` | — | Keep server-side only |
+| `LIVEKIT_WS_URL` | `ws://localhost:7880` | LiveKit URL used by SDK clients |
+| `GOOGLE_CLOUD_PROJECT` | — | Required for Google |
+| `GOOGLE_APPLICATION_CREDENTIALS` | — | Service-account JSON path |
+| `GOOGLE_API_KEY` | — | Alternative Google authentication |
+| `GOOGLE_CLOUD_LOCATION` | `asia-southeast1` | Speech-to-Text V2 region |
+| `GOOGLE_SPEECH_MODEL` | `chirp_2` | Recognition model |
+| `GEMINI_API_KEY` | — | Required for Gemini |
+| `GEMINI_MODEL` | `gemini-3.5-live-translate-preview` | Live model |
+| `GEMINI_LANGUAGE_CODE` | `th` | Input language hint |
+| `GEMINI_TARGET_LANGUAGE_CODE` | `en` | Required translation target; output discarded |
+| `AZURE_SUBSCRIPTION_KEY` | — | Required for Azure |
+| `AZURE_REGION` | `southeastasia` | Azure Speech region |
 
-| Provider   | Mode      | Sample Rate | Format    | Latency |
-| ---------- | --------- | ----------- | --------- | ------- |
-| **Google** | Streaming | 48 kHz      | PCM Int16 | ~300ms  |
-| **Azure**  | Batch     | 16 kHz      | WAV       | ~1-2s   |
+`HasGoogleKey`, `HasGeminiKey`, `HasAzureKey`, and `HasLiveKitKey` in `config/config.go` define availability shown by `/providers`.
 
-## API Endpoints
+## HTTP API
 
-### REST Endpoints
-
-| Method | Path         | Description               |
-| ------ | ------------ | ------------------------- |
-| GET    | `/health`    | Health check              |
-| GET    | `/providers` | Check available providers |
-
-### WebSocket Endpoints (Dynamic)
-
-Endpoints เปิดใช้งานตาม API keys ที่ configure:
-
-| Path      | Required Config                           |
-| --------- | ----------------------------------------- |
-| `/google` | `GOOGLE_CLOUD_PROJECT` + Google credentials |
-| `/azure`  | `AZURE_SUBSCRIPTION_KEY` + `AZURE_REGION` |
-
-### LiveKit Endpoints (Optional)
-
-| Method | Path                    | Description               |
-| ------ | ----------------------- | ------------------------- |
-| POST   | `/livekit/token`        | Generate access token     |
-| GET    | `/livekit/rooms`        | List rooms                |
-| GET    | `/livekit/rooms/:name`  | Get room details          |
-| DELETE | `/livekit/rooms/:name`  | Delete room               |
-| POST   | `/livekit/agent/start`  | Start transcription agent |
-| POST   | `/livekit/agent/stop`   | Stop agent                |
-| GET    | `/livekit/agent/status` | Agent status              |
-
-## WebSocket Protocol
-
-### Client → Server
-
-**Control Messages (JSON):**
-```json
-{ "type": "start" }
-{ "type": "stop" }
-```
-
-**Audio Data (Binary):**
-- PCM Int16, Little-endian
-- Sample rate ตาม provider (48kHz หรือ 16kHz)
-
-### Server → Client
-
-```json
-{ "type": "connected" }
-
-{
-  "type": "transcript",
-  "transcript": "สวัสดีครับ",
-  "isFinal": true,
-  "channel": {
-    "alternatives": [{
-      "transcript": "สวัสดีครับ",
-      "confidence": 0.95
-    }]
-  }
-}
-
-{ "type": "error", "error": "error message" }
-```
-
-## Environment Variables
-
-```bash
-# Server
-HOST=0.0.0.0
-PORT=3000
-
-# ASR Providers (optional - enable only what you need)
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
-GOOGLE_CLOUD_PROJECT=your-google-cloud-project-id
-# Optional; defaults to asia-southeast1 for Thai Chirp 2
-GOOGLE_CLOUD_LOCATION=asia-southeast1
-GOOGLE_SPEECH_MODEL=chirp_2
-AZURE_SUBSCRIPTION_KEY=your_key
-AZURE_REGION=southeastasia
-
-# LiveKit (optional)
-LIVEKIT_API_KEY=your_key
-LIVEKIT_API_SECRET=your_secret
-LIVEKIT_WS_URL=wss://your-livekit-server.com
-```
-
-## Check Provider Status
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/health` | Service health |
+| `GET` | `/providers` | Boolean provider and LiveKit availability |
+| `POST` | `/livekit/token` | Generate a participant JWT |
+| `GET` | `/livekit/rooms/` | List rooms |
+| `GET` | `/livekit/rooms/detailed` | Rooms with participant details |
+| `GET` | `/livekit/rooms/:name` | Room participants |
+| `DELETE` | `/livekit/rooms/:name` | Delete room |
+| `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove participant |
+| `POST` | `/livekit/agent/start` | Start a configured provider agent |
+| `POST` | `/livekit/agent/stop` | Stop an agent |
+| `GET` | `/livekit/agent/status` | Running agents |
 
 ```bash
 curl http://localhost:3000/providers
+
+curl -X POST http://localhost:3000/livekit/agent/start \
+  -H 'Content-Type: application/json' \
+  -d '{"roomName":"test","provider":"gemini"}'
 ```
+
+There are no public `/google`, `/azure`, or `/gemini` audio WebSocket routes.
+
+## Transcript data channel
+
+The agent publishes reliable packets with this shape:
 
 ```json
 {
-  "google": true,
-  "azure": false,
-  "livekit": true
+  "type": "transcript",
+  "text": "ข้อความภาษาไทย",
+  "isFinal": true,
+  "confidence": 0.9,
+  "provider": "google",
+  "timestamp": 1784196259000,
+  "speaker": "user-123"
 }
 ```
 
-## Dependencies
+Thai spacing is normalized once at the agent output boundary.
 
-| Package                                                           | Purpose             |
-| ----------------------------------------------------------------- | ------------------- |
-| [gofiber/fiber](https://github.com/gofiber/fiber)                 | Web framework       |
-| [gofiber/websocket](https://github.com/gofiber/websocket)         | WebSocket support   |
-| [cloud.google.com/go/speech](https://cloud.google.com/go/speech)  | Google Cloud STT    |
-| [livekit/server-sdk-go](https://github.com/livekit/server-sdk-go) | LiveKit integration |
-| [hraban/opus](https://github.com/hraban/opus)                     | Opus decode (CGO)   |
+## Test and build
+
+```bash
+go test ./...
+go test -race ./...
+go build ./...
+```
+
+Use the race detector for provider lifecycle, agent state, channel, lock, or goroutine changes. Do not commit binaries produced by local builds.
+
+## Technical documents
+
+- [LiveKit flow](docs/LIVEKIT_FLOW.md)
+- [Google provider flow](docs/GOOGLE_GRPC_FLOW.md)
+- [Azure upstream flow](docs/AZURE_WEBSOCKET_FLOW.md)
+- [Google stream limit](docs/ISSUE_GOOGLE_5MIN_LIMIT.md)
+- [Cloud VAD and endpointing](docs/VAD_CONFIGURATION.md)
+- [Editor mode proposal](docs/EDITOR_MODE_DESIGN.md)
+
+See the root [AGENTS.md](../AGENTS.md) for development rules.

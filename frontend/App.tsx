@@ -1,12 +1,9 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { Settings, Eye, Wrench, Mic2, Radio } from 'lucide-react';
 import { useLiveKit } from './hooks/useLiveKit';
-import { useGoogle } from './hooks/useGoogle';
-import { useAzure } from './hooks/useAzure';
 import { useAudioDevices } from './hooks/useAudioDevices';
 import SettingsModal from './components/SettingsModal';
 import LiveKitPanel from './components/LiveKitPanel';
-import TranscriptPanel from './components/TranscriptPanel';
 import ViewerPage from './components/ViewerPage';
 import AdminPage from './components/AdminPage';
 import MicrophoneInputStrip from './components/MicrophoneInputStrip';
@@ -66,12 +63,6 @@ export default function App() {
     autoConnect: false,
   });
 
-  // Google Cloud Speech-to-Text hook (original provider)
-  const googleHook = useGoogle(config);
-
-  // Azure Speech Services hook (original provider)
-  const azureHook = useAzure(config);
-
   // Handlers
   const handleConfigSave = useCallback((newConfig: AppConfig) => {
     setConfig(newConfig);
@@ -119,19 +110,13 @@ export default function App() {
     );
   }
 
-  const isAnyConnected = livekitHook.connectionState === ConnectionState.CONNECTED ||
-    googleHook.connectionState === ConnectionState.CONNECTED ||
-    azureHook.connectionState === ConnectionState.CONNECTED;
+  const isAnyConnected = livekitHook.connectionState === ConnectionState.CONNECTED;
 
   const microphoneSource = livekitHook.mediaStream && livekitHook.isMicrophoneEnabled
     ? { mediaStream: livekitHook.mediaStream, label: 'LiveKit', isMicrophoneEnabled: true }
-    : googleHook.mediaStream
-      ? { mediaStream: googleHook.mediaStream, label: 'Google', isMicrophoneEnabled: true }
-      : azureHook.mediaStream
-        ? { mediaStream: azureHook.mediaStream, label: 'Azure', isMicrophoneEnabled: true }
-        : livekitHook.mediaStream
-          ? { mediaStream: livekitHook.mediaStream, label: 'LiveKit', isMicrophoneEnabled: false }
-          : { mediaStream: null, label: null, isMicrophoneEnabled: false };
+    : livekitHook.mediaStream
+      ? { mediaStream: livekitHook.mediaStream, label: 'LiveKit', isMicrophoneEnabled: false }
+      : { mediaStream: null, label: null, isMicrophoneEnabled: false };
 
   return (
     <div className="app-shell">
@@ -143,7 +128,7 @@ export default function App() {
             </span>
             <div className="min-w-0">
               <h1 className="truncate text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">Thai Transcription</h1>
-              <p className="truncate text-xs text-slate-400">Live comparison workspace</p>
+              <p className="truncate text-xs text-slate-400">Live transcription workspace</p>
             </div>
           </div>
 
@@ -229,44 +214,6 @@ export default function App() {
               onClear={livekitHook.clearTranscripts}
               roomPlaceholder="Enter room name..."
             />
-          </section>
-
-          <section className="space-y-3" aria-labelledby="provider-heading">
-            <div className="flex items-end justify-between gap-4">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.14em] text-sky-300">Provider comparison</p>
-                <h2 id="provider-heading" className="mt-1 text-xl font-semibold tracking-tight text-white">Traditional ASR</h2>
-              </div>
-              <p className="hidden text-sm text-slate-400 sm:block">Run a provider independently for side-by-side checks</p>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-              <div className="space-y-2">
-                <h3 className="px-1 text-sm font-semibold text-sky-300">Google Cloud STT</h3>
-                <TranscriptPanel
-                  transcripts={googleHook.transcripts}
-                  interimTranscript={googleHook.interimTranscript}
-                  onClear={googleHook.clearTranscripts}
-                  connectionState={googleHook.connectionState}
-                  onStart={googleHook.startStreaming}
-                  onStop={googleHook.stopStreaming}
-                  microphoneActive={true}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <h3 className="px-1 text-sm font-semibold text-cyan-300">Azure Speech</h3>
-                <TranscriptPanel
-                  transcripts={azureHook.transcripts}
-                  interimTranscript={azureHook.interimTranscript}
-                  onClear={azureHook.clearTranscripts}
-                  connectionState={azureHook.connectionState}
-                  onStart={azureHook.startStreaming}
-                  onStop={azureHook.stopStreaming}
-                  microphoneActive={true}
-                />
-              </div>
-            </div>
           </section>
         </div>
       </main>

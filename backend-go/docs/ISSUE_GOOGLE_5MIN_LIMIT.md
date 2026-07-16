@@ -14,7 +14,7 @@ Google Cloud Speech-to-Text มีข้อจำกัด **5 นาทีต�
 
 - ผู้ใช้ **ไม่ต้องทำอะไร** — stream reconnect อัตโนมัติ
 - **ไม่หายแม้แต่คำเดียว** — ring buffer 1 วินาที replay ตอน reconnect
-- ทำงานทั้ง **WebSocket mode** และ **LiveKit mode** (ใช้ provider เดียวกัน)
+- ทำงานใน **LiveKit mode** ผ่าน provider ที่ reconnect ภายในโดยอัตโนมัติ
 
 ---
 

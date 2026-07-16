@@ -1,280 +1,284 @@
 # Thai Verbatim Transcriber
 
-Real-time Thai Speech-to-Text ด้วย Multi-provider ASR Comparison
+LiveKit-based real-time Thai speech transcription for publishers, viewers, and operators. Browser audio travels through WebRTC to a Go room agent, which transcribes with Google Cloud STT, Gemini Live, or Azure Speech and publishes text back through the LiveKit data channel.
 
-## Overview
+## Key features
 
-Web application สำหรับถอดความเสียงพูดภาษาไทยแบบ real-time โดยสามารถเปรียบเทียบผลลัพธ์จาก ASR providers หลายตัวพร้อมกัน
+- One LiveKit workflow for microphone publishing and transcription.
+- Selectable Google, Gemini, or Azure room agents.
+- Interim and committed transcript presentation optimized for Thai text.
+- Read-only viewer with room audio playback and provider filtering.
+- Admin UI for rooms, participants, provider availability, and agent lifecycle.
+- Microphone-level visualization and explicit session state.
 
-**2 โหมดการทำงาน:**
+## Contents
 
-1. **WebSocket Mode** - เชื่อมต่อตรงกับ ASR ผ่าน Backend
-2. **LiveKit Mode** - ใช้ WebRTC + Agent สำหรับ room-based transcription
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Getting started](#getting-started)
+- [ASR providers](#asr-providers)
+- [Configuration](#configuration)
+- [Backend API](#backend-api)
+- [Development and testing](#development-and-testing)
+- [Troubleshooting](#troubleshooting)
 
-## Features
+## Architecture
 
-| Feature             | Description                              |
-| ------------------- | ---------------------------------------- |
-| Multi-Provider ASR  | Google Cloud STT, Azure Speech           |
-| Real-time Streaming | WebSocket + LiveKit WebRTC               |
-| Thai Optimized      | ปรับแต่งสำหรับภาษาไทย verbatim transcription |
-| Side-by-Side        | เปรียบเทียบผลลัพธ์จาก providers พร้อมกัน       |
-| LiveKit Integration | Room-based transcription with agent      |
-| Viewer Mode         | ดู transcript + ฟังเสียง real-time          |
-
----
-
-## Mode 1: WebSocket ASR
-
-**ใช้เมื่อ:** ต้องการ transcribe เสียงของตัวเองโดยตรง (simple, low latency)
-
-### Flow
-
-```
-    Browser                      Go Backend                    ASR API
-       │                             │                            │
-       │  1. Connect WebSocket       │                            │
-       │  ws://localhost:3000/google │                            │
-       │ ─────────────────────────►  │                            │
-       │                             │                            │
-       │  2. { type: "connected" }   │                            │
-       │  ◄───────────────────────── │                            │
-       │                             │                            │
-       │  3. Send Binary Audio       │                            │
-       │  (PCM 48kHz)                │                            │
-       │ ─────────────────────────►  │  4. Forward to ASR         │
-       │                             │ ─────────────────────────► │
-       │                             │                            │
-       │                             │  5. Transcript Result      │
-       │                             │ ◄───────────────────────── │
-       │  6. JSON Response           │                            │
-       │  { type: "transcript",      │                            │
-       │    text: "สวัสดี",            │                            │
-       │    isFinal: true }          │                            │
-       │  ◄───────────────────────── │                            │
-       │                             │                            │
-       ▼                             ▼                            ▼
+```text
+Publisher / Viewer / Admin (React)
+              │
+              ├── HTTP → Go backend (tokens, rooms, agent control)
+              │
+              └── WebRTC + data channel
+                         │
+                    LiveKit server
+                         │
+                    Go room agent
+                         │
+              Google / Gemini / Azure
 ```
 
-### Endpoints
+The public application does not expose direct audio WebSocket endpoints. Azure's WebSocket connection is an internal upstream protocol used only by the Azure provider.
 
-| Endpoint  | Provider         | Audio Format | Mode      |
-| --------- | ---------------- | ------------ | --------- |
-| `/google` | Google Cloud STT | 48kHz PCM    | Streaming |
-| `/azure`  | Azure Speech     | 16kHz WAV    | Batch     |
+### Repository layout
 
----
-
-## Mode 2: LiveKit (WebRTC)
-
-**ใช้เมื่อ:** ต้องการ room-based, หลายคน join ดูพร้อมกัน, หรือต้องการ Viewer mode
-
-### Flow
-
-```
-  Publisher                LiveKit Server              Go Agent                ASR
-      │                          │                         │                    │
-      │  1. Join Room            │                         │                    │
-      │  (WebRTC)                │                         │                    │
-      │ ────────────────────────►│                         │                    │
-      │                          │                         │                    │
-      │  2. Publish Audio Track  │  3. Agent Join Room     │                    │
-      │ ────────────────────────►│◄─────────────────────── │                    │
-      │                          │                         │                    │
-      │                          │  4. Audio Stream (Opus) │                    │
-      │                          │ ───────────────────────►│                    │
-      │                          │                         │                    │
-      │                          │                         │  5. Send to ASR    │
-      │                          │                         │ ──────────────────►│
-      │                          │                         │                    │
-      │                          │                         │  6. Transcript     │
-      │                          │                         │◄────────────────── │
-      │                          │  7. Data Channel        │                    │
-      │  8. Receive Transcript   │◄─────────────────────── │                    │
-      │◄──────────────────────── │                         │                    │
-      │                          │                         │                    │
-      ▼                          ▼                         ▼                    ▼
-
-
-  Viewer                   LiveKit Server
-      │                          │
-      │  1. Join Room            │
-      │  (Subscribe Only)        │
-      │ ────────────────────────►│
-      │                          │
-      │  2. Receive Audio        │
-      │  (from Publisher)        │
-      │◄──────────────────────── │
-      │                          │
-      │  3. Receive Transcript   │
-      │  (from Agent)            │
-      │◄──────────────────────── │
-      │                          │
-      │  🔊 Play Audio           │
-      │  📝 Show Transcript      │
-      │                          │
-      ▼                          ▼
+```text
+.
+├── AGENTS.md                 # Repository rules for coding agents
+├── PRODUCT.md                # Product and design principles
+├── start.sh                  # Frontend/backend development launcher
+├── frontend/                 # React application
+│   ├── components/           # Publisher, viewer, admin, and status UI
+│   ├── hooks/                # LiveKit publisher/viewer and audio hooks
+│   └── lib/                  # Transcript, session, API, and signal helpers
+├── backend-go/               # Fiber API and LiveKit transcription agent
+│   ├── config/               # Environment-backed configuration
+│   ├── internal/delivery/    # HTTP routes and handlers
+│   ├── internal/domain/      # Provider contracts and Thai normalization
+│   └── internal/infrastructure/ # LiveKit agent and ASR providers
+└── livekit/                  # Local LiveKit Docker Compose setup
 ```
 
-### ขั้นตอน
+## Technology
 
-**Publisher:**
+| Area | Technology |
+| --- | --- |
+| Frontend | React 19, TypeScript 5.8, Vite 6, Tailwind CSS 3 |
+| Realtime client | LiveKit Client SDK |
+| Backend | Go 1.24, Fiber v2 |
+| Realtime server | LiveKit |
+| Audio decode | Opus through `gopkg.in/hraban/opus.v2` (CGO) |
+| ASR | Google Speech-to-Text V2, Gemini Live API, Azure Speech |
 
-1. Join room ด้วย `useLiveKit()` hook
-2. Publish audio track ไปยัง LiveKit Server
-3. รอรับ transcript ผ่าน Data Channel
+## Prerequisites
 
-**Agent (Backend):**
-
-1. Join room เดียวกัน
-2. Subscribe audio จาก Publisher
-3. ส่ง audio ไป ASR
-4. Broadcast transcript กลับ
-
-**Viewer:**
-
-1. Join room ด้วย `useRoomViewer()` (subscribe only)
-2. ได้ยินเสียงจาก Publisher
-3. เห็น transcript real-time
-
-### ข้อดีของ LiveKit Mode
-
-- หลายคนดูพร้อมกันได้ (Viewer mode)
-- Audio + Transcript sync
-- Room management (create/delete/list)
-- WebRTC = better audio quality
-- Multi-speaker support (future)
-
----
-
-## Project Structure
-
-```
-thai-verbatim-transcriber/
-├── frontend/                 # React 19 + TypeScript + Vite
-│   ├── hooks/                # useGoogle, useAzure, useLiveKit, useRoomViewer
-│   ├── components/           # UI components
-│   └── lib/                  # Utilities
-│
-├── backend-go/               # Go + Fiber (Clean Architecture)
-│   ├── config/               # Configuration
-│   ├── models/               # Request/Response DTOs
-│   └── internal/
-│       ├── domain/           # Core interfaces
-│       ├── delivery/         # Handlers + Routes
-│       ├── infrastructure/   # ASR + LiveKit Agent
-│       └── pkg/audio/        # Audio utilities
-│
-└── start.sh                  # Quick start script
-```
-
-## Quick Start
-
-### Prerequisites
-
-- Node.js 18+
-- Go 1.22+
-- pnpm (recommended) or npm
-- API Keys (Google/Azure - อย่างน้อย 1 provider)
-
-### 1. Clone & Setup
+- Node.js 18 or newer and pnpm.
+- Go 1.24.4 or a compatible newer release.
+- Docker with Docker Compose for local LiveKit.
+- A C compiler, `pkg-config`, and system Opus development library.
+- Credentials for at least one ASR provider.
 
 ```bash
-git clone https://github.com/woottipong/verbatim-transcriber.git
-cd thai-verbatim-transcriber
+# macOS
+brew install opus pkg-config
+
+# Debian/Ubuntu
+sudo apt-get install -y build-essential pkg-config libopus-dev
+```
+
+## Getting started
+
+### 1. Start LiveKit
+
+```bash
+cp livekit/.env.example livekit/.env
+cd livekit
+docker compose up -d
+docker compose ps
+cd ..
+```
+
+The development defaults use `devkey` / `secret` and are not production-safe.
+
+### 2. Configure the backend
+
+```bash
+cp backend-go/.env.example backend-go/.env
+```
+
+Edit `backend-go/.env` and configure LiveKit plus at least one provider. Never commit `.env` or credential JSON files.
+
+### 3. Configure the frontend
+
+```bash
+cp frontend/.env.example frontend/.env
+cd frontend
+pnpm install
+cd ..
+```
+
+### 4. Run
+
+```bash
+./start.sh
+```
+
+Or run the services separately:
+
+```bash
+# Terminal 1
+cd backend-go
+go run .
+
+# Terminal 2
+cd frontend
+pnpm dev
+```
+
+Open:
+
+- Publisher: [http://localhost:5173](http://localhost:5173)
+- Viewer: [http://localhost:5173/#viewer](http://localhost:5173/#viewer)
+- Admin: [http://localhost:5173/#admin](http://localhost:5173/#admin)
+- Health: [http://localhost:3000/health](http://localhost:3000/health)
+
+## Application pages
+
+- **Publisher:** joins a room, enables the microphone, monitors input level, and renders transcript packets. Joining automatically attempts to enable the microphone.
+- **Viewer:** joins without publishing, subscribes to room audio, and filters transcript rows by provider.
+- **Admin:** lists rooms/participants and starts or stops a configured provider agent per room.
+
+## ASR providers
+
+| Provider | Agent input | Default | Transcript behavior |
+| --- | --- | --- | --- |
+| Google | 48 kHz Linear16 PCM | `chirp_2`, `th-TH`, `asia-southeast1`, punctuation on | Interim snapshots and final utterances; reconnects before the five-minute limit |
+| Gemini | 16 kHz PCM | `gemini-3.5-live-translate-preview`, source `th`, target `en` | Source input chunks are retained; translated/model audio is discarded |
+| Azure | 16 kHz PCM/WAV stream | Thai conversation recognition, `southeastasia` | Interim hypotheses and finalized phrases |
+
+Latency and interim frequency depend on service, model, region, network, and speech pattern. A provider may finalize an utterance without emitting interim updates.
+
+## Configuration
+
+### Backend variables
+
+| Variable | Required | Default | Purpose |
+| --- | --- | --- | --- |
+| `HOST` | No | `localhost` | Fiber bind host |
+| `PORT` | No | `3000` | Fiber HTTP port |
+| `ALLOWED_ORIGINS` | No | Local origins | Comma-separated CORS allowlist |
+| `LIVEKIT_API_KEY` | For LiveKit routes | — | LiveKit API key |
+| `LIVEKIT_API_SECRET` | For LiveKit routes | — | LiveKit API secret |
+| `LIVEKIT_WS_URL` | No | `ws://localhost:7880` | LiveKit server URL |
+| `GOOGLE_CLOUD_PROJECT` | For Google | — | Google Cloud project |
+| `GOOGLE_APPLICATION_CREDENTIALS` | Google service account | — | Credential JSON path |
+| `GOOGLE_API_KEY` | Alternative Google auth | — | Google API key |
+| `GOOGLE_CLOUD_LOCATION` | No | `asia-southeast1` | Speech-to-Text V2 location |
+| `GOOGLE_SPEECH_MODEL` | No | `chirp_2` | Google model |
+| `GEMINI_API_KEY` | For Gemini | — | Gemini API key |
+| `GEMINI_MODEL` | No | `gemini-3.5-live-translate-preview` | Gemini model |
+| `GEMINI_LANGUAGE_CODE` | No | `th` | Source language hint |
+| `GEMINI_TARGET_LANGUAGE_CODE` | No | `en` | Required target; output is discarded |
+| `AZURE_SUBSCRIPTION_KEY` | For Azure | — | Azure Speech key |
+| `AZURE_REGION` | No | `southeastasia` | Azure region |
+
+### Frontend variables
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `VITE_BACKEND_URL` | `http://localhost:3000` | Backend HTTP base URL |
+| `VITE_LIVEKIT_URL` | `ws://localhost:7880` | Browser LiveKit URL |
+
+## Backend API
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/health` | Health check |
+| `GET` | `/providers` | Provider and LiveKit availability |
+| `POST` | `/livekit/token` | Create a participant token |
+| `GET` | `/livekit/rooms/` | List rooms |
+| `GET` | `/livekit/rooms/detailed` | List rooms with participants |
+| `GET` / `DELETE` | `/livekit/rooms/:name` | Inspect or delete a room |
+| `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove a participant |
+| `POST` | `/livekit/agent/start` | Start a room agent |
+| `POST` | `/livekit/agent/stop` | Stop a room agent |
+| `GET` | `/livekit/agent/status` | List running agents |
+
+```bash
+curl -X POST http://localhost:3000/livekit/agent/start \
+  -H 'Content-Type: application/json' \
+  -d '{"roomName":"test","provider":"google"}'
+```
+
+Valid providers are `google`, `gemini`, and `azure` when configured.
+
+## Transcript message contract
+
+```json
+{
+  "type": "transcript",
+  "text": "ทดสอบหนึ่งสองสาม",
+  "isFinal": false,
+  "confidence": 0.92,
+  "provider": "google",
+  "timestamp": 1784196259000,
+  "speaker": "user-1784196259605"
+}
+```
+
+Thai spacing is normalized in the Go agent. Google/Azure interim values update draft state by provider/speaker. Gemini chunks are retained as transcript rows even when marked non-final.
+
+## Development and testing
+
+```bash
+# LiveKit
+cd livekit
+docker compose up -d
+
+# Frontend
+cd frontend
+pnpm test
+pnpm build
 
 # Backend
 cd backend-go
-cp .env.example .env
-# Edit .env - add API keys
-
-# Frontend
-cd ../frontend
-cp .env.example .env
-
-# Recommended: Use pnpm for better performance
-pnpm install
-
-# Alternative: Use npm
-npm install
+go test ./...
+go test -race ./...
+go build ./...
 ```
 
-### 2. Start
+`start.sh` supports `--frontend-only`, `--backend-only`, `--build`, and `--help`; it does not start LiveKit.
 
-```bash
-# Option 1: Quick start script
-./start.sh
+## Troubleshooting
 
-# Option 2: Manual
-# Terminal 1 - Backend
-cd backend-go && go run main.go
-
-# Terminal 2 - Frontend
-cd frontend && pnpm run dev  # or npm run dev
-```
-
-### 3. Open Browser
-
-- **Main App:** http://localhost:5173
-- **Viewer:** http://localhost:5173#viewer
-- **Admin:** http://localhost:5173#admin
-
-## ASR Providers Comparison
-
-| Provider         | Mode      | Sample Rate | Format | Latency | Thai Quality |
-| ---------------- | --------- | ----------- | ------ | ------- | ------------ |
-| Google Cloud STT | Streaming | 48 kHz      | PCM    | ~300ms  | ⭐⭐⭐⭐⭐        |
-| Azure Speech     | Batch     | 16 kHz      | WAV    | ~1-2s   | ⭐⭐⭐⭐         |
-
-## Environment Variables
-
-### Backend (`backend-go/.env`)
-
-```bash
-# Server
-PORT=3000
-
-# ASR Providers (configure what you have)
-GOOGLE_APPLICATION_CREDENTIALS=/path/to/credentials.json
-GOOGLE_CLOUD_PROJECT=your-google-cloud-project-id
-GOOGLE_CLOUD_LOCATION=asia-southeast1
-GOOGLE_SPEECH_MODEL=chirp_2
-AZURE_SUBSCRIPTION_KEY=your_key
-AZURE_REGION=southeastasia
-
-# LiveKit (optional)
-LIVEKIT_API_KEY=your_key
-LIVEKIT_API_SECRET=your_secret
-LIVEKIT_WS_URL=ws://localhost:7880
-```
-
-### Frontend (`frontend/.env`)
-
-```bash
-VITE_BACKEND_URL=ws://localhost:3000
-VITE_LIVEKIT_URL=ws://localhost:7880
-```
+- **Port in use:** inspect with `lsof -nP -iTCP:3000 -sTCP:LISTEN` or port `5173`, then stop the stale process.
+- **No provider available:** call `/providers`, verify credentials, and restart the backend after changing `.env`.
+- **Google model permission/location error:** use a model available in the configured region; the Thai realtime default is `chirp_2` in `asia-southeast1`.
+- **No interim text:** inspect provider interim logs. Some utterances finalize without interim updates; Gemini chunks appear as retained rows rather than drafts.
+- **IPv6 STUN timeout:** if ICE reaches `connected`, an IPv6 timeout usually indicates an unavailable IPv6 path, not a failed session.
+- **Opus build failure:** install `libopus`/`libopus-dev`, verify `pkg-config --modversion opus`, and ensure `go env CGO_ENABLED` returns `1`.
 
 ## Documentation
 
-| Document                                                          | Description                          |
-| ----------------------------------------------------------------- | ------------------------------------ |
-| [Frontend README](frontend/README.md)                             | React app details, hooks, components |
-| [Backend README](backend-go/README.md)                            | Go server, handlers, API endpoints   |
-| **Backend Docs:**                                                 |                                      |
-| [WebSocket Format](backend-go/docs/WEBSOCKET_FORMAT.md)           | Message format specification         |
-| [Google gRPC Flow](backend-go/docs/GOOGLE_GRPC_FLOW.md)           | Google STT data flow                 |
-| [Azure WebSocket Flow](backend-go/docs/AZURE_WEBSOCKET_FLOW.md)   | Azure protocol details               |
-| [LiveKit Flow](backend-go/docs/LIVEKIT_FLOW.md)                   | LiveKit WebRTC architecture & flow   |
-| [Provider Comparison](backend-go/docs/GOOGLE_AZURE_COMPARISON.md) | Google vs Azure                      |
-| [Google 5-Min Limit](backend-go/docs/ISSUE_GOOGLE_5MIN_LIMIT.md)  | Streaming limit & solutions          |
-| [VAD Configuration](backend-go/docs/VAD_CONFIGURATION.md)         | Voice Activity Detection             |
+- [Agent guide](AGENTS.md)
+- [Product principles](PRODUCT.md)
+- [Frontend](frontend/README.md)
+- [Backend](backend-go/README.md)
+- [Local LiveKit](livekit/README.md)
+- [LiveKit flow](backend-go/docs/LIVEKIT_FLOW.md)
+- [Google flow](backend-go/docs/GOOGLE_GRPC_FLOW.md)
+- [Azure flow](backend-go/docs/AZURE_WEBSOCKET_FLOW.md)
+- [Google five-minute handling](backend-go/docs/ISSUE_GOOGLE_5MIN_LIMIT.md)
+- [Cloud VAD and endpointing](backend-go/docs/VAD_CONFIGURATION.md)
+- [Editor mode proposal](backend-go/docs/EDITOR_MODE_DESIGN.md)
 
-## Tech Stack
+## Security and deployment
 
-**Frontend:** React 19, TypeScript, Vite 6, Tailwind CSS, LiveKit Client SDK
-
-**Backend:** Go 1.22+, Fiber v2, gRPC (Google STT), LiveKit Server SDK
+- Never expose ASR credentials or LiveKit secrets to the browser.
+- Replace local LiveKit development credentials before remote deployment.
+- Use HTTPS/WSS and a restricted `ALLOWED_ORIGINS` list outside localhost.
+- Configure external IP, firewall, UDP ports, and TURN for the target LiveKit network.
+- The repository does not currently include production frontend/backend deployment manifests.
 
 ## License
 

@@ -1,180 +1,102 @@
-# Thai Verbatim Transcriber - Frontend
+# React frontend
 
-Real-time Thai speech-to-text transcription UI built with React 19 + TypeScript + Vite.
+React 19 + TypeScript + Vite UI for publishing microphone audio to LiveKit, viewing room transcripts, and administering rooms and transcription agents.
 
-## Quick Start
+## Requirements
 
-### Prerequisites
 - Node.js 18+
-- pnpm (recommended) or npm
-- Backend server running on `ws://localhost:3000`
+- pnpm
+- Go backend at `http://localhost:3000` by default
+- LiveKit at `ws://localhost:7880` by default
 
-### Installation
-
-```bash
-# Recommended: Use pnpm for better performance and smaller disk usage
-pnpm install
-
-# Alternative: Use npm
-npm install
-```
-
-### Development
-
-```bash
-# Using pnpm (recommended)
-pnpm run dev
-
-# Using npm
-npm run dev
-```
-
-Open [http://localhost:5173](http://localhost:5173)
-
-### Build
-
-```bash
-# Using pnpm (recommended)
-pnpm run build
-
-# Using npm
-npm run build
-```
-
-## Configuration
-
-### Environment Variables
+## Setup
 
 ```bash
 cp .env.example .env
+pnpm install
+pnpm dev
 ```
 
-| Variable           | Description           | Default               |
-| ------------------ | --------------------- | --------------------- |
-| `VITE_BACKEND_URL` | Backend WebSocket URL | `ws://localhost:3000` |
-| `VITE_LIVEKIT_URL` | LiveKit server URL    | `ws://localhost:7880` |
+Open:
 
-## Architecture
+- Publisher: `http://localhost:5173`
+- Viewer: `http://localhost:5173/#viewer`
+- Admin: `http://localhost:5173/#admin`
 
-```
+## Environment
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `VITE_BACKEND_URL` | `http://localhost:3000` | Backend HTTP base URL |
+| `VITE_LIVEKIT_URL` | `ws://localhost:7880` | Browser LiveKit URL |
+
+These values are embedded by Vite at build time. Use HTTPS/WSS for remote deployments.
+
+## Structure
+
+```text
 frontend/
-├── App.tsx                     # Main app (multi-panel layout)
-├── types.ts                    # TypeScript interfaces
-├── index.tsx                   # React entry point
-├── index.css                   # Tailwind styles
-│
-├── hooks/
-│   ├── useGoogle.ts            # Google Cloud STT WebSocket
-│   ├── useAzure.ts             # Azure Speech WebSocket
-│   ├── useLiveKit.ts           # LiveKit WebRTC room
-│   ├── useVAD.ts               # Voice Activity Detection
-│   ├── useAudioVisualizer.ts   # Waveform visualization
-│   └── useAudioDevices.ts      # Microphone selection
-│
+├── App.tsx                     # Hash routing and publisher workspace
 ├── components/
-│   ├── ConnectionBadge.tsx     # Connection status
-│   ├── RecordButton.tsx        # Record control
-│   ├── ErrorBanner.tsx         # Error display
-│   ├── TranscriptPanel.tsx     # Transcript area
-│   ├── LiveKitPanel.tsx        # LiveKit UI
-│   ├── Visualizer.tsx          # Audio waveform
-│   ├── SettingsModal.tsx       # Settings UI
-│   ├── ViewerPage.tsx          # Viewer mode
-│   ├── AdminPage.tsx           # Admin panel
-│   └── VADInfoBadge.tsx        # VAD status
-│
+│   ├── LiveKitPanel.tsx        # Session controls and transcript list
+│   ├── MicrophoneInputStrip.tsx # Input-level visualization
+│   ├── ViewerPage.tsx          # Subscribe-only viewer
+│   ├── AdminPage.tsx           # Room and agent management
+│   └── SettingsModal.tsx       # Backend URL configuration
+├── hooks/
+│   ├── useLiveKit.ts           # Publisher room and microphone lifecycle
+│   ├── useRoomViewer.ts        # Viewer room/audio lifecycle
+│   ├── useAudioVisualizer.ts   # Web Audio analyser state
+│   └── useAudioDevices.ts      # Input-device discovery
 ├── lib/
-│   ├── api.ts                  # API utilities
-│   ├── audio.ts                # Audio processing
-│   ├── constants.ts            # App constants
-│   └── utils.ts                # Utilities
-│
-└── public/
-    ├── vad.config.js           # VAD WASM config
-    └── *.wasm, *.onnx          # VAD model files
+│   ├── transcriptMessages.ts   # Packet validation and transcript state helpers
+│   ├── transcriptUpdates.ts    # Interim update coalescing
+│   ├── transcriptViewport.ts   # Scroll-to-latest behavior
+│   ├── liveKitSession.ts       # Session status presentation
+│   ├── audioSignal.ts          # Waveform calculations
+│   └── runtime.ts              # Config and bounded-state helpers
+└── types.ts
 ```
 
-## Backend Integration
+The frontend has no direct provider microphone hooks and does not stream audio to the Go HTTP server. All microphone audio is published with LiveKit.
 
-### WebSocket Endpoints
-| Path      | Provider         | Sample Rate |
-| --------- | ---------------- | ----------- |
-| `/google` | Google Cloud STT | 48 kHz      |
-| `/azure`  | Azure Speech     | 16 kHz      |
+## Transcript behavior
 
-### LiveKit Endpoints
-| Method | Path             | Description      |
-| ------ | ---------------- | ---------------- |
-| POST   | `/livekit/token` | Get access token |
-| GET    | `/livekit/rooms` | List rooms       |
+- Every packet is validated with `parseTranscriptMessage`.
+- Google and Azure interim values are stored as replaceable drafts keyed by provider and speaker.
+- Final values become bounded committed rows.
+- Gemini input chunks are retained as ordinary rows even when `isFinal=false`; only exact consecutive duplicates are suppressed.
+- Thai spacing normalization belongs to the Go agent. Avoid extra frontend normalization that could collapse interim behavior.
 
-### Message Formats
+## Session UX
 
-**Client → Server (Audio):**
-```javascript
-ws.send(audioBuffer);  // Int16Array binary
-```
+The publisher joins a named room and then enables the microphone. Readiness is derived from room connection, microphone state, and agent presence. Keep these states explicit in UI changes and do not rely on color alone.
 
-**Server → Client (Transcript):**
-```json
-{
-  "type": "transcript",
-  "transcript": "สวัสดีครับ",
-  "isFinal": true
-}
-```
-
-## Features
-
-### Multi-Provider ASR
-- Google Cloud STT (streaming)
-- Azure Speech (batch)
-- LiveKit WebRTC (real-time agent)
-
-### Audio Processing
-- **Google:** 48kHz Linear16 PCM
-- **Azure:** 16kHz WAV
-- Real-time sample rate conversion
-
-### Voice Activity Detection (VAD)
-- Silero VAD model (@ricky0123/vad-react)
-- Configurable threshold
-
-## Tech Stack
-
-| Category  | Technology           |
-| --------- | -------------------- |
-| Framework | React 19             |
-| Language  | TypeScript           |
-| Build     | Vite 6               |
-| Styling   | Tailwind CSS         |
-| Icons     | Lucide React         |
-| VAD       | @ricky0123/vad-react |
-| Audio     | Web Audio API        |
-| Realtime  | WebSocket, LiveKit   |
+The microphone strip uses the browser's Web Audio analyser only to communicate input level; it is not browser VAD and does not gate audio publication.
 
 ## Scripts
 
-| Command               | Description              |
-| --------------------- | ------------------------ |
-| `pnpm run dev`        | Start dev server         |
-| `pnpm run build`      | Build for production     |
-| `pnpm run preview`    | Preview production build |
-| `pnpm run backend:install` | Install backend deps  |
-| `pnpm run backend:start`   | Start backend server  |
-| `pnpm run full-setup` | Install frontend + backend |
-| `pnpm run full-dev`   | Start frontend + backend  |
+| Command | Description |
+| --- | --- |
+| `pnpm dev` | Start Vite on port 5173 |
+| `pnpm test` | Run `lib/*.test.ts` with Node's test runner |
+| `pnpm build` | Create a production Vite build |
+| `pnpm preview` | Preview the production build |
 
-**Note:** All npm commands work with pnpm as well.
+## Verification
 
-## Browser Support
+```bash
+pnpm test
+pnpm build
+```
 
-- Chrome/Edge 90+
-- Firefox 88+
-- Safari 15.4+
+Tests cover transcript buffering/state, session presentation, viewport behavior, and audio signal calculations. The production build is the TypeScript/Vite integration check.
 
-### Required APIs
-- `getUserMedia`
-- `AudioContext`
-- `WebSocket`
-- `SharedArrayBuffer` (for VAD WASM)
+## Browser requirements
+
+- Modern Chrome, Edge, Firefox, or Safari with WebRTC and `getUserMedia`.
+- `AudioContext` for microphone-level visualization.
+- Microphone permission for the publisher page.
+- A secure context for remote deployments; localhost is allowed during development.
+
+See the root [README](../README.md) for full setup and [AGENTS.md](../AGENTS.md) for development rules.

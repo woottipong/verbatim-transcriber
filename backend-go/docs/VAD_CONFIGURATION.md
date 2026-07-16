@@ -1,124 +1,64 @@
-# VAD Configuration - Azure & Google Speech
+# Speech activity and endpointing
 
-## Overview
+## Current behavior
 
-**VAD (Voice Activity Detection)** คือการตรวจจับว่ามีเสียงพูดหรือไม่ ใช้เพื่อ:
+The browser does not run VAD and does not gate microphone publication. The microphone waveform is input-level feedback only. Audio is continuously published while the LiveKit microphone track is enabled, and each cloud provider decides when text is interim or final.
 
-- ตัดแบ่ง segment เสียงพูด
-- ประหยัด bandwidth (ไม่ส่งช่วงเงียบ)
-- ลด latency (เริ่ม process ทันทีที่มีเสียง)
-
-### VAD Locations
-
-```
-Frontend VAD          Backend VAD        Cloud STT VAD
-(Optional)            (None)             (Built-in)
-     │                     │                  │
-     ▼                     ▼                  ▼
-  Silero VAD          Not used           Azure/Google
-  (Client-side)                          (Server-side)
+```text
+Browser microphone on
+  → continuous LiveKit audio
+  → cloud provider speech activity / endpointing
+  → interim and final transcript results
 ```
 
----
+## Provider behavior
 
-## Azure Speech VAD
+### Google
 
-### Built-in VAD
+Google StreamingRecognize returns interim results and `is_final` utterances. The provider uses final results as safe reconnect points near the five-minute stream limit. Automatic punctuation is enabled in the current backend configuration.
 
-Azure Speech Service มี VAD ในตัว — ทำงานอัตโนมัติไม่ต้องตั้งค่า
+Short speech may finalize with no interim updates. This is valid provider behavior, not necessarily a frontend bug.
 
-### Recognition Modes
+### Azure
 
-| Mode             | URL Parameter              | Description              |
-| ---------------- | -------------------------- | ------------------------ |
-| **conversation** | `recognition=conversation` | สำหรับบทสนทนา, VAD ผ่อนคลาย |
-| **dictation**    | `recognition=dictation`    | สำหรับ dictation, รอนานกว่า |
-| **interactive**  | `recognition=interactive`  | สำหรับ command, VAD เข้มงวด |
+Azure conversation recognition uses server-side endpointing. The provider sends:
 
-### VAD Events
+- segmentation silence timeout: 300 ms,
+- maximum silence duration: 500 ms,
+- initial silence timeout: 5 seconds,
+- interim results enabled.
 
-```go
-case "speech.startDetected":  // 🗣️ เริ่มตรวจพบเสียงพูด
-case "speech.endDetected":    // 🔕 เสียงพูดจบ (VAD detected silence)
-case "speech.hypothesis":     // 📝 Interim result (ระหว่างพูด)
-case "speech.phrase":         // ✅ Final result (VAD ตัดสินใจแล้ว)
-```
+Azure emits `speech.hypothesis` for interim text and `speech.phrase` for final text.
 
-### ข้อจำกัด
+### Gemini
 
-- ไม่สามารถปรับ threshold ได้
-- ไม่มี silence timeout config โดยตรงใน WebSocket API
-- ขึ้นอยู่กับ recognition mode ที่เลือก
+Gemini Live input transcription does not behave exactly like traditional ASR interim/final snapshots. It can emit useful source-input chunks with `isFinal=false`. The frontend retains those chunks as normal rows and suppresses only exact consecutive duplicates.
 
----
+The model's translated/model audio is not exposed to the application.
 
-## Google Cloud Speech VAD
+## UI implications
 
-### Built-in VAD + Configurable
+- **Waveform/input meter:** confirms that microphone samples reach the browser analyser.
+- **Microphone state:** confirms whether the LiveKit track is published.
+- **Agent/transcription state:** confirms whether an ASR agent is in the room.
+- **Interim draft:** replaceable active text for Google/Azure.
+- **Committed row:** final Google/Azure text or retained Gemini source chunk.
 
-```go
-// internal/infrastructure/asr/google.go
-StreamingConfig: &speechpb.StreamingRecognitionConfig{
-    Config:         &speechpb.RecognitionConfig{...},
-    InterimResults: true,
-    SingleUtterance: false,  // true = หยุดหลังพูดจบประโยคแรก
-}
-```
+Do not infer speech detection from waveform movement alone. Do not label browser input level as VAD unless a real VAD controller is implemented.
 
-### Configuration Options
+## Tuning guidance
 
-| Option            | Type | Description                      |
-| ----------------- | ---- | -------------------------------- |
-| `SingleUtterance` | bool | `true` = ปิด stream หลังเงียบครั้งแรก |
-| `InterimResults`  | bool | รับ interim results ระหว่างพูด      |
+- Tune cloud endpointing only with representative Thai speech and noise conditions.
+- Aggressive silence thresholds reduce final latency but can split phrases.
+- Automatic punctuation can improve readability but may affect when a service finalizes.
+- Avoid frontend whitespace normalization beyond packet validation; Thai normalization occurs at the Go agent output boundary.
 
-### ข้อจำกัด
+## Relevant files
 
-- **5 นาที streaming limit** — ต้อง reconnect ([ดูรายละเอียด](ISSUE_GOOGLE_5MIN_LIMIT.md))
-- ไม่มี silence threshold config โดยตรง
-- `SingleUtterance` ปิด stream ทันทีหลังเงียบ
-
----
-
-## VAD Features Comparison
-
-| Feature                | Azure | Google |
-| ---------------------- | ----- | ------ |
-| Built-in VAD           | ✅     | ✅      |
-| Configurable threshold | ❌     | ❌      |
-| Silence timeout config | ❌     | ❌      |
-| Speech start event     | ✅     | ❌      |
-| Speech end event       | ✅     | ❌      |
-| Streaming limit        | ไม่จำกัด | 5 นาที  |
-
----
-
-## Best Practices
-
-### เมื่อไหร่ควรใช้ Frontend VAD (Silero)
-
-| Scenario                | Use Frontend VAD?    |
-| ----------------------- | -------------------- |
-| ประหยัด bandwidth        | ✅ ใช้                 |
-| ต้องการควบคุม sensitivity | ✅ ใช้                 |
-| Latency สำคัญมาก          | ❌ ไม่ใช้ (เพิ่ม latency) |
-| ใช้ Azure/Google เฉยๆ    | ❌ ไม่จำเป็น             |
-
-### Recommended Configuration
-
-```typescript
-// สำหรับ Azure/Google — ไม่ต้องใช้ frontend VAD
-vadConfig: {
-    enabled: false,
-    threshold: 0.4,
-}
-```
-
-**สรุป:** สำหรับ Azure และ Google ไม่ต้องเปิด frontend VAD เพราะ built-in VAD ทำงานได้ดีอยู่แล้ว ส่ง audio ไปตลอดแล้วให้ cloud จัดการ
-
-### Audio Quality Tips
-
-- ✅ ใช้ sample rate ที่ถูกต้อง (48kHz สำหรับ Google, 16kHz สำหรับ Azure)
-- ✅ ส่ง audio ต่อเนื่อง ไม่ต้องรอ VAD ถ้าไม่จำเป็น
-- ❌ อย่าส่ง chunk เล็กเกินไป (< 100ms)
-- ❌ อย่าส่ง chunk ใหญ่เกินไป (> 500ms)
+- `frontend/components/MicrophoneInputStrip.tsx`
+- `frontend/hooks/useAudioVisualizer.ts`
+- `frontend/lib/audioSignal.ts`
+- `frontend/lib/transcriptMessages.ts`
+- `backend-go/internal/infrastructure/asr/google.go`
+- `backend-go/internal/infrastructure/asr/azure.go`
+- `backend-go/internal/infrastructure/asr/gemini.go`

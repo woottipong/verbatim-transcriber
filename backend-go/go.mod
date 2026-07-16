@@ -6,7 +6,6 @@ require (
 	cloud.google.com/go/speech v1.29.0
 	github.com/fasthttp/websocket v1.5.3
 	github.com/gofiber/fiber/v2 v2.52.12
-	github.com/gofiber/websocket/v2 v2.2.1
 	github.com/google/uuid v1.6.0
 	github.com/joho/godotenv v1.5.1
 	github.com/livekit/protocol v1.44.1-0.20260120134243-0914cc74653e

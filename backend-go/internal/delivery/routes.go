@@ -6,17 +6,12 @@ import (
 	"thai-transcriber-backend/internal/delivery/handler"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/websocket/v2"
 )
-
-// WSHandler is a WebSocket handler function type
-type WSHandler func(c *websocket.Conn)
 
 // SetupRoutes configures all routes for the application
 func SetupRoutes(app *fiber.App, cfg *config.Config) {
 	setupHealthRoutes(app, cfg)
 	setupLiveKitRoutes(app, cfg)
-	setupASRRoutes(app, cfg)
 }
 
 // setupHealthRoutes configures health check and provider status endpoints
@@ -70,48 +65,4 @@ func setupLiveKitRoutes(app *fiber.App, cfg *config.Config) {
 	} else {
 		log.Println("⚠️  [LiveKit Agent] Disabled - No ASR provider configured (Google, Gemini, or Azure)")
 	}
-}
-
-// setupASRRoutes configures WebSocket routes for ASR providers
-func setupASRRoutes(app *fiber.App, cfg *config.Config) {
-	var enabled []string
-
-	if cfg.HasGoogleKey() {
-		registerWSRoute(app, "/google", func(c *websocket.Conn) { handler.HandleASR(c, cfg, "Google") })
-		enabled = append(enabled, "Google")
-	} else {
-		log.Println("⚠️  [Google] Disabled - GOOGLE_CLOUD_PROJECT and Google credentials not configured")
-	}
-
-	if cfg.HasGeminiKey() {
-		registerWSRoute(app, "/gemini", func(c *websocket.Conn) { handler.HandleASR(c, cfg, "Gemini") })
-		enabled = append(enabled, "Gemini")
-	} else {
-		log.Println("⚠️  [Gemini] Disabled - GEMINI_API_KEY not configured")
-	}
-
-	if cfg.HasAzureKey() {
-		registerWSRoute(app, "/azure", func(c *websocket.Conn) { handler.HandleASR(c, cfg, "Azure") })
-		enabled = append(enabled, "Azure")
-	} else {
-		log.Println("⚠️  [Azure] Disabled - AZURE_SUBSCRIPTION_KEY or AZURE_REGION not configured")
-	}
-
-	// Log summary
-	if len(enabled) > 0 {
-		log.Printf("✅ Enabled ASR providers: %v\n", enabled)
-	} else {
-		log.Println("⚠️  No ASR providers enabled - Please configure API keys in .env")
-	}
-}
-
-// registerWSRoute registers a WebSocket route with upgrade middleware
-func registerWSRoute(app *fiber.App, path string, h WSHandler) {
-	app.Use(path, func(c *fiber.Ctx) error {
-		if websocket.IsWebSocketUpgrade(c) {
-			return c.Next()
-		}
-		return fiber.ErrUpgradeRequired
-	})
-	app.Get(path, websocket.New(h))
 }

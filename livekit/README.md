@@ -1,143 +1,100 @@
-# 🎙️ LiveKit Server - Thai Transcription
+# Local LiveKit server
 
-LiveKit Server สำหรับระบบ Real-time Thai Speech-to-Text
+Docker Compose setup for local Thai Verbatim Transcriber development.
 
-## 📋 Prerequisites
+## Requirements
 
-- Docker & Docker Compose
-- Port 7880, 7881, 7882 available
+- Docker with Docker Compose
+- Available ports 7880/TCP, 7881/TCP, 7882/UDP, 50000-50100/UDP, and 6379/TCP
 
-## 🚀 Quick Start
-
-### 1. Start Server
+## Start
 
 ```bash
-cd livekit
-docker-compose up -d
+cp .env.example .env
+docker compose up -d
+docker compose ps
+docker compose logs -f livekit
 ```
 
-### 2. Verify Running
+Stop with:
 
 ```bash
-# Check containers
-docker-compose ps
-
-# Check logs
-docker-compose logs -f livekit
-
-# Health check
-curl http://localhost:7880
+docker compose down
 ```
 
-### 3. Stop Server
+Use `docker compose down -v` only when intentionally deleting the local Redis volume.
+
+## Development credentials
+
+| Setting | Default |
+| --- | --- |
+| API key | `devkey` |
+| API secret | `secret` |
+| WebSocket URL | `ws://localhost:7880` |
+| HTTP URL | `http://localhost:7880` |
+
+These credentials are public development defaults. Never use them for a remote or production server.
+
+Copy the same key, secret, and WebSocket URL into `backend-go/.env`. The frontend normally uses `VITE_LIVEKIT_URL=ws://localhost:7880`.
+
+## Containers and ports
+
+| Service/port | Purpose |
+| --- | --- |
+| `livekit` | LiveKit development server |
+| `redis` | Local Redis container/volume reserved by the Compose stack |
+| `7880/TCP` | HTTP signaling and WebSocket |
+| `7881/TCP` | WebRTC TCP fallback |
+| `7882/UDP` | WebRTC UDP in development mode |
+| `50000-50100/UDP` | Exposed RTC UDP range |
+| `6379/TCP` | Redis |
+
+The Compose service launches LiveKit with `--dev --bind 0.0.0.0`. `livekit.yaml` documents production-oriented RTC, Redis, room, and TURN settings but is not passed to the development command by default.
+
+## Verify
 
 ```bash
-docker-compose down
-```
-
-## 🔑 Credentials (Development)
-
-| Key           | Value                   |
-| ------------- | ----------------------- |
-| API Key       | `devkey`                |
-| API Secret    | `secret`                |
-| WebSocket URL | `ws://localhost:7880`   |
-| HTTP URL      | `http://localhost:7880` |
-
-## 🌐 Ports
-
-| Port | Protocol | Usage                 |
-| ---- | -------- | --------------------- |
-| 7880 | TCP      | HTTP / WebSocket      |
-| 7881 | TCP      | WebRTC TCP (fallback) |
-| 7882 | UDP      | WebRTC UDP (primary)  |
-| 6379 | TCP      | Redis                 |
-
-## 📁 Files
-
-```
-livekit/
-├── docker-compose.yml  # Docker services definition
-├── livekit.yaml        # LiveKit server configuration
-├── .env.example        # Environment variables template
-└── README.md           # This file
-```
-
-## 🔧 Configuration
-
-### Development Mode (Default)
-
-ใช้ `--dev` flag ใน docker-compose ซึ่ง:
-- ไม่ต้องการ Redis
-- Auto-generate credentials
-- Permissive CORS
-
-### Production Mode
-
-1. Copy `.env.example` to `.env`
-2. Update credentials
-3. Modify `livekit.yaml`:
-   - Set `use_external_ip: true`
-   - Configure TURN server
-   - Update Redis settings
-
-## 🧪 Testing Connection
-
-### Using LiveKit CLI
-
-```bash
-# Install CLI
-brew install livekit-cli
-
-# Test connection
-livekit-cli room list \
-  --url http://localhost:7880 \
-  --api-key devkey \
-  --api-secret secret
-```
-
-### Using curl
-
-```bash
-# Health endpoint
 curl http://localhost:7880
 
-# Get token (requires token service)
 curl -X POST http://localhost:3000/livekit/token \
-  -H "Content-Type: application/json" \
-  -d '{"identity": "user1", "roomName": "test-room"}'
+  -H 'Content-Type: application/json' \
+  -d '{"identity":"user1","roomName":"test"}'
 ```
 
-## 🐛 Troubleshooting
+The second command requires the Go backend to be running with matching LiveKit credentials.
 
-### Port Already in Use
+## Production checklist
+
+- Replace the development key and secret.
+- Use TLS and a `wss://` URL.
+- Configure external IP discovery for the deployment environment.
+- Open the required TCP/UDP ports.
+- Configure TURN for restrictive NAT/firewall environments.
+- Decide whether Redis/multi-node support is required.
+- Mount and pass an explicit LiveKit configuration rather than relying on `--dev`.
+
+## Troubleshooting
+
+### Port conflict
 
 ```bash
-# Find process using port
-lsof -i :7880
-
-# Kill process
-kill -9 <PID>
+lsof -nP -iTCP:7880 -sTCP:LISTEN
+lsof -nP -iUDP:7882
 ```
 
-### Container Won't Start
+### Container unhealthy
 
 ```bash
-# View logs
-docker-compose logs livekit
-
-# Restart with rebuild
-docker-compose down && docker-compose up -d --build
+docker compose ps
+docker compose logs livekit
+docker compose restart livekit
 ```
 
-### WebRTC Connection Failed
+### Browser cannot connect
 
-1. Check firewall allows UDP 7882
-2. For remote connections, set `use_external_ip: true`
-3. Consider using TURN server
+1. Confirm backend and frontend use the same LiveKit host.
+2. Confirm API key/secret match between Compose and `backend-go/.env`.
+3. Check WebRTC UDP/firewall rules.
+4. For remote access, configure external IP and TURN.
 
-## 📚 Resources
-
-- [LiveKit Docs](https://docs.livekit.io)
-- [LiveKit GitHub](https://github.com/livekit/livekit)
-- [WebRTC Troubleshooting](https://docs.livekit.io/guides/troubleshooting/)
+See the root [README](../README.md) for the complete application setup.

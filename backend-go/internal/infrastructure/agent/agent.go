@@ -2,7 +2,7 @@
 // participants and performs real-time speech-to-text transcription.
 //
 // The agent connects to a LiveKit room, subscribes to audio tracks,
-// decodes Opus audio, and sends it to ASR providers (Google or Azure)
+// decodes Opus audio, and sends it to ASR providers (Google, Gemini, or Azure)
 // for transcription. Results are published back to the room via Data Channel.
 package agent
 

@@ -70,7 +70,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, config, 
                 <div className="space-y-3">
                   <div className="flex items-center gap-2">
                     <Server size={16} className="text-indigo-400" />
-                    <span className="font-semibold text-slate-200">WebSocket URL</span>
+                    <span className="font-semibold text-slate-200">Backend URL</span>
                   </div>
                   <p className="text-sm text-slate-400">Connect to the Go backend server for secure transcription</p>
 
@@ -81,12 +81,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, config, 
                       type="text"
                       value={localConfig.backendUrl}
                       onChange={(e) => setLocalConfig({ ...localConfig, backendUrl: e.target.value })}
-                      placeholder="ws://localhost:3000"
+                      placeholder="http://localhost:3000"
                       className="w-full rounded-lg border border-slate-600 bg-slate-950/50 px-3 py-2.5 text-sm text-slate-100 placeholder-slate-500"
                     />
                     <p className="text-xs text-slate-500 flex items-center gap-1">
                       <span className="w-1.5 h-1.5 bg-green-500 rounded-full"></span>
-                      Default: ws://localhost:3000
+                      Default: http://localhost:3000
                     </p>
                   </div>
                 </div>

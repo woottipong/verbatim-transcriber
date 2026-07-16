@@ -46,7 +46,7 @@ done
 # Header
 echo -e "${CYAN}┌─────────────────────────────────────────┐${NC}"
 echo -e "${CYAN}│${NC}  ${BLUE}🎙️  Real-time Thai Transcription${NC}      ${CYAN}│${NC}"
-echo -e "${CYAN}│${NC}  ${NC}Multi-Provider ASR Comparison${NC}          ${CYAN}│${NC}"
+echo -e "${CYAN}│${NC}  ${NC}LiveKit transcription workspace${NC}       ${CYAN}│${NC}"
 echo -e "${CYAN}└─────────────────────────────────────────┘${NC}"
 echo ""
 
@@ -54,15 +54,20 @@ echo ""
 check_requirements() {
     local has_error=false
 
-    # Check Node.js
-    if ! command -v node &> /dev/null; then
+    # Check frontend requirements
+    if [ "$BACKEND_ONLY" = false ] && ! command -v node &> /dev/null; then
         echo -e "${RED}❌ Node.js not found${NC}"
         echo "   Install: https://nodejs.org/"
         has_error=true
     fi
+    if [ "$BACKEND_ONLY" = false ] && ! command -v pnpm &> /dev/null; then
+        echo -e "${RED}❌ pnpm not found${NC}"
+        echo "   Install: corepack enable && corepack prepare pnpm@latest --activate"
+        has_error=true
+    fi
 
-    # Check Go
-    if ! command -v go &> /dev/null; then
+    # Check backend requirements
+    if [ "$FRONTEND_ONLY" = false ] && ! command -v go &> /dev/null; then
         echo -e "${RED}❌ Go not found${NC}"
         echo "   Install: https://go.dev/doc/install"
         has_error=true
@@ -81,7 +86,7 @@ install_deps() {
     if [ "$BACKEND_ONLY" = false ]; then
         if [ ! -d "$PROJECT_ROOT/frontend/node_modules" ]; then
             echo -e "${YELLOW}📦 Installing frontend dependencies...${NC}"
-            (cd "$PROJECT_ROOT/frontend" && npm install)
+            (cd "$PROJECT_ROOT/frontend" && pnpm install)
             echo ""
         fi
     fi
@@ -126,13 +131,13 @@ start_servers() {
     # Start frontend
     if [ "$BACKEND_ONLY" = false ]; then
         echo -e "${GREEN}▶${NC} Frontend: ${CYAN}http://localhost:$FRONTEND_PORT${NC}"
-        (cd "$PROJECT_ROOT/frontend" && npm run dev) &
+        (cd "$PROJECT_ROOT/frontend" && pnpm run dev) &
         FRONTEND_PID=$!
     fi
 
     # Start backend
     if [ "$FRONTEND_ONLY" = false ]; then
-        echo -e "${GREEN}▶${NC} Backend:  ${CYAN}ws://localhost:$BACKEND_PORT${NC}"
+        echo -e "${GREEN}▶${NC} Backend:  ${CYAN}http://localhost:$BACKEND_PORT${NC}"
         if [ "$BUILD_BACKEND" = true ] && [ -f "$PROJECT_ROOT/backend-go/server" ]; then
             (cd "$PROJECT_ROOT/backend-go" && ./server) &
         else

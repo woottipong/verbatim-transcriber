@@ -11,12 +11,11 @@
 
 1. **Install pnpm** (if not already installed):
    ```bash
-   npm install -g pnpm
-   # or
-   curl -fsSL https://get.pnpm.io/install.sh | sh
+   corepack enable
+   corepack prepare pnpm@latest --activate
    ```
 
-2. **Clean existing installation**:
+2. **Remove an old npm installation if migrating an existing checkout**:
    ```bash
    rm -rf node_modules package-lock.json
    ```
@@ -64,6 +63,6 @@ If you encounter issues:
 ## Migration Status
 
 ✅ **Completed**: Frontend successfully migrated to pnpm
-- All scripts updated to use pnpm
+- Frontend development and repository startup use pnpm
 - Documentation updated
 - Configuration optimized for pnpm

@@ -1,228 +1,94 @@
-# LiveKit WebRTC - Architecture & Data Flow
+# LiveKit architecture and data flow
 
-## Overview
+## Scope
 
-LiveKit Mode ใช้ WebRTC สำหรับ room-based transcription — หลายคน join ดู transcript พร้อมกันได้
+LiveKit is the application's only client audio transport. Publishers send microphone audio through WebRTC; viewers subscribe without publishing; the Go backend uses HTTP only for tokens, room management, and agent control.
 
-```
-Publisher (Browser)  ─── WebRTC ───►  LiveKit Server  ◄─── WebRTC ───  Agent (Go Backend)
-                                          │
-                                          │ WebRTC
-                                          ▼
-                                    Viewer (Browser)
-```
+## Components
 
----
+```text
+Publisher                  LiveKit                  Go agent                  ASR
+    │ join + publish Opus      │                        │                      │
+    ├─────────────────────────►│                        │                      │
+    │                          ├── subscribed track ───►│                      │
+    │                          │                        ├── PCM audio ─────────►│
+    │                          │                        │◄── transcript ────────┤
+    │                          │◄── reliable data ──────┤                      │
+    │◄── transcript packet ────┤                        │                      │
 
-## Architecture
-
-```
-LiveKit Room: "meeting-123"
-┌──────────────────────────────────────────────────────────────────┐
-│                                                                  │
-│  👤 Publisher                                                     │
-│  (Browser)              🔊 Audio Track (WebRTC Opus)             │
-│     │  ──────────────────────────────────────────────►           │
-│     │                                                            │
-│     │                   🤖 Agent (Go Backend)                     │
-│     │                      │                                     │
-│     │                      │  1. Subscribe Audio (Opus)           │
-│     │                      │  2. Decode Opus → PCM (CGO)         │
-│     │                      │  3. Send PCM → ASR (Google/Azure)   │
-│     │                      │  4. Receive Transcript              │
-│     │                      │  5. Publish via Data Channel        │
-│     │                      │                                     │
-│     │  ◄──────────────── 📝 Data Channel (transcript JSON) ──►  │
-│     │                                                            │
-│  👁️ Viewer(s)                                                     │
-│  (Browser)                                                       │
-│     ◄──── 🔊 Audio (from Publisher)                               │
-│     ◄──── 📝 Transcript (from Agent)                              │
-│                                                                  │
-└──────────────────────────────────────────────────────────────────┘
+Viewer
+    ├── join, subscribe only ─► LiveKit
+    ├── receive participant audio
+    └── receive transcript data
 ```
 
----
+## Publisher flow
 
-## Connection Flow
+1. `useLiveKit` requests a token from `POST /livekit/token`.
+2. The browser connects to the configured LiveKit URL.
+3. The browser enables and publishes its microphone track.
+4. The UI derives readiness from room connection, microphone state, and agent presence.
+5. Transcript data packets are validated and committed or shown as active interim state.
 
-### Publisher Flow
+## Agent flow
 
-```
-Publisher                    Go Backend REST              LiveKit Server
-   │                             │                            │
-   │  1. POST /livekit/token     │                            │
-   │  { identity, roomName }     │                            │
-   │ ───────────────────────────►│                            │
-   │                             │                            │
-   │  2. { token, wsUrl }        │                            │
-   │ ◄───────────────────────────│                            │
-   │                             │                            │
-   │  3. Connect WebRTC (token)  │                            │
-   │ ────────────────────────────┼───────────────────────────►│
-   │                             │                            │
-   │  4. Publish Audio Track     │                            │
-   │ ────────────────────────────┼───────────────────────────►│
-   │                             │                            │
-```
+1. Admin starts an agent with `POST /livekit/agent/start` and a provider name.
+2. The agent joins as `agent-<provider>-<timestamp>` and subscribes to audio tracks.
+3. Opus is decoded to mono 48 kHz PCM.
+4. Audio is batched into roughly 40 ms provider calls.
+5. Google receives 48 kHz; Gemini and Azure receive simple 3:1 decimated 16 kHz PCM.
+6. Provider results are normalized and published reliably as JSON data packets.
 
-### Agent Flow
+## Viewer flow
 
-```
-Frontend                     Go Backend REST              Agent (Go)             ASR
-   │                             │                           │                    │
-   │  1. POST /livekit/agent/start                           │                    │
-   │  { roomName, provider }     │                           │                    │
-   │ ───────────────────────────►│                           │                    │
-   │                             │  2. Create Agent          │                    │
-   │                             │ ─────────────────────────►│                    │
-   │                             │                           │                    │
-   │                             │      3. Join Room (WebRTC)│                    │
-   │                             │                           │──── Connect ──────►│
-   │                             │                           │                    │
-   │                             │      4. Subscribe Audio   │                    │
-   │                             │      (Auto-subscribe)     │                    │
-   │                             │                           │                    │
-   │                             │      5. Decode Opus→PCM   │                    │
-   │                             │                           │  6. Send PCM       │
-   │                             │                           │ ──────────────────►│
-   │                             │                           │                    │
-   │                             │                           │  7. Transcript     │
-   │                             │                           │ ◄──────────────────│
-   │                             │                           │                    │
-   │                             │      8. Data Channel      │                    │
-   │  ◄─────────────────────────────────  (to all)          │                    │
-   │                             │                           │                    │
-```
+1. `useRoomViewer` requests a token with publishing disabled.
+2. It subscribes to participant audio and transcript data.
+3. It tracks connected agents and derives provider names from packets/identities.
+4. It can filter transcript rows by provider.
 
-### Viewer Flow
+## HTTP routes
 
-```
-Viewer                       Go Backend REST              LiveKit Server
-   │                             │                            │
-   │  1. POST /livekit/token     │                            │
-   │  { identity, roomName,      │                            │
-   │    canPublish: false }      │                            │
-   │ ───────────────────────────►│                            │
-   │                             │                            │
-   │  2. { token, wsUrl }        │                            │
-   │ ◄───────────────────────────│                            │
-   │                             │                            │
-   │  3. Connect WebRTC (subscribe only)                      │
-   │ ────────────────────────────┼───────────────────────────►│
-   │                             │                            │
-   │  4. Receive Audio Track (from Publisher)                  │
-   │ ◄───────────────────────────┼────────────────────────────│
-   │                             │                            │
-   │  5. Receive Data Channel (transcript from Agent)         │
-   │ ◄───────────────────────────┼────────────────────────────│
-   │                             │                            │
-   │  🔊 Play Audio + 📝 Show Transcript                       │
-   │                             │                            │
-```
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `POST` | `/livekit/token` | Participant token |
+| `GET` | `/livekit/rooms/` | List rooms |
+| `GET` | `/livekit/rooms/detailed` | Rooms and participants |
+| `GET` / `DELETE` | `/livekit/rooms/:name` | Inspect/delete room |
+| `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove participant |
+| `POST` | `/livekit/agent/start` | Start provider agent |
+| `POST` | `/livekit/agent/stop` | Stop provider agent |
+| `GET` | `/livekit/agent/status` | Running agents |
 
----
-
-## REST API Endpoints
-
-### Token & Room Management
-
-| Method | Path                   | Description           |
-| ------ | ---------------------- | --------------------- |
-| POST   | `/livekit/token`       | Generate access token |
-| GET    | `/livekit/rooms`       | List rooms            |
-| GET    | `/livekit/rooms/:name` | Get room details      |
-| DELETE | `/livekit/rooms/:name` | Delete room           |
-
-### Agent Control
-
-| Method | Path                    | Description               |
-| ------ | ----------------------- | ------------------------- |
-| POST   | `/livekit/agent/start`  | Start transcription agent |
-| POST   | `/livekit/agent/stop`   | Stop agent                |
-| GET    | `/livekit/agent/status` | List running agents       |
-
----
-
-## Agent Audio Pipeline
-
-```
-WebRTC Audio (Opus, 48kHz)
-       │
-       ▼
-Opus Decoder (hraban/opus, CGO)
-       │
-       ▼
-PCM Int16 (48kHz, mono)
-       │
-       ├─── Google: ส่งตรง 48kHz ──► gRPC Streaming
-       │
-       └─── Azure: Resample 48→16kHz (3:1 decimation) ──► REST Batch
-```
-
-### Agent Identity
-
-Agent join room ด้วย identity ที่ระบุ provider:
-- `agent-google` — ใช้ Google Cloud STT
-- `agent-azure` — ใช้ Azure Speech
-
-รองรับหลาย agent ใน room เดียวกัน (เช่น agent-google + agent-azure พร้อมกัน)
-
----
-
-## Data Channel Message Format
-
-Agent ส่ง transcript ไปยังทุก participant ผ่าน reliable Data Channel:
+## Transcript packet
 
 ```json
 {
   "type": "transcript",
-  "text": "สวัสดีครับ",
-  "isFinal": true,
-  "confidence": 0.95,
+  "text": "ข้อความภาษาไทย",
+  "isFinal": false,
+  "confidence": 0.9,
   "provider": "google",
-  "timestamp": 1707321600000,
+  "timestamp": 1784196259000,
   "speaker": "user-123"
 }
 ```
 
-| Field      | Type    | Description                      |
-| ---------- | ------- | -------------------------------- |
-| type       | string  | Always `"transcript"`            |
-| text       | string  | Transcribed text                 |
-| isFinal    | bool    | Final or interim result          |
-| confidence | float64 | Confidence score (0-1)           |
-| provider   | string  | `"google"` or `"azure"`          |
-| timestamp  | int64   | Unix milliseconds                |
-| speaker    | string  | Publisher's participant identity |
+All transcript packets use reliable data-channel delivery. Google/Azure interim values remain replaceable drafts. Gemini chunks are intentionally retained as rows because its input transcription stream does not map cleanly to traditional interim/final semantics.
 
----
+## Key files
 
-## Key Implementation Files
+| File | Responsibility |
+| --- | --- |
+| `frontend/hooks/useLiveKit.ts` | Publisher room and microphone lifecycle |
+| `frontend/hooks/useRoomViewer.ts` | Viewer room/audio lifecycle |
+| `frontend/lib/transcriptMessages.ts` | Packet validation and state helpers |
+| `backend-go/internal/delivery/handler/livekit.go` | Token and room HTTP handlers |
+| `backend-go/internal/delivery/handler/agent.go` | Agent lifecycle HTTP handlers |
+| `backend-go/internal/infrastructure/agent/agent.go` | Audio decode, provider selection, transcript publication |
 
-| File                                     | Description                                                                             |
-| ---------------------------------------- | --------------------------------------------------------------------------------------- |
-| `internal/infrastructure/agent/agent.go` | Agent core: room join, audio subscribe, Opus decode, ASR pipeline, Data Channel publish |
-| `internal/delivery/handler/livekit.go`   | Token generation, Room CRUD, Participant management                                     |
-| `internal/delivery/handler/agent.go`     | Agent Start/Stop/Status REST handlers (supports multiple agents per room)               |
-| `internal/infrastructure/asr/`           | ASR provider implementations (Google gRPC, Azure REST)                                  |
-| `internal/domain/domain.go`              | ASRProvider interface                                                                   |
+## Operational notes
 
----
-
-## Environment Variables
-
-```bash
-LIVEKIT_API_KEY=your_key
-LIVEKIT_API_SECRET=your_secret
-LIVEKIT_WS_URL=ws://localhost:7880 # Production: wss://your-domain
-```
-
----
-
-## Notes
-
-- **CGO Required:** Agent ใช้ `gopkg.in/hraban/opus.v2` สำหรับ decode Opus audio → ต้อง build ด้วย CGO_ENABLED=1
-- **Auto-subscribe:** LiveKit default auto-subscribe ทำให้ Agent ได้รับ audio จากทุก participant อัตโนมัติ
-- **Multiple Agents:** รองรับหลาย agent ใน room เดียวกัน ด้วย key `roomName-provider`
-- **Broadcast:** Agent publish transcript ไปยัง **ทุก participant** ใน room (ไม่ filter destination)
+- Remote LiveKit requires suitable external IP, UDP firewall rules, and often TURN.
+- IPv6 STUN timeout warnings can coexist with a healthy IPv4 connection; use connection state and audio flow to judge impact.
+- The agent's Opus decoder requires CGO and a system Opus library.
+- One agent instance is keyed by room and provider.

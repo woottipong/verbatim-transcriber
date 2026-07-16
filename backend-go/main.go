@@ -86,13 +86,12 @@ func printStartupInfo(cfg *config.Config) {
 	type providerInfo struct {
 		name    string
 		enabled bool
-		path    string
 		icon    string
 	}
 	providers := []providerInfo{
-		{"Google Cloud STT", cfg.HasGoogleKey(), "/google", "🌐"},
-		{"Gemini Live STT", cfg.HasGeminiKey(), "/gemini", "✨"},
-		{"Azure Speech", cfg.HasAzureKey(), "/azure", "☁️"},
+		{"Google Cloud STT", cfg.HasGoogleKey(), "🌐"},
+		{"Gemini Live STT", cfg.HasGeminiKey(), "✨"},
+		{"Azure Speech", cfg.HasAzureKey(), "☁️"},
 	}
 
 	enabledCount := 0
@@ -106,15 +105,10 @@ func printStartupInfo(cfg *config.Config) {
 	fmt.Println("─────────────────────────────────────────────────────────────────")
 	for _, p := range providers {
 		status := "❌ Disabled"
-		detail := ""
 		if p.enabled {
 			status = "✅ Ready"
-			detail = fmt.Sprintf("ws://%s:%s%s", cfg.Host, cfg.Port, p.path)
 		}
 		fmt.Printf(" %s %-20s %s\n", p.icon, p.name, status)
-		if p.enabled && detail != "" {
-			fmt.Printf("    └─ %s\n", detail)
-		}
 	}
 	fmt.Println()
 	fmt.Println("─────────────────────────────────────────────────────────────────")
