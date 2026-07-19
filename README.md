@@ -223,7 +223,7 @@ Valid providers are `google`, `gemini`, and `azure` when configured.
 
 ### External transcript WebSocket
 
-The Admin workspace generates a signed URL for a room after `TRANSCRIPT_WS_SECRET` is configured. The token is bound to the current LiveKit room identity, so deleting and recreating a room with the same name does not reuse the old link. The socket carries text only; it cannot publish audio or control the room. There is no history/replay, and events are delivered only after the client connects.
+The Admin workspace generates a signed URL for a room after `TRANSCRIPT_WS_SECRET` is configured. The token is bound to the current LiveKit room identity, so deleting and recreating a room with the same name does not reuse the old link. The socket carries source transcripts only; Gemini translation packets remain on the LiveKit data channel for bilingual UI rows. It cannot publish audio or control the room. There is no history/replay, and events are delivered only after the client connects.
 
 The first event is:
 

@@ -131,7 +131,9 @@ func (h *Hub) Unsubscribe(room string, subscription *Subscription) {
 }
 
 func (h *Hub) Publish(room string, message agent.TranscriptMessage) {
-	if room == "" || message.Text == "" {
+	// The external transcript socket predates bilingual rows and remains a
+	// source-only stream. Translation packets are paired in LiveKit clients.
+	if room == "" || message.Text == "" || message.Role == domain.TranscriptRoleTranslation {
 		return
 	}
 

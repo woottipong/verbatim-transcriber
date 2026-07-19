@@ -151,7 +151,7 @@ curl -X POST http://localhost:3000/livekit/agent/start \
 
 There are no public `/google`, `/azure`, or `/gemini` audio WebSocket routes.
 
-The transcript WebSocket is text-only and separate from the upstream Azure provider WebSocket. It authenticates with a signed HS256 JWT containing the room, current LiveKit room SID, issuer and subject `transcript:subscribe`, and an expiry 24 hours from issuance. Deleting a room invalidates active subscribers and prevents the old link from attaching to a recreated room with the same name. It sends `session.ready`, `transcript.interim`, and `transcript.final` events. It has no history/replay and does not accept audio or commands.
+The transcript WebSocket is text-only and separate from the upstream Azure provider WebSocket. It authenticates with a signed HS256 JWT containing the room, current LiveKit room SID, issuer and subject `transcript:subscribe`, and an expiry 24 hours from issuance. Deleting a room invalidates active subscribers and prevents the old link from attaching to a recreated room with the same name. It sends source transcripts as `transcript.interim` and `transcript.final` events; Gemini translation packets remain on the LiveKit data channel for bilingual UI rows. It has no history/replay and does not accept audio or commands.
 
 ```json
 {"schemaVersion":"1.0","type":"session.ready","room":"test","timestamp":"2026-07-16T10:00:00.000Z"}

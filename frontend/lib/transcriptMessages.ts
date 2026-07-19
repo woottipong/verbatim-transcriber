@@ -36,6 +36,10 @@ export function isAppendOnlyInterimProvider(provider: string): boolean {
     return provider.toLowerCase() === 'gemini';
 }
 
+export function isTranscriptTurnLive(segment: Pick<TranscriptSegment, 'isFinal' | 'translation'>): boolean {
+    return !segment.isFinal || segment.translation?.isFinal === false;
+}
+
 export function appendTranscriptIfNew(
     current: TranscriptSegment[],
     next: TranscriptSegment,
@@ -93,6 +97,17 @@ export function normalizeLanguageTag(languageCode?: string): string | undefined 
     }
 }
 
+function areEquivalentLanguageTags(sourceLanguage?: string, targetLanguage?: string): boolean {
+    const source = normalizeLanguageTag(sourceLanguage);
+    const target = normalizeLanguageTag(targetLanguage);
+    if (!source || !target) return false;
+    if (source === target) return true;
+
+    const sourceBase = source.split('-', 1)[0];
+    const targetBase = target.split('-', 1)[0];
+    return sourceBase === targetBase && (source === sourceBase || target === targetBase);
+}
+
 export function createCommittedTranscript(
     id: string,
     message: TranscriptMessage,
@@ -102,7 +117,7 @@ export function createCommittedTranscript(
     return {
         id,
         text: message.text,
-        isFinal: true,
+        isFinal: message.isFinal,
         timestamp: message.timestamp ?? Date.now(),
         provider,
         speaker,
@@ -129,7 +144,8 @@ export function parseTranscriptMessage(value: unknown): TranscriptMessage | unde
         : candidate.role === 'translation'
             ? 'translation'
             : undefined;
-    if (!role || (role === 'translation' && typeof candidate.turnId !== 'string')) return undefined;
+    const turnId = typeof candidate.turnId === 'string' ? candidate.turnId.trim() : undefined;
+    if (!role || (role === 'translation' && !turnId)) return undefined;
 
     const text = candidate.text.replace(/\s+/g, ' ').trim();
     if (!text) return undefined;
@@ -144,7 +160,7 @@ export function parseTranscriptMessage(value: unknown): TranscriptMessage | unde
         ...(typeof candidate.provider === 'string' ? { provider: candidate.provider } : {}),
         ...(typeof candidate.speaker === 'string' ? { speaker: candidate.speaker } : {}),
         ...(typeof candidate.languageCode === 'string' ? { languageCode: candidate.languageCode } : {}),
-        ...(typeof candidate.turnId === 'string' ? { turnId: candidate.turnId } : {}),
+        ...(turnId ? { turnId } : {}),
     };
 }
 
@@ -187,9 +203,7 @@ export function attachTranslation(
     const source = next[index];
     const normalizedSource = source.text.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
     const normalizedTranslation = message.text.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
-    const sourceLanguage = source.languageCode?.toLowerCase().split(/[-_]/, 1)[0];
-    const translationLanguage = message.languageCode?.toLowerCase().split(/[-_]/, 1)[0];
-    if ((sourceLanguage && sourceLanguage === translationLanguage) || normalizedSource === normalizedTranslation) {
+    if (areEquivalentLanguageTags(source.languageCode, message.languageCode) || normalizedSource === normalizedTranslation) {
         return { transcripts: next, attached: true };
     }
 
@@ -225,6 +239,13 @@ export function storePendingTranslation(
         next.delete(oldestKey);
     }
     return next;
+}
+
+export function clearPendingTranslationsBySource(
+    current: ReadonlyMap<string, PendingTranslation>,
+    sourceIdentity: string,
+): Map<string, PendingTranslation> {
+    return new Map(Array.from(current).filter(([, pending]) => pending.sourceIdentity !== sourceIdentity));
 }
 
 export function upsertInterim(

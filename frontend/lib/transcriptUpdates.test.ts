@@ -117,6 +117,9 @@ test('validates translation packets and separates their turn key', async () => {
     assert.equal(module.parseTranscriptMessage({
         type: 'transcript', text: 'แปล', isFinal: false, role: 'translation', provider: 'gemini',
     }), undefined);
+    assert.equal(module.parseTranscriptMessage({
+        type: 'transcript', text: 'แปล', isFinal: false, role: 'translation', provider: 'gemini', turnId: '   ',
+    }), undefined);
 });
 
 test('attaches translation to the latest source row in the same turn', async () => {
@@ -151,6 +154,21 @@ test('hides identical Thai translations', async () => {
     assert.equal(result.transcripts[0].translation, undefined);
 });
 
+test('hides same-language translations when only one tag includes a region', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const rows = [{
+        id: '1', text: 'สวัสดี', isFinal: true, timestamp: 1, provider: 'gemini', speaker: 'user-1',
+        turnId: 'gemini-1', role: 'source' as const, languageCode: 'th-TH',
+    }];
+    const result = module.attachTranslation(rows, {
+        type: 'transcript', text: 'สวัสดีครับ', isFinal: true, provider: 'gemini', speaker: 'user-1',
+        role: 'translation', languageCode: 'th', turnId: 'gemini-1',
+    }, 'agent-gemini');
+
+    assert.equal(result.attached, true);
+    assert.equal(result.transcripts[0].translation, undefined);
+});
+
 test('shows English translation for a Thai source turn', async () => {
     const module = await import('./transcriptMessages.ts');
     const rows = [{
@@ -165,6 +183,38 @@ test('shows English translation for a Thai source turn', async () => {
     assert.equal(result.attached, true);
     assert.deepEqual(result.transcripts[0].translation, {
         text: 'Hello everyone', languageCode: 'en', isFinal: true,
+    });
+});
+
+test('shows translations between different scripts of the same base language', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const source = {
+        id: '1', text: '简体中文', isFinal: true, timestamp: 1, provider: 'gemini', speaker: 'user-1',
+        turnId: 'gemini-1', role: 'source' as const, languageCode: 'zh-Hans',
+    };
+    const result = module.attachTranslation([source], {
+        type: 'transcript', text: '繁體中文', isFinal: true, role: 'translation',
+        provider: 'gemini', speaker: 'user-1', languageCode: 'zh-Hant', turnId: 'gemini-1',
+    }, 'agent-gemini');
+
+    assert.deepEqual(result.transcripts[0].translation, {
+        text: '繁體中文', languageCode: 'zh-Hant', isFinal: true,
+    });
+});
+
+test('shows translations between different regions of the same base language', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const source = {
+        id: '1', text: 'olá', isFinal: true, timestamp: 1, provider: 'gemini', speaker: 'user-1',
+        turnId: 'gemini-1', role: 'source' as const, languageCode: 'pt-BR',
+    };
+    const result = module.attachTranslation([source], {
+        type: 'transcript', text: 'olá a todos', isFinal: true, role: 'translation',
+        provider: 'gemini', speaker: 'user-1', languageCode: 'pt-PT', turnId: 'gemini-1',
+    }, 'agent-gemini');
+
+    assert.deepEqual(result.transcripts[0].translation, {
+        text: 'olá a todos', languageCode: 'pt-PT', isFinal: true,
     });
 });
 
@@ -215,6 +265,33 @@ test('bounds and expires pending translations', async () => {
 
     const pruned = module.prunePendingTranslations(pending, 30_100);
     assert.equal(pruned.size, 0);
+});
+
+test('clears pending translations only for the disconnected agent', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const pending = new Map([
+        ['gemini:user-1:gemini-1', {
+            message: {
+                type: 'transcript' as const, text: 'แปลหนึ่ง', isFinal: false,
+                role: 'translation' as const, provider: 'gemini', turnId: 'gemini-1',
+            },
+            sourceIdentity: 'agent-gemini-1',
+            receivedAt: 1,
+        }],
+        ['gemini:user-2:gemini-2', {
+            message: {
+                type: 'transcript' as const, text: 'แปลสอง', isFinal: false,
+                role: 'translation' as const, provider: 'gemini', turnId: 'gemini-2',
+            },
+            sourceIdentity: 'agent-gemini-2',
+            receivedAt: 1,
+        }],
+    ]);
+
+    const remaining = module.clearPendingTranslationsBySource(pending, 'agent-gemini-1');
+
+    assert.deepEqual(Array.from(remaining.keys()), ['gemini:user-2:gemini-2']);
+    assert.equal(remaining.get('gemini:user-2:gemini-2')?.sourceIdentity, 'agent-gemini-2');
 });
 
 test('updates and clears interim entries by speaker and source', async () => {
@@ -286,6 +363,42 @@ test('formats the translation language from the actual language code', async () 
     assert.equal(module.formatLanguageLabel('zh-hans'), 'zh-hans');
     assert.equal(module.formatLanguageLabel('es'), 'es');
     assert.equal(module.formatLanguageLabel(''), '—');
+});
+
+test('marks a turn live while either its source or translation is unfinished', async () => {
+    const module = await import('./transcriptMessages.ts');
+
+    assert.equal(module.isTranscriptTurnLive({
+        isFinal: true,
+        translation: { text: 'Translating', languageCode: 'en', isFinal: false },
+    }), true);
+    assert.equal(module.isTranscriptTurnLive({
+        isFinal: false,
+        translation: { text: 'Translated', languageCode: 'en', isFinal: true },
+    }), true);
+    assert.equal(module.isTranscriptTurnLive({
+        isFinal: false,
+    }), true);
+    assert.equal(module.isTranscriptTurnLive({
+        isFinal: true,
+        translation: { text: 'Translated', languageCode: 'en', isFinal: true },
+    }), false);
+});
+
+test('preserves source finality when creating a committed display row', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const message = {
+        type: 'transcript' as const,
+        text: 'still speaking',
+        isFinal: false,
+        role: 'source' as const,
+        provider: 'gemini',
+        turnId: 'gemini-1',
+    };
+
+    const segment = module.createCommittedTranscript('1', message, 'gemini', 'user-1');
+
+    assert.equal(segment.isFinal, false);
 });
 
 test('normalizes API language codes for HTML lang attributes', async () => {

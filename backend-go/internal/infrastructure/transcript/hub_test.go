@@ -38,7 +38,7 @@ func TestHubPublishesOrderedTypedEvents(t *testing.T) {
 	}
 }
 
-func TestHubForwardsTranslationMetadata(t *testing.T) {
+func TestHubDoesNotPublishTranslationPacketsToLegacySubscribers(t *testing.T) {
 	hub := NewHub()
 	subscription := hub.Subscribe("room-a")
 	defer hub.Unsubscribe("room-a", subscription)
@@ -52,9 +52,10 @@ func TestHubForwardsTranslationMetadata(t *testing.T) {
 		TurnID:       "gemini-1",
 	})
 
-	transcript := decodeEvent(t, <-subscription.Events()).Transcript
-	if transcript.Role != domain.TranscriptRoleTranslation || transcript.LanguageCode != "th" || transcript.TurnID != "gemini-1" {
-		t.Fatalf("translation metadata = %+v", transcript)
+	select {
+	case payload := <-subscription.Events():
+		t.Fatalf("unexpected translation event: %s", payload)
+	default:
 	}
 }
 

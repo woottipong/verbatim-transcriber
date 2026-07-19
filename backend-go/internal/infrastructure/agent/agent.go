@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +46,7 @@ type TranscriptSink interface {
 }
 
 const liveAudioBatchDuration = 40 * time.Millisecond
+const maxLoggedTranscriptRunes = 160
 
 func audioBatchTargetBytes(sampleRate int, duration time.Duration) int {
 	return sampleRate * 2 * int(duration) / int(time.Second)
@@ -53,6 +56,51 @@ func transcriptDeliveryReliable(_ bool) bool {
 	// Transcript snapshots are small and every interim state is meaningful UI.
 	// Reliable delivery prevents active drafts from disappearing on busy rooms.
 	return true
+}
+
+func transcriptLogValue(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return "-"
+	}
+
+	quoted := strconv.QuoteToGraphic(trimmed)
+	return quoted[1 : len(quoted)-1]
+}
+
+func formatTranscriptLog(message TranscriptMessage) string {
+	state := "interim"
+	marker := "🟡"
+	if message.IsFinal {
+		state = "final"
+		marker = "🟢"
+	}
+
+	role := message.Role
+	if role == "" {
+		role = domain.TranscriptRoleSource
+	}
+	textRunes := []rune(message.Text)
+	line := fmt.Sprintf(
+		"%s [Transcript] state=%s provider=%s role=%s turn=%s lang=%s speaker=%s chars=%d",
+		marker,
+		state,
+		transcriptLogValue(message.Provider),
+		role,
+		transcriptLogValue(message.TurnID),
+		transcriptLogValue(message.LanguageCode),
+		transcriptLogValue(message.Speaker),
+		len(textRunes),
+	)
+	if !message.IsFinal {
+		return line
+	}
+
+	logText := message.Text
+	if len(textRunes) > maxLoggedTranscriptRunes {
+		logText = string(textRunes[:maxLoggedTranscriptRunes]) + "…"
+	}
+	return fmt.Sprintf("%s text=%q", line, logText)
 }
 
 // Agent handles audio transcription in a LiveKit room
@@ -499,16 +547,7 @@ func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, particip
 			continue
 		}
 
-		if result.IsFinal {
-			log.Printf("📝 [%s] %s", participant.Identity(), msg.Text)
-		} else {
-			log.Printf("🟡 [Agent] INTERIM from %s (provider=%s, reliable=%t): %q",
-				participant.Identity(),
-				provider.Name(),
-				transcriptDeliveryReliable(false),
-				msg.Text,
-			)
-		}
+		log.Print(formatTranscriptLog(msg))
 
 		// Publish via Data Channel to all participants
 		if err := a.publishTranscript(data, transcriptDeliveryReliable(result.IsFinal)); err != nil {

@@ -539,6 +539,11 @@ select:focus-visible {
   contain-intrinsic-block-size: auto 4.5rem;
 }
 
+.transcript-turn__index,
+.transcript-turn__time {
+  position: relative;
+}
+
 .transcript-bilingual {
   display: grid;
   min-width: 0;
@@ -554,6 +559,7 @@ select:focus-visible {
 .translation-block {
   display: grid;
   grid-column: 1 / -1;
+  grid-template-columns: minmax(2rem, max-content) minmax(0, 1fr);
   grid-template-columns: subgrid;
   column-gap: 0.5rem;
 }
@@ -598,7 +604,6 @@ select:focus-visible {
   min-height: 1.25rem;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
   align-self: start;
   border: 1px solid var(--language-target-border);
   border-radius: 5px;
@@ -609,6 +614,15 @@ select:focus-visible {
   font-weight: 700;
   line-height: 1.125rem;
   letter-spacing: 0.05em;
+}
+
+.language-label__text {
+  display: block;
+  min-width: 0;
+  max-inline-size: 6rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .translation-block__text {
@@ -635,6 +649,14 @@ select:focus-visible {
   border-radius: 999px;
   background: var(--accent);
   animation: status-pulse 1.6s ease-in-out infinite;
+}
+
+.transcript-turn__live-dot {
+  position: absolute;
+  inset-block-start: 0.4rem;
+  inset-inline-start: -0.5rem;
+  width: 0.3125rem;
+  height: 0.3125rem;
 }
 
 @media (max-width: 639px) {

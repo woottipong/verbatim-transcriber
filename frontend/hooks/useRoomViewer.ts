@@ -24,6 +24,7 @@ import {
     attachTranslation,
     appendTranscriptIfNew,
     clearInterimsBySource,
+    clearPendingTranslationsBySource,
     createCommittedTranscript,
     getTranscriptKey,
     getTranscriptTurnKey,
@@ -297,7 +298,10 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         if (isAgent(participant.identity)) {
             setAgents(prev => prev.filter(a => a.identity !== participant.identity));
             setInterimTranscripts(prev => clearInterimsBySource(prev, participant.identity));
-            translationsByTurnRef.current.clear();
+            translationsByTurnRef.current = clearPendingTranslationsBySource(
+                translationsByTurnRef.current,
+                participant.identity,
+            );
             console.log('[Viewer] 🤖 Agent disconnected:', participant.identity);
         }
     }, [isAgent]);

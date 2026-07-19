@@ -16,9 +16,8 @@ export default function TranslationBlock({ translation }: TranslationBlockProps)
 
   return (
     <div className="translation-block">
-      <span className="translation-block__label" aria-hidden="true">
-        {!translation.isFinal && <span className="transcript-live-dot" />}
-        {languageLabel}
+      <span className="translation-block__label" title={languageLabel} aria-hidden="true">
+        <span className="language-label__text">{languageLabel}</span>
       </span>
       <p
         className="translation-block__text"

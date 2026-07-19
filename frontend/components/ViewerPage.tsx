@@ -14,7 +14,7 @@ import { ConnectionState } from '../types';
 import { toHttpUrl } from '../lib/runtime';
 import { shouldStickToLatest } from '../lib/transcriptViewport';
 import TranslationBlock from './TranslationBlock';
-import { formatLanguageLabel, normalizeLanguageTag } from '../lib/transcriptMessages';
+import { formatLanguageLabel, isTranscriptTurnLive, normalizeLanguageTag } from '../lib/transcriptMessages';
 import { shouldAutoConnectViewer } from '../lib/viewerLaunch';
 import ConnectionBadge from './ConnectionBadge';
 import { buildViewerUrl } from '../lib/appRoutes';
@@ -408,39 +408,48 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                 ) : (
                                     <>
                                         {/* Final transcripts */}
-                                        {filteredTranscripts.map(segment => (
-                                            <div
-                                                key={segment.id}
-                                                className="transcript-row transcript-turn grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 py-3"
-                                            >
-                                                {segment.provider && (
-                                                    <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(segment.provider)}`}>
-                                                        {formatProviderName(segment.provider)}
-                                                    </span>
-                                                )}
-                                                <div className="transcript-bilingual min-w-0">
-                                                    <p
-                                                        className={`transcript-source-line break-words text-[1rem] leading-7 text-slate-100 ${segment.provider === 'gemini' && segment.languageCode ? 'transcript-source-line--labeled' : ''}`}
-                                                        lang={normalizeLanguageTag(segment.languageCode)}
-                                                        dir="auto"
-                                                    >
-                                                        {segment.provider === 'gemini' && segment.languageCode && (
-                                                            <span className="source-language-label" aria-hidden="true">
-                                                                {formatLanguageLabel(segment.languageCode)}
-                                                            </span>
-                                                        )}
-                                                        <span className="transcript-source-line__text">{segment.text}</span>
-                                                    </p>
-                                                    <TranslationBlock translation={segment.translation} />
-                                                </div>
-                                                <time
-                                                    className="shrink-0 text-[10px] text-slate-400"
-                                                    dateTime={new Date(segment.timestamp).toISOString()}
+                                        {filteredTranscripts.map(segment => {
+                                            const isTurnLive = isTranscriptTurnLive(segment);
+                                            return (
+                                                <div
+                                                    key={segment.id}
+                                                    className="transcript-row transcript-turn grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 py-3"
                                                 >
-                                                    {new Date(segment.timestamp).toLocaleTimeString()}
-                                                </time>
-                                            </div>
-                                        ))}
+                                                    {segment.provider && (
+                                                        <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(segment.provider)}`}>
+                                                            {formatProviderName(segment.provider)}
+                                                        </span>
+                                                    )}
+                                                    <div className="transcript-bilingual min-w-0">
+                                                        <p
+                                                            className={`transcript-source-line break-words text-[1rem] leading-7 text-slate-100 ${segment.provider === 'gemini' && segment.languageCode ? 'transcript-source-line--labeled' : ''}`}
+                                                            lang={normalizeLanguageTag(segment.languageCode)}
+                                                            dir="auto"
+                                                        >
+                                                            {segment.provider === 'gemini' && segment.languageCode && (
+                                                                <span className="source-language-label" title={formatLanguageLabel(segment.languageCode)} aria-hidden="true">
+                                                                    <span className="language-label__text">{formatLanguageLabel(segment.languageCode)}</span>
+                                                                </span>
+                                                            )}
+                                                            <span className="transcript-source-line__text">{segment.text}</span>
+                                                        </p>
+                                                        <TranslationBlock translation={segment.translation} />
+                                                    </div>
+                                                    <time
+                                                        className="transcript-turn__time shrink-0 text-[10px] text-slate-400"
+                                                        dateTime={new Date(segment.timestamp).toISOString()}
+                                                    >
+                                                        {isTurnLive && (
+                                                            <>
+                                                                <span className="sr-only">Live turn. </span>
+                                                                <span className="transcript-live-dot transcript-turn__live-dot" aria-hidden="true" />
+                                                            </>
+                                                        )}
+                                                        {new Date(segment.timestamp).toLocaleTimeString()}
+                                                    </time>
+                                                </div>
+                                            );
+                                        })}
 
                                         {/* Interim transcripts (per agent) */}
                                         {filteredInterims.map(interim => (

@@ -19,6 +19,7 @@ import {
     attachTranslation,
     appendTranscriptIfNew,
     clearInterimsBySource,
+    clearPendingTranslationsBySource,
     createCommittedTranscript,
     getTranscriptKey,
     getTranscriptTurnKey,
@@ -224,7 +225,10 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         if (participant.identity.startsWith('agent-') || participant.identity === 'asr-agent') {
             setConnectedAgents(prev => prev.filter(id => id !== participant.identity));
             setInterimTranscripts(prev => clearInterimsBySource(prev, participant.identity));
-            translationsByTurnRef.current.clear();
+            translationsByTurnRef.current = clearPendingTranslationsBySource(
+                translationsByTurnRef.current,
+                participant.identity,
+            );
             console.log('[LiveKit] 🤖 Agent disconnected:', participant.identity);
         }
     }, []);

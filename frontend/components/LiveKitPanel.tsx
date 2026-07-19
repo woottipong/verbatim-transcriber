@@ -4,7 +4,7 @@ import { TranscriptSegment, InterimTranscript, ConnectionState } from '../types'
 import { getLiveKitSessionPresentation } from '../lib/liveKitSession';
 import { shouldStickToLatest } from '../lib/transcriptViewport';
 import TranslationBlock from './TranslationBlock';
-import { formatLanguageLabel, normalizeLanguageTag } from '../lib/transcriptMessages';
+import { formatLanguageLabel, isTranscriptTurnLive, normalizeLanguageTag } from '../lib/transcriptMessages';
 
 interface LiveKitPanelProps {
   transcripts: TranscriptSegment[];
@@ -330,31 +330,36 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                       </div>
                     ) : viewMode === 'timeline' ? (
                       <div className="space-y-1">
-                        {providerTranscripts.map((segment, idx) => (
-                          <div 
-                            key={segment.id} 
-                            className="transcript-turn group -mx-2 flex items-start gap-2.5 rounded px-2 py-2 transition-colors duration-100 hover:bg-slate-900/25"
-                          >
-                            <span className="w-5 shrink-0 select-none pt-1 text-[10px] tabular-nums text-slate-400">
-                              {String(idx + 1).padStart(2, '0')}
-                            </span>
-                            <div className="transcript-bilingual min-w-0 flex-1">
-                              <p
-                                className={`transcript-source-line break-words text-[1.05rem] font-medium leading-7 text-slate-100 ${segment.provider === 'gemini' && segment.languageCode ? 'transcript-source-line--labeled' : ''}`}
-                                lang={normalizeLanguageTag(segment.languageCode)}
-                                dir="auto"
-                              >
-                                {segment.provider === 'gemini' && segment.languageCode && (
-                                  <span className="source-language-label" aria-hidden="true">
-                                    {formatLanguageLabel(segment.languageCode)}
-                                  </span>
-                                )}
-                                <span className="transcript-source-line__text">{segment.text}</span>
-                              </p>
-                              <TranslationBlock translation={segment.translation} />
+                        {providerTranscripts.map((segment, idx) => {
+                          const isTurnLive = isTranscriptTurnLive(segment);
+                          return (
+                            <div
+                              key={segment.id}
+                              className="transcript-turn group -mx-2 flex items-start gap-2 rounded px-2 py-2 transition-colors duration-100 hover:bg-slate-900/25"
+                            >
+                              <span className="transcript-turn__index w-5 shrink-0 select-none pt-1 text-[10px] tabular-nums text-slate-400">
+                                <span className="sr-only">{isTurnLive ? 'Live turn ' : 'Turn '}</span>
+                                <span aria-hidden="true">{String(idx + 1).padStart(2, '0')}</span>
+                                {isTurnLive && <span className="transcript-live-dot transcript-turn__live-dot" aria-hidden="true" />}
+                              </span>
+                              <div className="transcript-bilingual min-w-0 flex-1">
+                                <p
+                                  className={`transcript-source-line break-words text-[1.05rem] font-medium leading-7 text-slate-100 ${segment.provider === 'gemini' && segment.languageCode ? 'transcript-source-line--labeled' : ''}`}
+                                  lang={normalizeLanguageTag(segment.languageCode)}
+                                  dir="auto"
+                                >
+                                  {segment.provider === 'gemini' && segment.languageCode && (
+                                    <span className="source-language-label" title={formatLanguageLabel(segment.languageCode)} aria-hidden="true">
+                                      <span className="language-label__text">{formatLanguageLabel(segment.languageCode)}</span>
+                                    </span>
+                                  )}
+                                  <span className="transcript-source-line__text">{segment.text}</span>
+                                </p>
+                                <TranslationBlock translation={segment.translation} />
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                         {providerInterims.map(interim => {
                           const classes = draftClasses[interim.provider] ?? { bg: 'bg-violet-500/5 border-violet-500/10', text: 'text-violet-400' };
                           return (
