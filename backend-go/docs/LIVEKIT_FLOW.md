@@ -64,16 +64,19 @@ Viewer
 ```json
 {
   "type": "transcript",
-  "text": "ข้อความภาษาไทย",
+  "text": "emergency room",
   "isFinal": false,
   "confidence": 0.9,
-  "provider": "google",
+  "provider": "gemini",
   "timestamp": 1784196259000,
-  "speaker": "user-123"
+  "speaker": "user-123",
+  "role": "source",
+  "languageCode": "en",
+  "turnId": "gemini-1"
 }
 ```
 
-All transcript packets use reliable data-channel delivery. Google/Azure interim values remain replaceable drafts. Gemini chunks are intentionally retained as rows because its input transcription stream does not map cleanly to traditional interim/final semantics.
+All transcript packets use reliable data-channel delivery. Google/Azure interim values remain replaceable drafts. Gemini source chunks do not map cleanly to traditional interim/final semantics, so the backend creates application-level pseudo-turns after 800 ms of low-energy PCM and 500 ms without transcript activity. Audio is still forwarded unchanged. Source `languageCode` is forwarded only when Gemini returns it; the configured source hint is not exposed as detected metadata. The frontend updates one source row for each `turnId`, while Gemini translation packets use `role: "translation"` and the same ID so the bilingual row stays grouped. Because the source and output streams are independent, alignment is best-effort rather than sentence-perfect.
 
 ## Key files
 

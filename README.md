@@ -154,7 +154,7 @@ Open:
 | Provider | Agent input | Default | Transcript behavior |
 | --- | --- | --- | --- |
 | Google | 48 kHz Linear16 PCM | `chirp_2`, `th-TH`, `asia-southeast1`, punctuation on | Interim snapshots and final utterances; reconnects before the five-minute limit |
-| Gemini | 16 kHz PCM | `gemini-3.5-live-translate-preview`, source `th`, target `en` | Source input chunks are retained; translated/model audio is discarded |
+| Gemini | 16 kHz PCM | `gemini-3.5-live-translate-preview`, optional source hint, target defaults to `th` | Source chunks are retained; translated text uses the configured target metadata and model audio is discarded |
 | Azure | 16 kHz PCM/WAV stream | Thai conversation recognition, `southeastasia` | Interim hypotheses and finalized phrases |
 
 Latency and interim frequency depend on service, model, region, network, and speech pattern. A provider may finalize an utterance without emitting interim updates.
@@ -180,10 +180,12 @@ Latency and interim frequency depend on service, model, region, network, and spe
 | `GOOGLE_SPEECH_MODEL` | No | `chirp_2` | Google model |
 | `GEMINI_API_KEY` | For Gemini | — | Gemini API key |
 | `GEMINI_MODEL` | No | `gemini-3.5-live-translate-preview` | Gemini model |
-| `GEMINI_LANGUAGE_CODE` | No | `th` | Source language hint |
-| `GEMINI_TARGET_LANGUAGE_CODE` | No | `en` | Required target; output is discarded |
+| `GEMINI_LANGUAGE_CODE` | No | — | Optional source language hint; empty enables detection |
+| `GEMINI_TARGET_LANGUAGE_CODE` | No | `th` | Supported BCP-47 translation target and UI language badge |
 | `AZURE_SUBSCRIPTION_KEY` | For Azure | — | Azure Speech key |
 | `AZURE_REGION` | No | `southeastasia` | Azure region |
+
+Gemini target examples include `th`, `en`, `de`, `es`, `ja`, `ko`, `vi`, `zh-Hans`, `zh-Hant`, `pt-BR`, and `pt-PT`. Unsupported values are rejected when the provider starts. See the [complete supported target list](backend-go/README.md#gemini-live-translation-target-languages).
 
 ### Frontend variables
 
@@ -265,7 +267,7 @@ Transcript events use a room-scoped sequence:
 }
 ```
 
-Thai spacing is normalized in the Go agent. Google/Azure interim values update draft state by provider/speaker. Gemini chunks are retained as transcript rows even when marked non-final.
+Thai spacing is normalized in the Go agent. Google/Azure interim values update draft state by provider/speaker. Gemini source chunks are accumulated into one row per Live Translate turn even when marked non-final, and translated output is attached to that same grouped row.
 
 ## Development and testing
 

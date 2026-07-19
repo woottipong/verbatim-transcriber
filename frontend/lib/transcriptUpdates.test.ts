@@ -88,6 +88,7 @@ test('validates transcript packets and derives a provider-speaker key', async ()
         type: 'transcript',
         text: 'ทดสอบ',
         isFinal: false,
+        role: 'source',
         provider: 'google',
         speaker: 'user-1',
     });
@@ -95,6 +96,125 @@ test('validates transcript packets and derives a provider-speaker key', async ()
     assert.equal(keyOf(valid as TranscriptMessage, 'agent-google'), 'google:user-1');
     assert.equal(parse({ type: 'status', text: 'connected', isFinal: false }), undefined);
     assert.equal(parse({ type: 'transcript', text: 123, isFinal: false }), undefined);
+});
+
+test('validates translation packets and separates their turn key', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const translation = module.parseTranscriptMessage({
+        type: 'transcript',
+        text: ' ห้องฉุกเฉิน ',
+        isFinal: false,
+        provider: 'gemini',
+        speaker: 'user-1',
+        role: 'translation',
+        languageCode: 'th',
+        turnId: 'gemini-1',
+    });
+
+    assert.ok(translation);
+    assert.equal(translation.role, 'translation');
+    assert.equal(module.getTranscriptKey(translation, 'agent-gemini'), 'gemini:user-1:gemini-1:translation');
+    assert.equal(module.parseTranscriptMessage({
+        type: 'transcript', text: 'แปล', isFinal: false, role: 'translation', provider: 'gemini',
+    }), undefined);
+});
+
+test('attaches translation to the latest source row in the same turn', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const rows = [
+        { id: '1', text: 'from', isFinal: true, timestamp: 1, provider: 'gemini', speaker: 'user-1', turnId: 'gemini-1', role: 'source' as const },
+        { id: '2', text: 'emergency room', isFinal: true, timestamp: 2, provider: 'gemini', speaker: 'user-1', turnId: 'gemini-1', role: 'source' as const },
+    ];
+    const result = module.attachTranslation(rows, {
+        type: 'transcript', text: 'ห้องฉุกเฉิน', isFinal: true, provider: 'gemini', speaker: 'user-1',
+        role: 'translation', languageCode: 'th', turnId: 'gemini-1',
+    }, 'agent-gemini');
+
+    assert.equal(result.attached, true);
+    assert.equal(result.transcripts.length, 2);
+    assert.equal(result.transcripts[0].translation, undefined);
+    assert.deepEqual(result.transcripts[1].translation, { text: 'ห้องฉุกเฉิน', languageCode: 'th', isFinal: true });
+});
+
+test('hides identical Thai translations', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const rows = [{
+        id: '1', text: 'ห้องฉุกเฉิน', isFinal: true, timestamp: 1, provider: 'gemini', speaker: 'user-1',
+        turnId: 'gemini-1', role: 'source' as const, languageCode: 'th',
+    }];
+    const result = module.attachTranslation(rows, {
+        type: 'transcript', text: 'ห้องฉุกเฉิน', isFinal: true, provider: 'gemini', speaker: 'user-1',
+        role: 'translation', languageCode: 'th', turnId: 'gemini-1',
+    }, 'agent-gemini');
+
+    assert.equal(result.attached, true);
+    assert.equal(result.transcripts[0].translation, undefined);
+});
+
+test('shows English translation for a Thai source turn', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const rows = [{
+        id: '1', text: 'สวัสดีทุกคน', isFinal: true, timestamp: 1, provider: 'gemini', speaker: 'user-1',
+        turnId: 'gemini-1', role: 'source' as const, languageCode: 'th',
+    }];
+    const result = module.attachTranslation(rows, {
+        type: 'transcript', text: 'Hello everyone', isFinal: true, provider: 'gemini', speaker: 'user-1',
+        role: 'translation', languageCode: 'en', turnId: 'gemini-1',
+    }, 'agent-gemini');
+
+    assert.equal(result.attached, true);
+    assert.deepEqual(result.transcripts[0].translation, {
+        text: 'Hello everyone', languageCode: 'en', isFinal: true,
+    });
+});
+
+test('does not invent a target language when translation metadata is missing', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const rows = [{
+        id: '1', text: 'สวัสดีทุกคน', isFinal: true, timestamp: 1, provider: 'gemini', speaker: 'user-1',
+        turnId: 'gemini-1', role: 'source' as const, languageCode: 'th',
+    }];
+    const result = module.attachTranslation(rows, {
+        type: 'transcript', text: 'Hello everyone', isFinal: true, provider: 'gemini', speaker: 'user-1',
+        role: 'translation', turnId: 'gemini-1',
+    }, 'agent-gemini');
+
+    assert.deepEqual(result.transcripts[0].translation, {
+        text: 'Hello everyone', languageCode: '', isFinal: true,
+    });
+});
+
+test('moves a turn translation to the latest source row', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const translation = { text: 'จากห้องฉุกเฉิน', languageCode: 'th', isFinal: false };
+    const rows = [
+        { id: '1', text: 'from', isFinal: true, timestamp: 1, provider: 'gemini', speaker: 'user-1', turnId: 'gemini-1', role: 'source' as const, translation },
+        { id: '2', text: 'emergency room', isFinal: true, timestamp: 2, provider: 'gemini', speaker: 'user-1', turnId: 'gemini-1', role: 'source' as const },
+    ];
+    const result = module.attachTranslation(rows, {
+        type: 'transcript', text: 'จากห้องฉุกเฉิน', isFinal: false, provider: 'gemini', speaker: 'user-1',
+        role: 'translation', languageCode: 'th', turnId: 'gemini-1',
+    }, 'agent-gemini');
+
+    assert.equal(result.transcripts[0].translation, undefined);
+    assert.deepEqual(result.transcripts[1].translation, translation);
+});
+
+test('bounds and expires pending translations', async () => {
+    const module = await import('./transcriptMessages.ts');
+    let pending = new Map();
+    for (let index = 0; index < 65; index++) {
+        const message = {
+            type: 'transcript' as const, text: `แปล ${index}`, isFinal: false, provider: 'gemini', speaker: 'user-1',
+            role: 'translation' as const, languageCode: 'th', turnId: `gemini-${index}`,
+        };
+        pending = module.storePendingTranslation(pending, message, 'agent-gemini', index);
+    }
+    assert.equal(pending.size, 64);
+    assert.equal(pending.has('gemini:user-1:gemini-0'), false);
+
+    const pruned = module.prunePendingTranslations(pending, 30_100);
+    assert.equal(pruned.size, 0);
 });
 
 test('updates and clears interim entries by speaker and source', async () => {
@@ -134,6 +254,47 @@ test('keeps Gemini interim chunks as separate transcript rows', async () => {
     assert.deepEqual(rows.map(row => row.text), ['ทดสอบ', 'เอาเด็กเท่านั้น']);
     const unchangedRows = append(rows, { ...second, id: '3' });
     assert.strictEqual(unchangedRows, rows);
+});
+
+test('updates one Gemini source row for cumulative chunks in the same turn', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const first = {
+        id: '1', text: 'useful. Very useful.', isFinal: true, timestamp: 1,
+        provider: 'gemini', speaker: 'user-1', role: 'source' as const, turnId: 'gemini-1',
+        translation: { text: 'มีประโยชน์มาก', languageCode: 'th', isFinal: false },
+    };
+    const second = {
+        id: '2', text: 'useful. Very useful. Because off', isFinal: true, timestamp: 2,
+        provider: 'gemini', speaker: 'user-1', role: 'source' as const, turnId: 'gemini-1',
+    };
+
+    let rows = module.appendTranscriptIfNew([], first);
+    rows = module.appendTranscriptIfNew(rows, second);
+
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].id, '1');
+    assert.equal(rows[0].timestamp, 1);
+    assert.equal(rows[0].text, second.text);
+    assert.deepEqual(rows[0].translation, first.translation);
+});
+
+test('formats the translation language from the actual language code', async () => {
+    const module = await import('./transcriptMessages.ts');
+
+    assert.equal(module.formatLanguageLabel('th-TH'), 'th-TH');
+    assert.equal(module.formatLanguageLabel('PT_br'), 'PT_br');
+    assert.equal(module.formatLanguageLabel('zh-hans'), 'zh-hans');
+    assert.equal(module.formatLanguageLabel('es'), 'es');
+    assert.equal(module.formatLanguageLabel(''), '—');
+});
+
+test('normalizes API language codes for HTML lang attributes', async () => {
+    const module = await import('./transcriptMessages.ts');
+
+    assert.equal(module.normalizeLanguageTag('en_US'), 'en-US');
+    assert.equal(module.normalizeLanguageTag('TH-th'), 'th-TH');
+    assert.equal(module.normalizeLanguageTag('not a language'), undefined);
+    assert.equal(module.normalizeLanguageTag(''), undefined);
 });
 
 test('sticks to latest only while the viewport is near the bottom', async () => {

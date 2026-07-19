@@ -9,6 +9,13 @@ package domain
 
 import "context"
 
+type TranscriptRole string
+
+const (
+	TranscriptRoleSource      TranscriptRole = "source"
+	TranscriptRoleTranslation TranscriptRole = "translation"
+)
+
 // =============================================================================
 // ASR (Automatic Speech Recognition) Domain
 // =============================================================================
@@ -16,11 +23,14 @@ import "context"
 // TranscriptResult represents a transcription result from an ASR provider.
 // This is the core entity for speech-to-text functionality.
 type TranscriptResult struct {
-	Text       string  // Transcribed text
-	IsFinal    bool    // True if this is a final result, false for interim
-	Confidence float64 // Confidence score (0-1)
-	Offset     int64   // Audio offset in nanoseconds (provider-specific)
-	Duration   int64   // Duration in nanoseconds (provider-specific)
+	Text         string         // Transcribed text
+	IsFinal      bool           // True if this is a final result, false for interim
+	Confidence   float64        // Confidence score (0-1)
+	Offset       int64          // Audio offset in nanoseconds (provider-specific)
+	Duration     int64          // Duration in nanoseconds (provider-specific)
+	Role         TranscriptRole // Source transcript or translated output
+	LanguageCode string         // BCP-47 language code when provided
+	TurnID       string         // Provider-scoped turn identifier
 }
 
 // ASRProvider is the interface that all ASR providers must implement.

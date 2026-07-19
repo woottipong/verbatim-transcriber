@@ -25,13 +25,16 @@ import (
 
 // TranscriptMessage represents a transcript sent to clients via Data Channel
 type TranscriptMessage struct {
-	Type       string  `json:"type"`
-	Text       string  `json:"text"`
-	IsFinal    bool    `json:"isFinal"`
-	Confidence float64 `json:"confidence,omitempty"`
-	Provider   string  `json:"provider"`
-	Timestamp  int64   `json:"timestamp"`
-	Speaker    string  `json:"speaker,omitempty"`
+	Type         string                `json:"type"`
+	Text         string                `json:"text"`
+	IsFinal      bool                  `json:"isFinal"`
+	Confidence   float64               `json:"confidence,omitempty"`
+	Provider     string                `json:"provider"`
+	Timestamp    int64                 `json:"timestamp"`
+	Speaker      string                `json:"speaker,omitempty"`
+	Role         domain.TranscriptRole `json:"role,omitempty"`
+	LanguageCode string                `json:"languageCode,omitempty"`
+	TurnID       string                `json:"turnId,omitempty"`
 }
 
 // TranscriptSink receives the same normalized transcript messages that are
@@ -519,14 +522,21 @@ func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, particip
 }
 
 func newTranscriptMessage(result domain.TranscriptResult, provider, speaker string) TranscriptMessage {
+	role := result.Role
+	if role == "" {
+		role = domain.TranscriptRoleSource
+	}
 	return TranscriptMessage{
-		Type:       "transcript",
-		Text:       domain.NormalizeThaiSpacing(result.Text),
-		IsFinal:    result.IsFinal,
-		Confidence: result.Confidence,
-		Provider:   provider,
-		Timestamp:  time.Now().UnixMilli(),
-		Speaker:    speaker,
+		Type:         "transcript",
+		Text:         domain.NormalizeThaiSpacing(result.Text),
+		IsFinal:      result.IsFinal,
+		Confidence:   result.Confidence,
+		Provider:     provider,
+		Timestamp:    time.Now().UnixMilli(),
+		Speaker:      speaker,
+		Role:         role,
+		LanguageCode: result.LanguageCode,
+		TurnID:       result.TurnID,
 	}
 }
 

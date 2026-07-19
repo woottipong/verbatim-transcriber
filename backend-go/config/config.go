@@ -80,8 +80,8 @@ func Load() *Config {
 		},
 		GeminiConfig: GeminiConfig{
 			Model:              getEnv("GEMINI_MODEL", "gemini-3.5-live-translate-preview"),
-			LanguageCode:       getEnv("GEMINI_LANGUAGE_CODE", "th"),
-			TargetLanguageCode: getEnv("GEMINI_TARGET_LANGUAGE_CODE", "en"),
+			LanguageCode:       os.Getenv("GEMINI_LANGUAGE_CODE"),
+			TargetLanguageCode: getEnv("GEMINI_TARGET_LANGUAGE_CODE", "th"),
 			SampleRate:         16000,
 		},
 		AzureConfig: AzureConfig{

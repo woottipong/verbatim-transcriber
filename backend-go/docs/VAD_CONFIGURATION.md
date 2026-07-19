@@ -32,9 +32,9 @@ Azure emits `speech.hypothesis` for interim text and `speech.phrase` for final t
 
 ### Gemini
 
-Gemini Live input transcription does not behave exactly like traditional ASR interim/final snapshots. It can emit useful source-input chunks with `isFinal=false`. The frontend retains those chunks as normal rows and suppresses only exact consecutive duplicates.
+Gemini Live input transcription does not behave exactly like traditional ASR interim/final snapshots. It can emit useful source-input chunks with `isFinal=false`. The backend therefore creates application-level pseudo-turns: 800 ms of low-energy PCM marks a boundary candidate, and the provider waits until transcript traffic has also been quiet for 500 ms so delayed translated output can catch up. PCM is observed but forwarded unchanged. The frontend updates one grouped source row for that `turnId` and shows the translation chip on the same row. This is best-effort alignment, not a sentence-level guarantee from Gemini.
 
-The model's translated/model audio is not exposed to the application.
+Translated text is exposed; translated/model audio is still discarded.
 
 ## UI implications
 
@@ -42,7 +42,7 @@ The model's translated/model audio is not exposed to the application.
 - **Microphone state:** confirms whether the LiveKit track is published.
 - **Agent/transcription state:** confirms whether an ASR agent is in the room.
 - **Interim draft:** replaceable active text for Google/Azure.
-- **Committed row:** final Google/Azure text or retained Gemini source chunk.
+- **Committed row:** final Google/Azure text or one grouped Gemini source turn, optionally with a translation chip.
 
 Do not infer speech detection from waveform movement alone. Do not label browser input level as VAD unless a real VAD controller is implemented.
 

@@ -20,13 +20,18 @@ import { appendBounded } from '../lib/runtime';
 import { getControlAuthHeaders } from '../lib/runtime';
 import {
     InterimTranscript,
+    PendingTranslation,
+    attachTranslation,
     appendTranscriptIfNew,
     clearInterimsBySource,
     createCommittedTranscript,
     getTranscriptKey,
+    getTranscriptTurnKey,
     isAppendOnlyInterimProvider,
     parseTranscriptMessage,
+    prunePendingTranslations,
     removeInterim,
+    storePendingTranslation,
     upsertInterim,
 } from '../lib/transcriptMessages';
 
@@ -80,6 +85,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
     const isAudioMutedRef = useRef(false);
     const connectionAttemptRef = useRef(0);
+    const translationsByTurnRef = useRef<Map<string, PendingTranslation>>(new Map());
 
     const cleanupAudioElements = useCallback(() => {
         audioElementsRef.current.forEach(audioElement => {
@@ -225,6 +231,16 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             const speaker = message.speaker || agentIdentity;
             const isAppendOnly = isAppendOnlyInterimProvider(provider);
 
+            if (message.role === 'translation') {
+                translationsByTurnRef.current = storePendingTranslation(
+                    translationsByTurnRef.current,
+                    message,
+                    agentIdentity,
+                );
+                setTranscripts(prev => attachTranslation(prev, message, agentIdentity).transcripts);
+                return;
+            }
+
             if (isAppendOnly || message.isFinal) {
                 segmentIdRef.current++;
                 const segment = createCommittedTranscript(
@@ -233,9 +249,17 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
                     provider,
                     speaker,
                 );
-                setTranscripts(prev => isAppendOnly
-                    ? appendTranscriptIfNew(prev, segment)
-                    : appendBounded(prev, segment));
+                setTranscripts(prev => {
+                    let next = isAppendOnly
+                        ? appendTranscriptIfNew(prev, segment)
+                        : appendBounded(prev, segment);
+                    if (message.turnId) {
+                        translationsByTurnRef.current = prunePendingTranslations(translationsByTurnRef.current);
+                        const pending = translationsByTurnRef.current.get(getTranscriptTurnKey(message, agentIdentity));
+                        if (pending) next = attachTranslation(next, pending.message, pending.sourceIdentity).transcripts;
+                    }
+                    return next;
+                });
 
                 setInterimTranscripts(prev => removeInterim(prev, key));
             } else {
@@ -273,6 +297,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         if (isAgent(participant.identity)) {
             setAgents(prev => prev.filter(a => a.identity !== participant.identity));
             setInterimTranscripts(prev => clearInterimsBySource(prev, participant.identity));
+            translationsByTurnRef.current.clear();
             console.log('[Viewer] 🤖 Agent disconnected:', participant.identity);
         }
     }, [isAgent]);
@@ -290,6 +315,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             cleanupAudioElements();
             setAudioParticipants([]);
             setInterimTranscripts(new Map());
+            translationsByTurnRef.current.clear();
 
             setConnectionState(ConnectionState.CONNECTING);
             setError(null);
@@ -321,6 +347,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
                 setConnectionState(ConnectionState.DISCONNECTED);
                 setAgents([]);
                 setInterimTranscripts(new Map());
+                translationsByTurnRef.current.clear();
                 cleanupAudioElements();
                 setAudioParticipants([]);
             });
@@ -397,6 +424,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         setRoom(null);
         setAgents([]);
         setInterimTranscripts(new Map());
+        translationsByTurnRef.current.clear();
         setCurrentRoomName(null);
         setConnectionState(ConnectionState.DISCONNECTED);
         cleanupAudioElements();
@@ -407,6 +435,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     const clearTranscripts = useCallback(() => {
         setTranscripts([]);
         setInterimTranscripts(new Map());
+        translationsByTurnRef.current.clear();
         segmentIdRef.current = 0;
     }, []);
 

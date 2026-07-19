@@ -81,6 +81,26 @@ func TestNewInterimTranscriptMessageKeepsNormalizedThaiText(t *testing.T) {
 	}
 }
 
+func TestNewTranscriptMessagePreservesTranslationMetadata(t *testing.T) {
+	message := newTranscriptMessage(
+		domain.TranscriptResult{
+			Text:         "ห้อง ฉุกเฉิน",
+			Role:         domain.TranscriptRoleTranslation,
+			LanguageCode: "th",
+			TurnID:       "gemini-1",
+		},
+		"gemini",
+		"speaker-1",
+	)
+
+	if message.Role != domain.TranscriptRoleTranslation || message.LanguageCode != "th" || message.TurnID != "gemini-1" {
+		t.Fatalf("translation metadata = role:%q language:%q turn:%q", message.Role, message.LanguageCode, message.TurnID)
+	}
+	if got, want := message.Text, "ห้องฉุกเฉิน"; got != want {
+		t.Fatalf("message text = %q, want %q", got, want)
+	}
+}
+
 func TestAudioBatchTargetBytesUsesLowLatencyWindow(t *testing.T) {
 	if got, want := audioBatchTargetBytes(48000, 40*time.Millisecond), 3840; got != want {
 		t.Fatalf("audioBatchTargetBytes() = %d, want %d", got, want)

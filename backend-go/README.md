@@ -54,10 +54,10 @@ Provider-independent types and Thai spacing normalization live in `internal/doma
 | Provider | Input from agent | Important behavior |
 | --- | --- | --- |
 | Google | 48 kHz Linear16 PCM | Speech-to-Text V2 streaming, interim enabled, automatic punctuation, pre-limit reconnect and one-second replay buffer |
-| Gemini | 16 kHz PCM | Source input transcription only; required model audio response is discarded |
+| Gemini | 16 kHz PCM | Source input chunks plus Thai output transcription; required model audio response is discarded |
 | Azure | 16 kHz PCM/WAV stream | Azure upstream WebSocket conversation recognition with interim hypotheses and endpointing settings |
 
-Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `gemini-3.5-live-translate-preview` with `th` source and `en` target by default.
+Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `gemini-3.5-live-translate-preview`, detects the source language unless a hint is configured, and translates to Thai by default.
 
 ## Environment variables
 
@@ -78,12 +78,43 @@ Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `g
 | `GOOGLE_SPEECH_MODEL` | `chirp_2` | Recognition model |
 | `GEMINI_API_KEY` | — | Required for Gemini |
 | `GEMINI_MODEL` | `gemini-3.5-live-translate-preview` | Live model |
-| `GEMINI_LANGUAGE_CODE` | `th` | Input language hint |
-| `GEMINI_TARGET_LANGUAGE_CODE` | `en` | Required translation target; output discarded |
+| `GEMINI_LANGUAGE_CODE` | — | Optional input language hint; empty enables detection |
+| `GEMINI_TARGET_LANGUAGE_CODE` | `th` | Supported BCP-47 translation target; also used for UI language metadata |
 | `AZURE_SUBSCRIPTION_KEY` | — | Required for Azure |
 | `AZURE_REGION` | `southeastasia` | Azure Speech region |
 
 `HasGoogleKey`, `HasGeminiKey`, `HasAzureKey`, and `HasLiveKitKey` in `config/config.go` define availability shown by `/providers`.
+
+### Gemini Live translation target languages
+
+`GEMINI_TARGET_LANGUAGE_CODE` is the source of truth for Gemini translation output metadata. The backend canonicalizes supported codes (for example, `PT_br` becomes `pt-BR`), rejects unsupported values when the Gemini provider is created, and publishes the configured target code with every translation so the UI badge matches the environment setting.
+
+Use one of these BCP-47 codes supported by `gemini-3.5-live-translate-preview`:
+
+```text
+af ak sq am ar hy az eu be bn bg my ca zh-Hans zh-Hant hr cs da nl en
+et fil fi fr gl ka de el gu ha he hi hu is id it ja jv kn kk km rw ko
+lo lv lt mk ms ml mr mn ne no nb fa pl pt-BR pt-PT pa ro ru sr sd si
+sk sl es su sw sv ta te th tr uk ur uz vi zu
+```
+
+Common examples:
+
+| Language | Value |
+| --- | --- |
+| Thai | `th` |
+| English | `en` |
+| German | `de` |
+| Spanish | `es` |
+| Japanese | `ja` |
+| Korean | `ko` |
+| Vietnamese | `vi` |
+| Chinese, Simplified | `zh-Hans` |
+| Chinese, Traditional | `zh-Hant` |
+| Portuguese, Brazil | `pt-BR` |
+| Portuguese, Portugal | `pt-PT` |
+
+The complete upstream list is maintained in the [Gemini Live Translation documentation](https://ai.google.dev/gemini-api/docs/live-api/live-translate#supported-languages). This list is specific to Live Translation and is not the broader Gemini Live Agent language list.
 
 When `HOST` is remote (for example `0.0.0.0`), room, agent, participant-token,
 and transcript-link management endpoints require `Authorization: Bearer
@@ -147,16 +178,21 @@ The agent publishes reliable packets with this shape:
 ```json
 {
   "type": "transcript",
-  "text": "ข้อความภาษาไทย",
+  "text": "emergency room",
   "isFinal": true,
   "confidence": 0.9,
-  "provider": "google",
+  "provider": "gemini",
   "timestamp": 1784196259000,
-  "speaker": "user-123"
+  "speaker": "user-123",
+  "role": "source",
+  "languageCode": "en",
+  "turnId": "gemini-1"
 }
 ```
 
-Thai spacing is normalized once at the agent output boundary.
+`role`, `languageCode`, and `turnId` are additive metadata used by Gemini source/translation pairs. Source `languageCode` is published only when Gemini returns it; `GEMINI_LANGUAGE_CODE` remains an input hint and is not presented as detected metadata. Translation `languageCode` always uses the validated `GEMINI_TARGET_LANGUAGE_CODE`. Thai spacing is normalized once at the agent output boundary.
+
+Gemini `turnId` values are application-level pseudo-turns rather than deterministic model turns. The provider observes the unchanged PCM stream and closes a turn after 800 ms of low-energy audio plus 500 ms without new transcript activity. This keeps delayed translated output with the preceding source in typical pauses, but alignment remains best-effort rather than sentence-perfect.
 
 ## Test and build
 

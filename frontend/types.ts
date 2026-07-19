@@ -16,6 +16,16 @@ export interface TranscriptSegment {
   timestamp: number;
   provider?: string;   // ASR provider: "google", "gemini", "azure"
   speaker?: string;    // Speaker identity: "user-123"
+  role?: 'source' | 'translation';
+  languageCode?: string;
+  turnId?: string;
+  translation?: TranscriptTranslation;
+}
+
+export interface TranscriptTranslation {
+  text: string;
+  languageCode: string;
+  isFinal: boolean;
 }
 
 // ============================================

@@ -20,6 +20,12 @@
   --warning: oklch(80% 0.15 84);
   --danger: oklch(67% 0.21 25);
   --focus-ring: oklch(76% 0.16 284 / 0.65);
+  --language-source-border: oklch(57% 0.045 274 / 0.65);
+  --language-source-bg: oklch(29% 0.028 274 / 0.72);
+  --language-source-text: var(--muted);
+  --language-target-border: oklch(61% 0.12 292 / 0.48);
+  --language-target-bg: oklch(34% 0.065 292 / 0.54);
+  --language-target-text: oklch(82% 0.11 292);
 }
 
 * {
@@ -203,7 +209,7 @@ select:focus-visible {
 
 .control-button {
   display: inline-flex;
-  min-height: 36px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
@@ -527,6 +533,100 @@ select:focus-visible {
 }
 .transcript-row__marker { opacity: 0.85; }
 .transcript-row__hint { white-space: nowrap; }
+
+.transcript-turn {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 4.5rem;
+}
+
+.transcript-bilingual {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: max-content minmax(0, 1fr);
+}
+
+.transcript-source-line {
+  grid-column: 1 / -1;
+  max-width: 75ch;
+}
+
+.transcript-source-line--labeled,
+.translation-block {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  column-gap: 0.5rem;
+}
+
+.transcript-source-line--labeled {
+  align-items: baseline;
+}
+
+.transcript-source-line__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.source-language-label {
+  display: inline-flex;
+  min-width: 2rem;
+  min-height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  align-self: start;
+  border: 1px solid var(--language-source-border);
+  border-radius: 5px;
+  padding-inline: 0.35rem;
+  color: var(--language-source-text);
+  background: var(--language-source-bg);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1.125rem;
+  letter-spacing: 0.05em;
+}
+
+.translation-block {
+  max-width: 75ch;
+  min-width: 0;
+  align-items: baseline;
+  margin-top: 0.375rem;
+}
+
+.translation-block__label {
+  display: inline-flex;
+  min-width: 2rem;
+  min-height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  align-self: start;
+  border: 1px solid var(--language-target-border);
+  border-radius: 5px;
+  padding-inline: 0.35rem;
+  color: var(--language-target-text);
+  background: var(--language-target-bg);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1.125rem;
+  letter-spacing: 0.05em;
+}
+
+.translation-block__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: oklch(84% 0.055 288);
+  font-size: 0.9rem;
+  font-weight: 400;
+  line-height: 1.5rem;
+  text-wrap: pretty;
+}
+
+@media (min-width: 1024px) {
+  .transcript-source-line,
+  .translation-block {
+    max-width: none;
+  }
+}
 
 .transcript-live-dot {
   width: 0.375rem;

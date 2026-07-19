@@ -14,14 +14,19 @@ import { appendBounded } from '../lib/runtime';
 import { getControlAuthHeaders } from '../lib/runtime';
 import {
     InterimTranscript,
+    PendingTranslation,
     TranscriptMessage,
+    attachTranslation,
     appendTranscriptIfNew,
     clearInterimsBySource,
     createCommittedTranscript,
     getTranscriptKey,
+    getTranscriptTurnKey,
     isAppendOnlyInterimProvider,
     parseTranscriptMessage,
+    prunePendingTranslations,
     removeInterim,
+    storePendingTranslation,
     upsertInterim,
 } from '../lib/transcriptMessages';
 
@@ -85,6 +90,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const reconnectAttemptsRef = useRef(0);
     const segmentIdRef = useRef(0);
     const connectionAttemptRef = useRef(0);
+    const translationsByTurnRef = useRef<Map<string, PendingTranslation>>(new Map());
 
     const applyTranscriptUpdate = useCallback((message: BufferedTranscriptMessage) => {
         const provider = message.provider || 'unknown';
@@ -97,9 +103,17 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 provider,
                 message.speaker || message.sourceIdentity,
             );
-            setTranscripts(prev => isAppendOnly
-                ? appendTranscriptIfNew(prev, segment)
-                : appendBounded(prev, segment));
+            setTranscripts(prev => {
+                let next = isAppendOnly
+                    ? appendTranscriptIfNew(prev, segment)
+                    : appendBounded(prev, segment);
+                if (message.turnId) {
+                    translationsByTurnRef.current = prunePendingTranslations(translationsByTurnRef.current);
+                    const pending = translationsByTurnRef.current.get(getTranscriptTurnKey(message, message.sourceIdentity));
+                    if (pending) next = attachTranslation(next, pending.message, pending.sourceIdentity).transcripts;
+                }
+                return next;
+            });
             setInterimTranscripts(prev => removeInterim(prev, message.key));
             return;
         }
@@ -164,6 +178,16 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 sourceIdentity,
             };
 
+            if (message.role === 'translation') {
+                translationsByTurnRef.current = storePendingTranslation(
+                    translationsByTurnRef.current,
+                    message,
+                    sourceIdentity,
+                );
+                setTranscripts(prev => attachTranslation(prev, message, sourceIdentity).transcripts);
+                return;
+            }
+
             // Gemini Live emits committed input chunks as interim packets.
             // Preserve every chunk so the transcript reads like ordinary STT.
             if (isAppendOnlyInterimProvider(message.provider || '')) {
@@ -200,6 +224,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         if (participant.identity.startsWith('agent-') || participant.identity === 'asr-agent') {
             setConnectedAgents(prev => prev.filter(id => id !== participant.identity));
             setInterimTranscripts(prev => clearInterimsBySource(prev, participant.identity));
+            translationsByTurnRef.current.clear();
             console.log('[LiveKit] 🤖 Agent disconnected:', participant.identity);
         }
     }, []);
@@ -247,6 +272,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 console.log('[LiveKit] ❌ Disconnected from room');
                 roomRef.current = null;
                 transcriptUpdatesRef.current?.clear();
+                translationsByTurnRef.current.clear();
                 setInterimTranscripts(new Map());
                 setRoom(null);
                 setLocalParticipant(null);
@@ -361,6 +387,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const disconnect = useCallback(() => {
         connectionAttemptRef.current++;
         transcriptUpdatesRef.current?.clear();
+        translationsByTurnRef.current.clear();
         setInterimTranscripts(new Map());
         const currentRoom = roomRef.current;
         roomRef.current = null;
@@ -380,6 +407,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     // Clear transcripts
     const clearTranscripts = useCallback(() => {
         transcriptUpdatesRef.current?.clear();
+        translationsByTurnRef.current.clear();
         setTranscripts([]);
         setInterimTranscripts(new Map());
         segmentIdRef.current = 0;
@@ -395,6 +423,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         return () => {
             connectionAttemptRef.current++;
             transcriptUpdatesRef.current?.clear();
+            translationsByTurnRef.current.clear();
             if (roomRef.current) {
                 roomRef.current.disconnect();
             }

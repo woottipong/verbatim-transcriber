@@ -1,8 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Radio, Users, Mic, MicOff, LogOut, Eraser } from 'lucide-react';
 import { TranscriptSegment, InterimTranscript, ConnectionState } from '../types';
 import { getLiveKitSessionPresentation } from '../lib/liveKitSession';
 import { shouldStickToLatest } from '../lib/transcriptViewport';
+import TranslationBlock from './TranslationBlock';
+import { formatLanguageLabel, normalizeLanguageTag } from '../lib/transcriptMessages';
 
 interface LiveKitPanelProps {
   transcripts: TranscriptSegment[];
@@ -73,40 +75,65 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isFollowingLatest, setIsFollowingLatest] = useState(true);
   const [viewMode, setViewMode] = useState<'timeline' | 'paragraph'>('timeline');
+  const [selectedProvider, setSelectedProvider] = useState('');
+
+  const scrollToLatest = useCallback(() => {
+    const anchors = scrollRef.current?.querySelectorAll<HTMLElement>('[data-transcript-end]');
+    anchors?.forEach(anchor => anchor.scrollIntoView({ block: 'end' }));
+  }, []);
 
   useEffect(() => {
-    if (isFollowingLatest) {
-      const scrollContainers = scrollRef.current?.querySelectorAll('.overflow-y-auto');
-      scrollContainers?.forEach(container => {
-        container.scrollTop = container.scrollHeight;
-      });
-    }
-  }, [interimTranscripts, isFollowingLatest, transcripts]);
+    if (!isFollowingLatest) return;
+
+    const frame = window.requestAnimationFrame(scrollToLatest);
+    return () => window.cancelAnimationFrame(frame);
+  }, [interimTranscripts, isFollowingLatest, scrollToLatest, transcripts]);
 
   const isConnected = connectionState === ConnectionState.CONNECTED;
   const isConnecting = connectionState === ConnectionState.CONNECTING;
   const hasContent = transcripts.length > 0 || interimTranscripts.size > 0;
 
-  const activeProviders = Array.from(new Set([
-    ...transcripts.map(t => t.provider),
-    ...Array.from(interimTranscripts.values()).map(i => i.provider)
-  ])).filter(Boolean);
-
-  if (isAgentConnected && agentIdentity) {
-    agentIdentity.split(',').forEach(id => {
-      const parts = id.split('-');
-      if (parts.length > 1 && !activeProviders.includes(parts[1])) {
-        activeProviders.push(parts[1]);
+  const providerGroups = useMemo(() => {
+    const groups = new Map<string, {
+      transcripts: TranscriptSegment[];
+      interims: InterimTranscript[];
+    }>();
+    const ensureGroup = (provider: string) => {
+      let group = groups.get(provider);
+      if (!group) {
+        group = { transcripts: [], interims: [] };
+        groups.set(provider, group);
       }
+      return group;
+    };
+
+    transcripts.forEach(segment => {
+      if (segment.provider) ensureGroup(segment.provider).transcripts.push(segment);
     });
-  }
+    interimTranscripts.forEach(interim => {
+      if (interim.provider) ensureGroup(interim.provider).interims.push(interim);
+    });
+    if (isAgentConnected && agentIdentity) {
+      agentIdentity.split(',').forEach(identity => {
+        const provider = identity.split('-')[1];
+        if (provider) ensureGroup(provider);
+      });
+    }
+    if (groups.size === 0) ensureGroup('google');
 
-  if (activeProviders.length === 0) {
-    activeProviders.push('google');
-  }
-
-  const order = ['google', 'gemini', 'azure'];
-  activeProviders.sort((a, b) => order.indexOf(a) - order.indexOf(b));
+    const order = ['google', 'gemini', 'azure'];
+    return Array.from(groups.entries()).sort(([left], [right]) => {
+      const leftOrder = order.indexOf(left);
+      const rightOrder = order.indexOf(right);
+      if (leftOrder === -1) return rightOrder === -1 ? left.localeCompare(right) : 1;
+      if (rightOrder === -1) return -1;
+      return leftOrder - rightOrder;
+    });
+  }, [agentIdentity, interimTranscripts, isAgentConnected, transcripts]);
+  const activeProviders = providerGroups.map(([provider]) => provider);
+  const visibleMobileProvider = activeProviders.includes(selectedProvider)
+    ? selectedProvider
+    : activeProviders[0];
 
   const session = getLiveKitSessionPresentation(
     connectionState,
@@ -132,14 +159,14 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
             <div className="min-w-0">
               <h3 className="text-sm font-semibold text-slate-100">Audio Room Connection</h3>
               {isConnected ? (
-                <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
                   <span className="flex items-center gap-1.5">
                     <Users size={13} aria-hidden="true" />
                     {participantCount} {participantCount === 1 ? 'user' : 'users'}
                   </span>
                 </p>
               ) : (
-                <p className="mt-0.5 text-xs text-slate-500">Low-latency audio stream</p>
+                <p className="mt-0.5 text-xs text-slate-400">Low-latency audio stream</p>
               )}
             </div>
           </div>
@@ -194,14 +221,18 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
             {isConnected && (
               <div className="flex items-center rounded-lg border border-slate-700 bg-slate-950/45 p-0.5 select-none shrink-0" role="group" aria-label="View mode">
                 <button
+                  type="button"
                   onClick={() => setViewMode('timeline')}
-                  className={`h-8 px-2.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${viewMode === 'timeline' ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                  aria-pressed={viewMode === 'timeline'}
+                  className={`h-11 px-3 text-xs font-semibold rounded-md transition-colors cursor-pointer ${viewMode === 'timeline' ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
                 >
                   Lines
                 </button>
                 <button
+                  type="button"
                   onClick={() => setViewMode('paragraph')}
-                  className={`h-8 px-2.5 text-xs font-semibold rounded-md transition-colors cursor-pointer ${viewMode === 'paragraph' ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                  aria-pressed={viewMode === 'paragraph'}
+                  className={`h-11 px-3 text-xs font-semibold rounded-md transition-colors cursor-pointer ${viewMode === 'paragraph' ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
                 >
                   Text
                 </button>
@@ -239,7 +270,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                     ? 'Start speaking. Your transcript will show here.'
                     : session.headline}
               </p>
-              <p className="mt-2 text-sm leading-6 text-slate-500">
+              <p className="mt-2 text-sm leading-6 text-slate-400">
                 {connectionState === ConnectionState.DISCONNECTED
                   ? 'Connect to the room to start sending your audio.'
                   : session.canSpeak
@@ -249,20 +280,43 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
             </div>
           </div>
         ) : (
-          <div className="absolute inset-0 flex divide-x divide-slate-800/80 bg-slate-950/20">
-            {activeProviders.map(provider => {
-              const providerTranscripts = transcripts.filter(t => t.provider === provider);
-              const providerInterims = Array.from(interimTranscripts.values()).filter(i => i.provider === provider);
+          <div className="absolute inset-0 flex flex-col bg-slate-950/20">
+            {activeProviders.length > 1 && (
+              <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-800 bg-slate-900/55 p-2 lg:hidden" role="group" aria-label="Transcription provider">
+                {activeProviders.map(provider => (
+                  <button
+                    key={provider}
+                    type="button"
+                    onClick={() => setSelectedProvider(provider)}
+                    aria-pressed={visibleMobileProvider === provider}
+                    className={`min-h-11 shrink-0 rounded-md px-3 text-xs font-semibold transition-colors ${visibleMobileProvider === provider
+                      ? 'bg-violet-500 text-white'
+                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                    }`}
+                  >
+                    {provider === 'google' ? 'Google Cloud STT' : provider === 'gemini' ? 'Gemini Live' : provider === 'azure' ? 'Azure Speech' : provider}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex min-h-0 flex-1 lg:divide-x lg:divide-slate-800/80">
+            {providerGroups.map(([provider, group]) => {
+              const providerTranscripts = group.transcripts;
+              const providerInterims = group.interims;
               const hasProviderContent = providerTranscripts.length > 0 || providerInterims.length > 0;
               
               return (
-                <div key={provider} className="flex flex-col h-full min-w-0 flex-1">
+                <section
+                  key={provider}
+                  className={`${visibleMobileProvider === provider ? 'flex' : 'hidden'} h-full min-w-0 flex-1 flex-col lg:flex`}
+                  aria-label={`${provider} transcript`}
+                >
                   <div className="px-4 py-2.5 bg-slate-900/40 border-b border-slate-800 flex items-center justify-between text-xs font-semibold text-slate-400 select-none shrink-0">
                     <span className="flex items-center gap-2 uppercase tracking-wider">
                       <span className={`w-1 h-3 rounded ${providerAccents[provider] ?? 'bg-slate-500'}`} aria-hidden="true" />
                       {provider === 'google' ? 'Google Cloud STT' : provider === 'gemini' ? 'Gemini Live' : provider === 'azure' ? 'Azure Speech' : provider}
                     </span>
-                    <span className="tabular-nums text-slate-500 font-medium">{providerTranscripts.length} lines</span>
+                    <span className="tabular-nums text-slate-400 font-medium">{providerTranscripts.length} lines</span>
                   </div>
                   
                   <div 
@@ -279,14 +333,26 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                         {providerTranscripts.map((segment, idx) => (
                           <div 
                             key={segment.id} 
-                            className="py-1 px-2 -mx-2 flex items-baseline gap-2.5 rounded hover:bg-slate-900/25 transition-colors duration-100 group"
+                            className="transcript-turn group -mx-2 flex items-start gap-2.5 rounded px-2 py-2 transition-colors duration-100 hover:bg-slate-900/25"
                           >
-                            <span className="text-[10px] tabular-nums text-slate-500 group-hover:text-slate-400 select-none w-5 shrink-0 pt-0.5">
+                            <span className="w-5 shrink-0 select-none pt-1 text-[10px] tabular-nums text-slate-400">
                               {String(idx + 1).padStart(2, '0')}
                             </span>
-                            <p className="min-w-0 flex-1 text-[1.05rem] leading-7 text-slate-100 font-medium tracking-wide">
-                              {segment.text}
-                            </p>
+                            <div className="transcript-bilingual min-w-0 flex-1">
+                              <p
+                                className={`transcript-source-line break-words text-[1.05rem] font-medium leading-7 text-slate-100 ${segment.provider === 'gemini' && segment.languageCode ? 'transcript-source-line--labeled' : ''}`}
+                                lang={normalizeLanguageTag(segment.languageCode)}
+                                dir="auto"
+                              >
+                                {segment.provider === 'gemini' && segment.languageCode && (
+                                  <span className="source-language-label" aria-hidden="true">
+                                    {formatLanguageLabel(segment.languageCode)}
+                                  </span>
+                                )}
+                                <span className="transcript-source-line__text">{segment.text}</span>
+                              </p>
+                              <TranslationBlock translation={segment.translation} />
+                            </div>
                           </div>
                         ))}
                         {providerInterims.map(interim => {
@@ -307,28 +373,30 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                         })}
                       </div>
                     ) : (
-                      <div className="text-[1.05rem] leading-8 text-slate-100 font-medium tracking-wide space-y-3">
-                        <p>
-                          {providerTranscripts.map((segment) => (
-                            <span key={segment.id} className="hover:bg-slate-900/40 rounded px-0.5 transition-colors duration-100">
+                      <p className="max-w-[75ch] break-words text-[1.05rem] font-medium leading-8 text-slate-100">
+                        {providerTranscripts.map(segment => (
+                          <React.Fragment key={segment.id}>
+                            <span lang={normalizeLanguageTag(segment.languageCode)} dir="auto">
                               {segment.text}
-                            </span>
-                          ))}
-                          {providerInterims.map(interim => {
-                            const classes = draftClasses[interim.provider] ?? { bg: 'bg-violet-500/5 border-violet-500/10', text: 'text-violet-400' };
-                            return (
-                              <span key={interim.key} className={`italic ${classes.text}`}>
-                                {interim.text}…
-                              </span>
-                            );
-                          })}
-                        </p>
-                      </div>
+                            </span>{' '}
+                          </React.Fragment>
+                        ))}
+                        {providerInterims.map(interim => {
+                          const classes = draftClasses[interim.provider] ?? { bg: 'bg-violet-500/5 border-violet-500/10', text: 'text-violet-400' };
+                          return (
+                            <React.Fragment key={interim.key}>
+                              <span className={`italic ${classes.text}`}>{interim.text}…</span>{' '}
+                            </React.Fragment>
+                          );
+                        })}
+                      </p>
                     )}
+                    <div data-transcript-end aria-hidden="true" />
                   </div>
-                </div>
+                </section>
               );
             })}
+            </div>
           </div>
         )}
       </div>
@@ -337,10 +405,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
           type="button"
           className="control-button control-button--quiet absolute bottom-3 right-4 bg-slate-900/95 shadow-lg z-10"
           onClick={() => {
-            const scrollContainers = scrollRef.current?.querySelectorAll('.overflow-y-auto');
-            scrollContainers?.forEach(container => {
-              container.scrollTop = container.scrollHeight;
-            });
+            scrollToLatest();
             setIsFollowingLatest(true);
           }}
         >
@@ -348,9 +413,9 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
         </button>
       )}
 
-      <footer className="flex items-center justify-between border-t border-slate-700/70 px-4 py-2.5 text-xs text-slate-500 sm:px-5">
-        <span>Status: Connected · Low Latency Feed</span>
-        <span className="tabular-nums text-violet-300">{transcripts.length} Lines</span>
+      <footer className="flex items-center justify-between border-t border-slate-700/70 px-4 py-2.5 text-xs text-slate-400 sm:px-5">
+        <span className="min-w-0 truncate pr-3">{session.headline} · {session.detail}</span>
+        <span className="shrink-0 tabular-nums text-violet-300">{transcripts.length} Lines</span>
       </footer>
     </article>
   );

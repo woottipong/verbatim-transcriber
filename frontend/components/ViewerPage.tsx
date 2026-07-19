@@ -13,6 +13,8 @@ import { useRoomViewer } from '../hooks/useRoomViewer';
 import { ConnectionState } from '../types';
 import { toHttpUrl } from '../lib/runtime';
 import { shouldStickToLatest } from '../lib/transcriptViewport';
+import TranslationBlock from './TranslationBlock';
+import { formatLanguageLabel, normalizeLanguageTag } from '../lib/transcriptMessages';
 import { shouldAutoConnectViewer } from '../lib/viewerLaunch';
 import ConnectionBadge from './ConnectionBadge';
 import { buildViewerUrl } from '../lib/appRoutes';
@@ -48,6 +50,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
     const [filterProvider, setFilterProvider] = useState<string>('all');
     const [isFollowingLatest, setIsFollowingLatest] = useState(true);
     const transcriptScrollRef = useRef<HTMLDivElement>(null);
+    const transcriptEndRef = useRef<HTMLDivElement>(null);
     const autoConnectAttemptedRef = useRef<string | null>(null);
 
     // Convert backend URL to HTTP
@@ -130,9 +133,12 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
     }, [filterProvider, viewer.interimTranscripts]);
 
     useEffect(() => {
-        if (transcriptScrollRef.current && isFollowingLatest) {
-            transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
-        }
+        if (!isFollowingLatest) return;
+
+        const frame = window.requestAnimationFrame(() => {
+            transcriptEndRef.current?.scrollIntoView({ block: 'end' });
+        });
+        return () => window.cancelAnimationFrame(frame);
     }, [filteredInterims, filteredTranscripts, isFollowingLatest]);
 
     // Provider color mapping
@@ -222,7 +228,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                             )}
 
                             {rooms.length === 0 ? (
-                                <p className="text-sm text-slate-500 text-center py-4">
+                                <p className="text-center text-sm text-slate-400 py-4">
                                     {isLoadingRooms ? 'Loading...' : 'No active rooms'}
                                 </p>
                             ) : (
@@ -274,7 +280,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                 </h2>
 
                                 {viewer.agents.length === 0 ? (
-                                    <p className="text-sm text-slate-500 text-center py-2">
+                                    <p className="text-center text-sm text-slate-400 py-2">
                                         No agents connected
                                     </p>
                                 ) : (
@@ -344,7 +350,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                     <h2 className="text-sm font-semibold text-white">
                                         Transcripts
                                     </h2>
-                                    <span className="text-xs text-slate-500">
+                                    <span className="text-xs text-slate-400">
                                         {filteredTranscripts.length} segment{filteredTranscripts.length !== 1 ? 's' : ''}
                                     </span>
                                 </div>
@@ -357,7 +363,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                             value={filterProvider}
                                             onChange={(e) => setFilterProvider(e.target.value)}
                                             aria-label="Filter transcripts by provider"
-                                            className="h-9 rounded-lg border border-slate-600 bg-slate-950/40 px-3 text-xs font-medium text-white"
+                                            className="h-11 rounded-lg border border-slate-600 bg-slate-950/40 px-3 text-xs font-medium text-white"
                                         >
                                             <option value="all">All Providers</option>
                                             {availableProviders.map(provider => (
@@ -387,16 +393,16 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                 onScroll={(event) => setIsFollowingLatest(shouldStickToLatest(event.currentTarget))}
                             >
                                 {viewer.connectionState !== ConnectionState.CONNECTED ? (
-                                    <div className="flex flex-col items-center justify-center h-full text-slate-500">
+                                    <div className="flex h-full flex-col items-center justify-center text-slate-400">
                                         <Radio size={32} className="mb-3 opacity-50" />
                                         <p className="text-sm">Select a room to start viewing</p>
                                     </div>
                                 ) : filteredTranscripts.length === 0 && filteredInterims.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center h-full text-slate-500">
+                                    <div className="flex h-full flex-col items-center justify-center text-slate-400">
                                         <Bot size={32} className="mb-3 opacity-50" />
                                         <p className="text-sm">Waiting for transcripts...</p>
                                         {viewer.agents.length === 0 && (
-                                            <p className="text-xs text-slate-600 mt-1">No agents connected yet</p>
+                                            <p className="mt-1 text-xs text-slate-400">No agents connected yet</p>
                                         )}
                                     </div>
                                 ) : (
@@ -405,19 +411,34 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                         {filteredTranscripts.map(segment => (
                                             <div
                                                 key={segment.id}
-                                                className="transcript-row grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 py-3"
+                                                className="transcript-row transcript-turn grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 py-3"
                                             >
                                                 {segment.provider && (
                                                     <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(segment.provider)}`}>
                                                         {formatProviderName(segment.provider)}
                                                     </span>
                                                 )}
-                                                <p className="min-w-0 text-[1rem] leading-7 text-slate-100">
-                                                    {segment.text}
-                                                </p>
-                                                <span className="shrink-0 text-[10px] text-slate-500">
+                                                <div className="transcript-bilingual min-w-0">
+                                                    <p
+                                                        className={`transcript-source-line break-words text-[1rem] leading-7 text-slate-100 ${segment.provider === 'gemini' && segment.languageCode ? 'transcript-source-line--labeled' : ''}`}
+                                                        lang={normalizeLanguageTag(segment.languageCode)}
+                                                        dir="auto"
+                                                    >
+                                                        {segment.provider === 'gemini' && segment.languageCode && (
+                                                            <span className="source-language-label" aria-hidden="true">
+                                                                {formatLanguageLabel(segment.languageCode)}
+                                                            </span>
+                                                        )}
+                                                        <span className="transcript-source-line__text">{segment.text}</span>
+                                                    </p>
+                                                    <TranslationBlock translation={segment.translation} />
+                                                </div>
+                                                <time
+                                                    className="shrink-0 text-[10px] text-slate-400"
+                                                    dateTime={new Date(segment.timestamp).toISOString()}
+                                                >
                                                     {new Date(segment.timestamp).toLocaleTimeString()}
-                                                </span>
+                                                </time>
                                             </div>
                                         ))}
 
@@ -426,10 +447,6 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                             <div
                                                 key={interim.key}
                                                 className="transcript-row transcript-row--interim grid grid-cols-[auto_minmax(0,1fr)] gap-3 py-3"
-                                                role="status"
-                                                aria-live="polite"
-                                                aria-atomic="true"
-                                                aria-label={`Live interim transcript from ${interim.speaker}`}
                                             >
                                                 <span className="transcript-row__marker pt-0.5 text-sm text-violet-300" aria-hidden="true">↳</span>
                                                 <div className="transcript-row__content flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1">
@@ -438,12 +455,19 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                                         {formatProviderName(interim.provider)} · Live draft
                                                     </span>
                                                     <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-violet-300/70">กำลังถอดเสียง</span>
-                                                    <p className="transcript-row__text basis-full min-w-0 text-[1rem] leading-7 text-slate-300">
+                                                    <p
+                                                        className="transcript-row__text basis-full min-w-0 text-[1rem] leading-7 text-slate-300"
+                                                        role="status"
+                                                        aria-live="polite"
+                                                        aria-atomic="true"
+                                                    >
+                                                        <span className="sr-only">Live interim transcript from {interim.speaker}: </span>
                                                         {interim.text}
                                                     </p>
                                                 </div>
                                             </div>
                                         ))}
+                                        <div ref={transcriptEndRef} aria-hidden="true" />
                                     </>
                                 )}
                             </div>
@@ -452,9 +476,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                     type="button"
                                     className="control-button control-button--quiet absolute bottom-3 right-4 bg-slate-900/95 shadow-lg"
                                     onClick={() => {
-                                        if (transcriptScrollRef.current) {
-                                            transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
-                                        }
+                                        transcriptEndRef.current?.scrollIntoView({ block: 'end' });
                                         setIsFollowingLatest(true);
                                     }}
                                 >

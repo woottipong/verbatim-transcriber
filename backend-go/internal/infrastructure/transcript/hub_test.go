@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"thai-transcriber-backend/internal/domain"
 	"thai-transcriber-backend/internal/infrastructure/agent"
 )
 
@@ -34,6 +35,26 @@ func TestHubPublishesOrderedTypedEvents(t *testing.T) {
 	}
 	if first.ID == "" || second.ID == "" || first.ID == second.ID {
 		t.Fatalf("event IDs = %q/%q", first.ID, second.ID)
+	}
+}
+
+func TestHubForwardsTranslationMetadata(t *testing.T) {
+	hub := NewHub()
+	subscription := hub.Subscribe("room-a")
+	defer hub.Unsubscribe("room-a", subscription)
+
+	hub.Publish("room-a", agent.TranscriptMessage{
+		Text:         "ห้องฉุกเฉิน",
+		Provider:     "gemini",
+		Speaker:      "speaker-1",
+		Role:         domain.TranscriptRoleTranslation,
+		LanguageCode: "th",
+		TurnID:       "gemini-1",
+	})
+
+	transcript := decodeEvent(t, <-subscription.Events()).Transcript
+	if transcript.Role != domain.TranscriptRoleTranslation || transcript.LanguageCode != "th" || transcript.TurnID != "gemini-1" {
+		t.Fatalf("translation metadata = %+v", transcript)
 	}
 }
 
