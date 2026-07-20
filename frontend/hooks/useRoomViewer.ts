@@ -35,6 +35,7 @@ import {
     storePendingTranslation,
     upsertInterim,
 } from '../lib/transcriptMessages';
+import { providerFromAgentIdentity } from '../lib/providers';
 
 // Agent info with provider
 export interface AgentInfo {
@@ -103,13 +104,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
 
     // Extract provider from agent identity (e.g., "agent-google-xxx" -> "google", "agent-google" -> "google")
     const getProviderFromIdentity = useCallback((identity: string): string => {
-        if (identity === 'asr-agent') return 'unknown';
-        if (!identity.startsWith('agent-')) return 'unknown';
-
-        // Handle formats: "agent-google", "agent-google-xxx", "agent-azure", etc.
-        const withoutPrefix = identity.slice(6); // Remove "agent-"
-        const parts = withoutPrefix.split('-');
-        return parts[0] || 'unknown'; // First part after "agent-" is the provider
+        return providerFromAgentIdentity(identity);
     }, []);
 
     // Fetch token from backend (as viewer, not publishing)

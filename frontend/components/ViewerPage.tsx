@@ -18,20 +18,13 @@ import { formatLanguageLabel, isTranscriptTurnLive, normalizeLanguageTag } from 
 import { shouldAutoConnectViewer } from '../lib/viewerLaunch';
 import ConnectionBadge from './ConnectionBadge';
 import { buildViewerUrl } from '../lib/appRoutes';
+import { formatProviderName, hasSourceLanguageLabel } from '../lib/providers';
 
 interface RoomInfo {
     name: string;
     numParticipants: number;
     creationTime: number;
 }
-
-const formatProviderName = (provider: string): string => {
-    const p = provider.toLowerCase();
-    if (p === 'google') return 'Google Cloud STT';
-    if (p === 'gemini') return 'Gemini Live';
-    if (p === 'azure') return 'Azure Speech';
-    return provider;
-};
 
 interface ViewerPageProps {
     onBack?: () => void;
@@ -147,6 +140,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
             case 'google': return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
             case 'gemini': return 'text-violet-400 bg-violet-500/20 border-violet-500/30';
             case 'azure': return 'text-cyan-400 bg-cyan-500/20 border-cyan-500/30';
+            case 'gpt-realtime-whisper': return 'text-emerald-400 bg-emerald-500/20 border-emerald-500/30';
             default: return 'text-slate-400 bg-slate-500/20 border-slate-500/30';
         }
     };
@@ -422,11 +416,11 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                                     )}
                                                     <div className="transcript-bilingual min-w-0">
                                                         <p
-                                                            className={`transcript-source-line break-words text-[1rem] leading-7 text-slate-100 ${segment.provider === 'gemini' && segment.languageCode ? 'transcript-source-line--labeled' : ''}`}
+                                                            className={`transcript-source-line break-words text-[1rem] leading-7 text-slate-100 ${hasSourceLanguageLabel(segment.provider, segment.languageCode) ? 'transcript-source-line--labeled' : ''}`}
                                                             lang={normalizeLanguageTag(segment.languageCode)}
                                                             dir="auto"
                                                         >
-                                                            {segment.provider === 'gemini' && segment.languageCode && (
+                                                            {hasSourceLanguageLabel(segment.provider, segment.languageCode) && (
                                                                 <span className="source-language-label" title={formatLanguageLabel(segment.languageCode)} aria-hidden="true">
                                                                     <span className="language-label__text">{formatLanguageLabel(segment.languageCode)}</span>
                                                                 </span>

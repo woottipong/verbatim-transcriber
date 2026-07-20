@@ -97,13 +97,11 @@ func NewGeminiProvider(ctx context.Context, cfg GeminiConfig) (*GeminiProvider, 
 		return nil, fmt.Errorf("unsupported Gemini target language code %q", normalized.TargetLanguageCode)
 	}
 	return &GeminiProvider{
-		cfg:     normalized,
-		results: make(chan domain.TranscriptResult, 100),
-		done:    make(chan struct{}),
-		segmenter: geminiSegmenter{
-			sampleRate: normalized.SampleRate,
-		},
-		now: time.Now,
+		cfg:       normalized,
+		results:   make(chan domain.TranscriptResult, 100),
+		done:      make(chan struct{}),
+		segmenter: newGeminiSegmenter(normalized.SampleRate),
+		now:       time.Now,
 	}, nil
 }
 
@@ -409,8 +407,8 @@ func (g *GeminiProvider) currentTime() time.Time {
 func (g *GeminiProvider) observeAudioForSegmentation(audio []byte, now time.Time) []domain.TranscriptResult {
 	g.transcriptMu.Lock()
 	defer g.transcriptMu.Unlock()
-	if g.segmenter.sampleRate <= 0 {
-		g.segmenter.sampleRate = normalizeGeminiConfig(g.cfg).SampleRate
+	if g.segmenter.sampleRate <= 0 || g.segmenter.rmsThreshold <= 0 || g.segmenter.silenceWindow <= 0 {
+		g.segmenter = newGeminiSegmenter(normalizeGeminiConfig(g.cfg).SampleRate)
 	}
 
 	pending := g.segmenter.observeAudio(audio, now)

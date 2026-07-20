@@ -91,6 +91,7 @@ func printStartupInfo(cfg *config.Config) {
 	providers := []providerInfo{
 		{"Google Cloud STT", cfg.HasGoogleKey(), "🌐"},
 		{"Gemini Live STT", cfg.HasGeminiKey(), "✨"},
+		{"OpenAI Realtime Whisper", cfg.HasOpenAITranscriptionKey(), "🤖"},
 		{"Azure Speech", cfg.HasAzureKey(), "☁️"},
 	}
 

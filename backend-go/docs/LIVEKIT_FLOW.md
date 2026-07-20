@@ -33,10 +33,10 @@ Viewer
 ## Agent flow
 
 1. Admin starts an agent with `POST /livekit/agent/start` and a provider name.
-2. The agent joins as `agent-<provider>-<timestamp>` and subscribes to audio tracks.
+2. The agent joins as `agent-<provider>` (the provider token may itself contain hyphens) and subscribes to audio tracks.
 3. Opus is decoded to mono 48 kHz PCM.
 4. Audio is batched into roughly 40 ms provider calls.
-5. Google receives 48 kHz; Gemini and Azure receive simple 3:1 decimated 16 kHz PCM.
+5. Google receives 48 kHz; Gemini and Azure receive anti-aliased 16 kHz PCM; GPT Realtime Whisper receives anti-aliased 24 kHz PCM16.
 6. Provider results are normalized and published reliably as JSON data packets.
 
 ## Viewer flow
@@ -76,7 +76,7 @@ Viewer
 }
 ```
 
-All transcript packets use reliable data-channel delivery. Google/Azure interim values remain replaceable drafts. Gemini source chunks do not map cleanly to traditional interim/final semantics, so the backend creates application-level pseudo-turns after 800 ms of low-energy PCM and 500 ms without transcript activity. Audio is still forwarded unchanged. Source `languageCode` is forwarded only when Gemini returns it; the configured source hint is not exposed as detected metadata. The frontend updates one source row for each `turnId`, while Gemini translation packets use `role: "translation"` and the same ID so the bilingual row stays grouped. Because the source and output streams are independent, alignment is best-effort rather than sentence-perfect.
+All transcript packets use reliable data-channel delivery. Google/Azure interim values remain replaceable drafts. Gemini source chunks do not map cleanly to traditional interim/final semantics, so the backend creates application-level pseudo-turns after 800 ms of low-energy PCM and 500 ms without transcript activity. GPT Realtime Whisper uses a transcription-only session, streams 24 kHz PCM, manually commits after the shared PCM silence boundary, publishes source interim deltas and completed finals, and performs bounded reconnects with one second of recent-audio replay.
 
 ## Key files
 

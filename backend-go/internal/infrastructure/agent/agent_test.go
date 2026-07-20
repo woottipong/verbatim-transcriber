@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 type lifecycleProvider struct {
 	startErr  error
+	err       error
 	stopCalls int
 	results   chan domain.TranscriptResult
 }
@@ -23,7 +25,7 @@ func (p *lifecycleProvider) Stop() error {
 	p.stopCalls++
 	return nil
 }
-func (p *lifecycleProvider) Err() error      { return nil }
+func (p *lifecycleProvider) Err() error      { return p.err }
 func (p *lifecycleProvider) SampleRate() int { return 48000 }
 func (p *lifecycleProvider) Name() string    { return "test" }
 
@@ -52,6 +54,35 @@ func TestStartProviderCleansUpAfterStartFailure(t *testing.T) {
 	}
 	if provider.stopCalls != 1 {
 		t.Fatalf("Stop() calls = %d, want 1", provider.stopCalls)
+	}
+}
+
+func TestHandleTranscriptionResultsStopsRunningAgentWhenProviderFails(t *testing.T) {
+	results := make(chan domain.TranscriptResult)
+	close(results)
+	provider := &lifecycleProvider{
+		err:     errors.New("realtime connection lost"),
+		results: results,
+	}
+	cancelled := make(chan struct{})
+	agent := &Agent{
+		isRunning:   true,
+		asrProvider: provider,
+		cancel:      func() { close(cancelled) },
+	}
+
+	agent.handleTranscriptionResults(provider, nil)
+
+	if agent.IsRunning() {
+		t.Fatal("agent remained running after provider results closed with an error")
+	}
+	select {
+	case <-cancelled:
+	default:
+		t.Fatal("agent context was not cancelled after provider failure")
+	}
+	if provider.stopCalls != 1 {
+		t.Fatalf("provider Stop() calls = %d, want 1", provider.stopCalls)
 	}
 }
 
@@ -108,6 +139,37 @@ func TestAudioBatchTargetBytesUsesLowLatencyWindow(t *testing.T) {
 	}
 	if got, want := audioBatchTargetBytes(16000, 40*time.Millisecond), 1280; got != want {
 		t.Fatalf("audioBatchTargetBytes() = %d, want %d", got, want)
+	}
+}
+
+func TestResamplePCM16SupportsProviderRates(t *testing.T) {
+	samples := make([]int16, 480)
+	if got, want := len(resamplePCM16(samples, 48000, 24000)), 240*2; got != want {
+		t.Fatalf("48 kHz to 24 kHz bytes = %d, want %d", got, want)
+	}
+	if got, want := len(resamplePCM16(samples, 48000, 16000)), 160*2; got != want {
+		t.Fatalf("48 kHz to 16 kHz bytes = %d, want %d", got, want)
+	}
+	if got, want := len(resamplePCM16(samples, 48000, 48000)), 480*2; got != want {
+		t.Fatalf("48 kHz passthrough bytes = %d, want %d", got, want)
+	}
+}
+
+func TestResamplePCM16FiltersFrequenciesAboveTargetNyquist(t *testing.T) {
+	samples := make([]int16, 480)
+	for i := range samples {
+		if i%2 == 0 {
+			samples[i] = 12000
+		} else {
+			samples[i] = -12000
+		}
+	}
+
+	resampled := resamplePCM16(samples, 48000, 24000)
+	for offset := 0; offset+1 < len(resampled); offset += 2 {
+		if sample := int16(binary.LittleEndian.Uint16(resampled[offset:])); sample != 0 {
+			t.Fatalf("aliased output sample = %d, want 0 after low-pass averaging", sample)
+		}
 	}
 }
 

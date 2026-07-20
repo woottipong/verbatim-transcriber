@@ -37,13 +37,13 @@ import {
     validateRoomName,
 } from '../lib/adminRooms';
 import { getControlAuthHeaders, toHttpUrl } from '../lib/runtime';
+import { providerLabels } from '../lib/providers';
+import type { AgentProvider } from '../lib/providers';
 
 interface AdminPageProps {
     onBack?: () => void;
     backendUrl: string;
 }
-
-type AgentProvider = 'google' | 'gemini' | 'azure';
 
 interface Notice {
     tone: 'success' | 'error';
@@ -54,12 +54,6 @@ interface TranscriptLinkState {
     roomName: string;
     response: TranscriptTokenResponse;
 }
-
-const providerLabels: Record<AgentProvider, string> = {
-    google: 'Google Cloud STT',
-    gemini: 'Gemini Live',
-    azure: 'Azure Speech',
-};
 
 export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     const httpBackendUrl = toHttpUrl(backendUrl);

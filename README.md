@@ -5,7 +5,7 @@ LiveKit-based real-time Thai speech transcription for publishers, viewers, and o
 ## Key features
 
 - One LiveKit workflow for microphone publishing and transcription.
-- Selectable Google, Gemini, or Azure room agents.
+- Selectable Google, Gemini, Azure, or GPT Realtime Whisper room agents.
 - Interim and committed transcript presentation optimized for Thai text.
 - Read-only viewer with room audio playback and provider filtering.
 - Admin-first room workspace for rooms, participants, share links, and agent lifecycle.
@@ -36,7 +36,7 @@ Publisher / Viewer / Admin (React)
                          │
                     Go room agent
                          │
-              Google / Gemini / Azure
+              Google / Gemini / Azure / OpenAI Realtime Whisper
 ```
 
 The public application does not expose direct audio WebSocket endpoints. Azure's WebSocket connection is an internal upstream protocol used only by the Azure provider.
@@ -69,7 +69,7 @@ The public application does not expose direct audio WebSocket endpoints. Azure's
 | Backend | Go 1.24, Fiber v2 |
 | Realtime server | LiveKit |
 | Audio decode | Opus through `gopkg.in/hraban/opus.v2` (CGO) |
-| ASR | Google Speech-to-Text V2, Gemini Live API, Azure Speech |
+| ASR | Google Speech-to-Text V2, Gemini Live API, Azure Speech, OpenAI Realtime Whisper |
 
 ## Prerequisites
 
@@ -155,6 +155,7 @@ Open:
 | --- | --- | --- | --- |
 | Google | 48 kHz Linear16 PCM | `chirp_2`, `th-TH`, `asia-southeast1`, punctuation on | Interim snapshots and final utterances; reconnects before the five-minute limit |
 | Gemini | 16 kHz PCM | `gemini-3.5-live-translate-preview`, optional source hint, target defaults to `th` | Source chunks are retained; translated text uses the configured target metadata and model audio is discarded |
+| GPT Realtime Whisper | 24 kHz PCM16 | Realtime transcription intent with model `gpt-realtime-whisper`, source language defaults to `th` | Source interim deltas and completed finals; bounded reconnect with recent-audio replay; no translation output |
 | Azure | 16 kHz PCM/WAV stream | Thai conversation recognition, `southeastasia` | Interim hypotheses and finalized phrases |
 
 Latency and interim frequency depend on service, model, region, network, and speech pattern. A provider may finalize an utterance without emitting interim updates.
@@ -182,6 +183,8 @@ Latency and interim frequency depend on service, model, region, network, and spe
 | `GEMINI_MODEL` | No | `gemini-3.5-live-translate-preview` | Gemini model |
 | `GEMINI_LANGUAGE_CODE` | No | — | Optional source language hint; empty enables detection |
 | `GEMINI_TARGET_LANGUAGE_CODE` | No | `th` | Supported BCP-47 translation target and UI language badge |
+| `OPENAI_API_KEY` | For GPT Realtime Whisper | — | OpenAI API key; enables the `gpt-realtime-whisper` provider |
+| `OPENAI_LANGUAGE_CODE` | No | `th` | Source-language hint sent to the transcription session |
 | `AZURE_SUBSCRIPTION_KEY` | For Azure | — | Azure Speech key |
 | `AZURE_REGION` | No | `southeastasia` | Azure region |
 
@@ -219,7 +222,7 @@ curl -X POST http://localhost:3000/livekit/agent/start \
   -d '{"roomName":"test","provider":"google"}'
 ```
 
-Valid providers are `google`, `gemini`, and `azure` when configured.
+Valid providers are `google`, `gemini`, `azure`, and `gpt-realtime-whisper` when configured.
 
 ### External transcript WebSocket
 
@@ -267,7 +270,7 @@ Transcript events use a room-scoped sequence:
 }
 ```
 
-Thai spacing is normalized in the Go agent. Google/Azure interim values update draft state by provider/speaker. Gemini source chunks are accumulated into one row per Live Translate turn even when marked non-final, and translated output is attached to that same grouped row.
+Thai spacing is normalized in the Go agent. Google/Azure interim values update draft state by provider/speaker. Gemini source chunks are accumulated into one row per Live Translate turn even when marked non-final, and translated output is attached to that same grouped row. GPT Realtime Whisper uses the dedicated Realtime transcription intent, streams 24 kHz PCM16 continuously (including silence), publishes source interim deltas and completed finals, and retries recoverable WebSocket failures with bounded backoff plus up to one second of recent-audio replay.
 
 ## Development and testing
 

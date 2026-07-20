@@ -2,7 +2,7 @@
 // participants and performs real-time speech-to-text transcription.
 //
 // The agent connects to a LiveKit room, subscribes to audio tracks,
-// decodes Opus audio, and sends it to ASR providers (Google, Gemini, or Azure)
+// decodes Opus audio, and sends it to ASR providers (Google, Gemini, Azure, or OpenAI Realtime Whisper)
 // for transcription. Results are published back to the room via Data Channel.
 package agent
 
@@ -50,6 +50,48 @@ const maxLoggedTranscriptRunes = 160
 
 func audioBatchTargetBytes(sampleRate int, duration time.Duration) int {
 	return sampleRate * 2 * int(duration) / int(time.Second)
+}
+
+func resamplePCM16(samples []int16, sourceRate, targetRate int) []byte {
+	if len(samples) == 0 || sourceRate <= 0 || targetRate <= 0 {
+		return nil
+	}
+	if sourceRate == targetRate {
+		out := make([]byte, len(samples)*2)
+		for i, sample := range samples {
+			out[i*2] = byte(sample)
+			out[i*2+1] = byte(sample >> 8)
+		}
+		return out
+	}
+	if targetRate > sourceRate {
+		// The LiveKit decoder currently produces 48 kHz audio. Keep this
+		// helper conservative rather than inventing samples for an unsupported
+		// provider rate.
+		return nil
+	}
+	outputSamples := len(samples) * targetRate / sourceRate
+	out := make([]byte, outputSamples*2)
+	for i := 0; i < outputSamples; i++ {
+		// Average each source interval before decimation so out-of-band energy
+		// is attenuated instead of being folded back into the speech band.
+		start := i * sourceRate / targetRate
+		end := (i + 1) * sourceRate / targetRate
+		if end <= start {
+			end = start + 1
+		}
+		if end > len(samples) {
+			end = len(samples)
+		}
+		var sum int64
+		for _, sample := range samples[start:end] {
+			sum += int64(sample)
+		}
+		sample := int16(sum / int64(end-start))
+		out[i*2] = byte(sample)
+		out[i*2+1] = byte(sample >> 8)
+	}
+	return out
 }
 
 func transcriptDeliveryReliable(_ bool) bool {
@@ -112,13 +154,13 @@ type Agent struct {
 	isRunning         bool
 	stopRequested     bool
 	cancel            context.CancelFunc
-	preferredProvider string // "google", "gemini", "azure", or "" for auto
+	preferredProvider string // "google", "gemini", "azure", "gpt-realtime-whisper", or "" for auto
 	roomName          string // store room name for status
 	transcriptSink    TranscriptSink
 }
 
 // New creates a new LiveKit ASR Agent
-// provider can be "google", "gemini", "azure", or "" for auto-detect
+// provider can be "google", "gemini", "azure", "gpt-realtime-whisper", or "" for auto-detect
 func New(cfg *config.Config, provider string, sinks ...TranscriptSink) *Agent {
 	var sink TranscriptSink
 	if len(sinks) > 0 {
@@ -214,6 +256,8 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 			identity = "agent-azure"
 		} else if a.config.HasGeminiKey() {
 			identity = "agent-gemini"
+		} else if a.config.HasOpenAITranscriptionKey() {
+			identity = "agent-gpt-realtime-whisper"
 		} else {
 			identity = "agent-unknown"
 		}
@@ -301,8 +345,6 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 	// Determine which ASR provider to use based on preference
 	var provider domain.ASRProvider
 	var err error
-	var needsResample bool // Azure needs 16kHz, WebRTC sends 48kHz
-
 	// Check preferred provider first
 	switch a.preferredProvider {
 	case "azure":
@@ -314,7 +356,6 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 				SegmentationSilenceTimeout:     a.config.AzureConfig.SegmentationSilenceTimeout,
 				SegmentationMaxSilenceDuration: a.config.AzureConfig.SegmentationMaxSilenceDuration,
 			})
-			needsResample = true
 			if err != nil {
 				log.Printf("⚠️ [Agent] Failed to init Azure provider: %v", err)
 			}
@@ -348,15 +389,27 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 				TargetLanguageCode: a.config.GeminiConfig.TargetLanguageCode,
 				SampleRate:         a.config.GeminiConfig.SampleRate,
 			})
-			needsResample = true
 			if err != nil {
 				log.Printf("⚠️ [Agent] Failed to init Gemini provider: %v", err)
 			}
 		} else {
 			log.Println("⚠️ [Agent] Gemini requested but no API key configured")
 		}
+	case "gpt-realtime-whisper":
+		if a.config.HasOpenAITranscriptionKey() {
+			provider, err = asr.NewOpenAITranscriptionProvider(ctx, asr.OpenAITranscriptionConfig{
+				APIKey:       a.config.OpenAIAPIKey,
+				LanguageCode: a.config.OpenAIConfig.LanguageCode,
+				SampleRate:   a.config.OpenAIConfig.SampleRate,
+			})
+			if err != nil {
+				log.Printf("⚠️ [Agent] Failed to init OpenAI Realtime Whisper provider: %v", err)
+			}
+		} else {
+			log.Println("⚠️ [Agent] OpenAI Realtime Whisper requested but no API key configured")
+		}
 	default:
-		// Auto-detect: preserve the existing Google/Azure priority, then use Gemini.
+		// Auto-detect: preserve the existing Google/Azure/Gemini priority, then use OpenAI Realtime Whisper.
 		if a.config.HasGoogleKey() {
 			provider, err = asr.NewGoogleProvider(ctx, asr.GoogleConfig{
 				CredentialsFile:       a.config.GoogleApplicationCredentials,
@@ -381,7 +434,6 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 				SegmentationSilenceTimeout:     a.config.AzureConfig.SegmentationSilenceTimeout,
 				SegmentationMaxSilenceDuration: a.config.AzureConfig.SegmentationMaxSilenceDuration,
 			})
-			needsResample = true
 			if err != nil {
 				log.Printf("⚠️ [Agent] Failed to init Azure provider: %v", err)
 			}
@@ -394,9 +446,18 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 				TargetLanguageCode: a.config.GeminiConfig.TargetLanguageCode,
 				SampleRate:         a.config.GeminiConfig.SampleRate,
 			})
-			needsResample = true
 			if err != nil {
 				log.Printf("⚠️ [Agent] Failed to init Gemini provider: %v", err)
+			}
+		}
+		if provider == nil && a.config.HasOpenAITranscriptionKey() {
+			provider, err = asr.NewOpenAITranscriptionProvider(ctx, asr.OpenAITranscriptionConfig{
+				APIKey:       a.config.OpenAIAPIKey,
+				LanguageCode: a.config.OpenAIConfig.LanguageCode,
+				SampleRate:   a.config.OpenAIConfig.SampleRate,
+			})
+			if err != nil {
+				log.Printf("⚠️ [Agent] Failed to init OpenAI Realtime Whisper provider: %v", err)
 			}
 		}
 	}
@@ -406,7 +467,8 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		return
 	}
 
-	log.Printf("🎯 [Agent] Using %s for transcription (resample: %v)", provider.Name(), needsResample)
+	targetSampleRate := provider.SampleRate()
+	log.Printf("🎯 [Agent] Using %s for transcription (input sample rate: %d Hz)", provider.Name(), targetSampleRate)
 
 	a.mu.Lock()
 	if !a.isRunning {
@@ -422,9 +484,11 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 	cleanupProvider, err := startProvider(ctx, provider)
 	if err != nil {
 		log.Printf("❌ [Agent] Failed to start ASR provider: %v", err)
+		a.stopAfterProviderTermination(provider, err)
 		return
 	}
 	defer cleanupProvider()
+	log.Printf("✅ [Agent] ASR provider started: %s", provider.Name())
 
 	// Handle transcription results
 	go a.handleTranscriptionResults(provider, participant)
@@ -445,6 +509,8 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 	// capture-side latency to roughly two 20ms WebRTC audio packets.
 	batchTargetBytes := audioBatchTargetBytes(provider.SampleRate(), liveAudioBatchDuration)
 	audioBatch := make([]byte, 0, batchTargetBytes*2)
+	loggedDecodedAudio := false
+	loggedSentAudio := false
 
 	for {
 		select {
@@ -482,33 +548,24 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		if samplesDecoded == 0 {
 			continue
 		}
+		if !loggedDecodedAudio {
+			loggedDecodedAudio = true
+			log.Printf("🎙️ [Agent] First audio frame decoded: samples=%d pcm_bytes=%d provider_rate=%d", samplesDecoded, samplesDecoded*2, targetSampleRate)
+		}
 
 		var pcmBytes []byte
 
-		if needsResample {
-			// Resample from 48kHz to 16kHz (3:1 decimation)
-			resampledSamples := samplesDecoded / 3
-			pcmBytes = make([]byte, resampledSamples*2)
-			for i := 0; i < resampledSamples; i++ {
-				// Simple decimation: take every 3rd sample
-				sample := pcmBuffer[i*3]
-				pcmBytes[i*2] = byte(sample)
-				pcmBytes[i*2+1] = byte(sample >> 8)
-			}
-		} else {
-			// No resampling needed (Google uses 48kHz)
-			pcmBytes = make([]byte, samplesDecoded*2)
-			for i := 0; i < samplesDecoded; i++ {
-				pcmBytes[i*2] = byte(pcmBuffer[i])
-				pcmBytes[i*2+1] = byte(pcmBuffer[i] >> 8)
-			}
-		}
+		pcmBytes = resamplePCM16(pcmBuffer[:samplesDecoded], 48000, targetSampleRate)
 
 		// Accumulate into batch
 		audioBatch = append(audioBatch, pcmBytes...)
 
 		// Send when batch reaches target size (~100ms of audio)
 		if len(audioBatch) >= batchTargetBytes {
+			if !loggedSentAudio {
+				loggedSentAudio = true
+				log.Printf("📤 [Agent] First audio batch to %s: bytes=%d", provider.Name(), len(audioBatch))
+			}
 			if err := provider.SendAudio(audioBatch); err != nil {
 				log.Printf("❌ [Agent] Error sending audio to ASR: %v", err)
 				break
@@ -558,6 +615,24 @@ func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, particip
 			a.transcriptSink.Publish(a.GetRoom(), msg)
 		}
 	}
+
+	a.stopAfterProviderTermination(provider, provider.Err())
+}
+
+func (a *Agent) stopAfterProviderTermination(provider domain.ASRProvider, providerErr error) {
+	a.mu.Lock()
+	isCurrentProvider := a.isRunning && !a.stopRequested && a.asrProvider == provider
+	a.mu.Unlock()
+	if !isCurrentProvider {
+		return
+	}
+
+	if providerErr != nil {
+		log.Printf("❌ [Agent] ASR provider %s stopped unexpectedly: %v", provider.Name(), providerErr)
+	} else {
+		log.Printf("⚠️ [Agent] ASR provider %s closed its result stream unexpectedly", provider.Name())
+	}
+	a.Stop()
 }
 
 func newTranscriptMessage(result domain.TranscriptResult, provider, speaker string) TranscriptMessage {

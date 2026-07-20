@@ -14,7 +14,7 @@ export interface TranscriptSegment {
   text: string;
   isFinal: boolean;
   timestamp: number;
-  provider?: string;   // ASR provider: "google", "gemini", "azure"
+  provider?: string;   // ASR provider: "google", "gemini", "azure", "gpt-realtime-whisper"
   speaker?: string;    // Speaker identity: "user-123"
   role?: 'source' | 'translation';
   languageCode?: string;

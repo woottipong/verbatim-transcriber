@@ -19,7 +19,7 @@ func TestPCM16RMSNormalizesSamples(t *testing.T) {
 }
 
 func TestGeminiSegmenterMarksBoundaryAfterSilence(t *testing.T) {
-	segmenter := geminiSegmenter{sampleRate: 16000}
+	segmenter := newGeminiSegmenter(16000)
 	now := time.Unix(100, 0)
 	segmenter.observeTranscript(now)
 
@@ -40,7 +40,7 @@ func TestGeminiSegmenterMarksBoundaryAfterSilence(t *testing.T) {
 }
 
 func TestGeminiSegmenterWaitsForTranscriptGrace(t *testing.T) {
-	segmenter := geminiSegmenter{sampleRate: 16000}
+	segmenter := newGeminiSegmenter(16000)
 	now := time.Unix(200, 0)
 	segmenter.observeAudio(pcm16Batch(4000, 100*time.Millisecond, 16000), now)
 	segmenter.observeAudio(pcm16Batch(0, 800*time.Millisecond, 16000), now.Add(800*time.Millisecond))
@@ -55,7 +55,7 @@ func TestGeminiSegmenterWaitsForTranscriptGrace(t *testing.T) {
 }
 
 func TestGeminiSegmenterCancelsBoundaryWhenSpeechResumes(t *testing.T) {
-	segmenter := geminiSegmenter{sampleRate: 16000}
+	segmenter := newGeminiSegmenter(16000)
 	now := time.Unix(300, 0)
 	segmenter.observeAudio(pcm16Batch(4000, 100*time.Millisecond, 16000), now)
 	segmenter.observeAudio(pcm16Batch(0, 800*time.Millisecond, 16000), now.Add(800*time.Millisecond))

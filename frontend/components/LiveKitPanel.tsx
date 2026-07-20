@@ -5,6 +5,7 @@ import { getLiveKitSessionPresentation } from '../lib/liveKitSession';
 import { shouldStickToLatest } from '../lib/transcriptViewport';
 import TranslationBlock from './TranslationBlock';
 import { formatLanguageLabel, isTranscriptTurnLive, normalizeLanguageTag } from '../lib/transcriptMessages';
+import { formatProviderName, hasSourceLanguageLabel, providerAccents, providerDraftClasses, providerFromAgentIdentity } from '../lib/providers';
 
 interface LiveKitPanelProps {
   transcripts: TranscriptSegment[];
@@ -26,24 +27,8 @@ const formatAgentProvider = (identity: string | null): string => {
   if (!identity) return '';
   return identity
     .split(',')
-    .map(id => {
-      const parts = id.split('-');
-      if (parts.length > 1) {
-        const provider = parts[1].toLowerCase();
-        if (provider === 'google') return 'Google Cloud STT';
-        if (provider === 'gemini') return 'Gemini Live';
-        if (provider === 'azure') return 'Azure Speech';
-        return parts[1];
-      }
-      return id;
-    })
+    .map(id => formatProviderName(providerFromAgentIdentity(id.trim())))
     .join(', ');
-};
-
-const providerAccents: Record<string, string> = {
-  google: 'bg-sky-400',
-  gemini: 'bg-violet-400',
-  azure: 'bg-cyan-400',
 };
 
 interface DraftClass {
@@ -51,11 +36,7 @@ interface DraftClass {
   text: string;
 }
 
-const draftClasses: Record<string, DraftClass> = {
-  google: { bg: 'bg-sky-500/5 border-sky-500/10', text: 'text-sky-400' },
-  gemini: { bg: 'bg-violet-500/5 border-violet-500/10', text: 'text-violet-400' },
-  azure: { bg: 'bg-cyan-500/5 border-cyan-500/10', text: 'text-cyan-400' },
-};
+const draftClasses: Record<string, DraftClass> = providerDraftClasses;
 
 const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
   transcripts,
@@ -115,13 +96,13 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
     });
     if (isAgentConnected && agentIdentity) {
       agentIdentity.split(',').forEach(identity => {
-        const provider = identity.split('-')[1];
+        const provider = providerFromAgentIdentity(identity.trim());
         if (provider) ensureGroup(provider);
       });
     }
     if (groups.size === 0) ensureGroup('google');
 
-    const order = ['google', 'gemini', 'azure'];
+    const order = ['google', 'gemini', 'azure', 'gpt-realtime-whisper'];
     return Array.from(groups.entries()).sort(([left], [right]) => {
       const leftOrder = order.indexOf(left);
       const rightOrder = order.indexOf(right);
@@ -294,7 +275,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                       : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                     }`}
                   >
-                    {provider === 'google' ? 'Google Cloud STT' : provider === 'gemini' ? 'Gemini Live' : provider === 'azure' ? 'Azure Speech' : provider}
+                    {formatProviderName(provider)}
                   </button>
                 ))}
               </div>
@@ -314,7 +295,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                   <div className="px-4 py-2.5 bg-slate-900/40 border-b border-slate-800 flex items-center justify-between text-xs font-semibold text-slate-400 select-none shrink-0">
                     <span className="flex items-center gap-2 uppercase tracking-wider">
                       <span className={`w-1 h-3 rounded ${providerAccents[provider] ?? 'bg-slate-500'}`} aria-hidden="true" />
-                      {provider === 'google' ? 'Google Cloud STT' : provider === 'gemini' ? 'Gemini Live' : provider === 'azure' ? 'Azure Speech' : provider}
+                      {formatProviderName(provider)}
                     </span>
                     <span className="tabular-nums text-slate-400 font-medium">{providerTranscripts.length} lines</span>
                   </div>
@@ -344,11 +325,11 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                               </span>
                               <div className="transcript-bilingual min-w-0 flex-1">
                                 <p
-                                  className={`transcript-source-line break-words text-[1.05rem] font-medium leading-7 text-slate-100 ${segment.provider === 'gemini' && segment.languageCode ? 'transcript-source-line--labeled' : ''}`}
+                                  className={`transcript-source-line break-words text-[1.05rem] font-medium leading-7 text-slate-100 ${hasSourceLanguageLabel(segment.provider, segment.languageCode) ? 'transcript-source-line--labeled' : ''}`}
                                   lang={normalizeLanguageTag(segment.languageCode)}
                                   dir="auto"
                                 >
-                                  {segment.provider === 'gemini' && segment.languageCode && (
+                                  {hasSourceLanguageLabel(segment.provider, segment.languageCode) && (
                                     <span className="source-language-label" title={formatLanguageLabel(segment.languageCode)} aria-hidden="true">
                                       <span className="language-label__text">{formatLanguageLabel(segment.languageCode)}</span>
                                     </span>
