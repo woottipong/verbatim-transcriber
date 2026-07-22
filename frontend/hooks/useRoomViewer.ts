@@ -20,15 +20,22 @@ import { appendBounded } from '../lib/runtime';
 import { getControlAuthHeaders } from '../lib/runtime';
 import {
     InterimTranscript,
-    appendTranscriptIfNew,
+    PendingTranslation,
+    attachTranslation,
+    attachTranslationToInterims,
     clearInterimsBySource,
+    clearPendingTranslationsBySource,
     createCommittedTranscript,
+    createInterimTranscript,
     getTranscriptKey,
-    isAppendOnlyInterimProvider,
+    getTranscriptTurnKey,
     parseTranscriptMessage,
+    prunePendingTranslations,
     removeInterim,
+    storePendingTranslation,
     upsertInterim,
 } from '../lib/transcriptMessages';
+import { providerFromAgentIdentity } from '../lib/providers';
 
 // Agent info with provider
 export interface AgentInfo {
@@ -80,6 +87,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
     const isAudioMutedRef = useRef(false);
     const connectionAttemptRef = useRef(0);
+    const translationsByTurnRef = useRef<Map<string, PendingTranslation>>(new Map());
 
     const cleanupAudioElements = useCallback(() => {
         audioElementsRef.current.forEach(audioElement => {
@@ -96,17 +104,11 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
 
     // Extract provider from agent identity (e.g., "agent-google-xxx" -> "google", "agent-google" -> "google")
     const getProviderFromIdentity = useCallback((identity: string): string => {
-        if (identity === 'asr-agent') return 'unknown';
-        if (!identity.startsWith('agent-')) return 'unknown';
-
-        // Handle formats: "agent-google", "agent-google-xxx", "agent-azure", etc.
-        const withoutPrefix = identity.slice(6); // Remove "agent-"
-        const parts = withoutPrefix.split('-');
-        return parts[0] || 'unknown'; // First part after "agent-" is the provider
+        return providerFromAgentIdentity(identity);
     }, []);
 
     // Fetch token from backend (as viewer, not publishing)
-    const fetchToken = useCallback(async (roomName: string): Promise<string> => {
+    const fetchToken = useCallback(async (roomName: string): Promise<{ token: string; wsUrl?: string }> => {
         const identity = `viewer-${Date.now()}`;
 
         const response = await fetch(tokenEndpoint, {
@@ -126,7 +128,10 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         }
 
         const data = await response.json();
-        return data.token;
+        return {
+            token: data.token,
+            wsUrl: data.wsUrl || data.ws_url,
+        };
     }, [tokenEndpoint]);
 
     // Handle audio track subscription
@@ -208,13 +213,6 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             const provider = message.provider || getProviderFromIdentity(agentIdentity);
             const key = getTranscriptKey(message, agentIdentity);
 
-            console.log('[Viewer] 📝 Transcript:', {
-                text: message.text,
-                isFinal: message.isFinal,
-                provider,
-                from: agentIdentity,
-            });
-
             // Update agent provider if we got it from the message
             if (message.provider && isAgent(agentIdentity)) {
                 setAgents(prev => prev.map(a =>
@@ -223,9 +221,19 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             }
 
             const speaker = message.speaker || agentIdentity;
-            const isAppendOnly = isAppendOnlyInterimProvider(provider);
 
-            if (isAppendOnly || message.isFinal) {
+            if (message.role === 'translation') {
+                translationsByTurnRef.current = storePendingTranslation(
+                    translationsByTurnRef.current,
+                    message,
+                    agentIdentity,
+                );
+                setTranscripts(prev => attachTranslation(prev, message, agentIdentity).transcripts);
+                setInterimTranscripts(prev => attachTranslationToInterims(prev, message, agentIdentity).interims);
+                return;
+            }
+
+            if (message.isFinal) {
                 segmentIdRef.current++;
                 const segment = createCommittedTranscript(
                     `view-${segmentIdRef.current}`,
@@ -233,19 +241,29 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
                     provider,
                     speaker,
                 );
-                setTranscripts(prev => isAppendOnly
-                    ? appendTranscriptIfNew(prev, segment)
-                    : appendBounded(prev, segment));
+                setTranscripts(prev => {
+                    let next = appendBounded(prev, segment);
+                    if (message.turnId) {
+                        translationsByTurnRef.current = prunePendingTranslations(translationsByTurnRef.current);
+                        const pending = translationsByTurnRef.current.get(getTranscriptTurnKey(message, agentIdentity));
+                        if (pending) next = attachTranslation(next, pending.message, pending.sourceIdentity).transcripts;
+                    }
+                    return next;
+                });
 
                 setInterimTranscripts(prev => removeInterim(prev, key));
             } else {
-                setInterimTranscripts(prev => upsertInterim(prev, {
-                    key,
-                    text: message.text,
-                    provider,
-                    speaker,
-                    sourceIdentity: agentIdentity,
-                }));
+                setInterimTranscripts(prev => {
+                    let next = upsertInterim(prev, createInterimTranscript(message, agentIdentity, provider));
+                    if (message.turnId) {
+                        translationsByTurnRef.current = prunePendingTranslations(translationsByTurnRef.current);
+                        const pending = translationsByTurnRef.current.get(getTranscriptTurnKey(message, agentIdentity));
+                        if (pending) {
+                            next = attachTranslationToInterims(next, pending.message, pending.sourceIdentity).interims;
+                        }
+                    }
+                    return next;
+                });
             }
         } catch (err) {
             console.error('[Viewer] Failed to parse transcript data:', err);
@@ -273,6 +291,10 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         if (isAgent(participant.identity)) {
             setAgents(prev => prev.filter(a => a.identity !== participant.identity));
             setInterimTranscripts(prev => clearInterimsBySource(prev, participant.identity));
+            translationsByTurnRef.current = clearPendingTranslationsBySource(
+                translationsByTurnRef.current,
+                participant.identity,
+            );
             console.log('[Viewer] 🤖 Agent disconnected:', participant.identity);
         }
     }, [isAgent]);
@@ -290,13 +312,14 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             cleanupAudioElements();
             setAudioParticipants([]);
             setInterimTranscripts(new Map());
+            translationsByTurnRef.current.clear();
 
             setConnectionState(ConnectionState.CONNECTING);
             setError(null);
             setCurrentRoomName(roomName);
 
             // Get token
-            const token = await fetchToken(roomName);
+            const { token, wsUrl } = await fetchToken(roomName);
             if (connectionAttempt !== connectionAttemptRef.current) return;
             console.log('[Viewer] 🎫 Token received for room:', roomName);
 
@@ -321,6 +344,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
                 setConnectionState(ConnectionState.DISCONNECTED);
                 setAgents([]);
                 setInterimTranscripts(new Map());
+                translationsByTurnRef.current.clear();
                 cleanupAudioElements();
                 setAudioParticipants([]);
             });
@@ -346,7 +370,8 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             roomRef.current = newRoom;
 
             // Connect (viewer - no local tracks)
-            await newRoom.connect(import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880', token, {
+            const serverUrl = wsUrl || import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880';
+            await newRoom.connect(serverUrl, token, {
                 autoSubscribe: true,
             });
             if (connectionAttempt !== connectionAttemptRef.current) {
@@ -397,6 +422,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         setRoom(null);
         setAgents([]);
         setInterimTranscripts(new Map());
+        translationsByTurnRef.current.clear();
         setCurrentRoomName(null);
         setConnectionState(ConnectionState.DISCONNECTED);
         cleanupAudioElements();
@@ -407,6 +433,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     const clearTranscripts = useCallback(() => {
         setTranscripts([]);
         setInterimTranscripts(new Map());
+        translationsByTurnRef.current.clear();
         segmentIdRef.current = 0;
     }, []);
 

@@ -6,11 +6,11 @@ product
 
 ## Users
 
-Thai-language transcription operators, producers, viewers, and administrators monitoring live speech in a focused working environment. Their immediate job is to join a room, verify that microphone audio and transcription are active, and read continuously updating transcripts without losing context.
+Thai-language transcription operators, producers, viewers, and administrators monitoring live speech in a focused working environment. Their immediate job is to join a room, verify that the selected microphone or Chrome Tab audio and transcription are active, and read continuously updating transcripts without losing context.
 
 ## Product Purpose
 
-Thai Verbatim Transcriber is a LiveKit-based real-time transcription workspace. It publishes microphone audio through WebRTC, transcribes it through a selected backend ASR agent, and makes session state, incoming interim text, and committed transcript segments clear enough for an operator to act on them immediately.
+Thai Verbatim Transcriber is a LiveKit-based real-time transcription workspace. It publishes microphone or Chrome Tab audio through WebRTC, transcribes it through a selected backend ASR agent, and makes session state, incoming Draft text, and committed transcript segments clear enough for an operator to act on them immediately.
 
 ## Brand Personality
 

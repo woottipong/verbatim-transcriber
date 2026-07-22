@@ -1,5 +1,9 @@
 type ScheduleUpdate = (callback: () => void, delayMs: number) => number;
 type CancelUpdate = (timerId: number) => void;
+type FinalDelivery = 'next-interval' | 'immediate';
+
+export const INTERIM_TRANSCRIPT_UPDATE_INTERVAL_MS = 33;
+export const GEMINI_TRANSCRIPT_UPDATE_INTERVAL_MS = 100;
 
 export class TranscriptUpdateBuffer<T> {
     private readonly pending = new Map<string, T>();
@@ -11,6 +15,7 @@ export class TranscriptUpdateBuffer<T> {
     private readonly cancel: CancelUpdate;
     private readonly isFinal: (update: T) => boolean;
     private readonly getKey: (update: T) => string;
+    private readonly finalDelivery: FinalDelivery;
 
     constructor(
         deliver: (update: T) => void,
@@ -19,6 +24,7 @@ export class TranscriptUpdateBuffer<T> {
         cancel: CancelUpdate = timerId => window.clearTimeout(timerId),
         isFinal: (update: T) => boolean = () => false,
         getKey: (update: T) => string = () => 'default',
+        finalDelivery: FinalDelivery = 'next-interval',
     ) {
         this.deliver = deliver;
         this.intervalMs = intervalMs;
@@ -26,6 +32,7 @@ export class TranscriptUpdateBuffer<T> {
         this.cancel = cancel;
         this.isFinal = isFinal;
         this.getKey = getKey;
+        this.finalDelivery = finalDelivery;
     }
 
     push(update: T): void {
@@ -37,6 +44,12 @@ export class TranscriptUpdateBuffer<T> {
 
             if (latestInterim) {
                 this.deliver(latestInterim);
+            }
+
+            if (this.finalDelivery === 'immediate') {
+                this.pendingFinals.delete(key);
+                this.deliver(update);
+                return;
             }
 
             if (this.timerId === null) {

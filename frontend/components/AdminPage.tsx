@@ -3,7 +3,6 @@ import {
     AlertTriangle,
     ArrowLeft,
     Bot,
-    Check,
     Copy,
     ExternalLink,
     Eye,
@@ -19,6 +18,7 @@ import {
     Users,
     X,
 } from 'lucide-react';
+import ToastViewport from './ToastViewport';
 import {
     AgentStatus,
     createRoom,
@@ -37,13 +37,13 @@ import {
     validateRoomName,
 } from '../lib/adminRooms';
 import { getControlAuthHeaders, toHttpUrl } from '../lib/runtime';
+import { providerLabels } from '../lib/providers';
+import type { AgentProvider } from '../lib/providers';
 
 interface AdminPageProps {
     onBack?: () => void;
     backendUrl: string;
 }
-
-type AgentProvider = 'google' | 'gemini' | 'azure';
 
 interface Notice {
     tone: 'success' | 'error';
@@ -54,12 +54,6 @@ interface TranscriptLinkState {
     roomName: string;
     response: TranscriptTokenResponse;
 }
-
-const providerLabels: Record<AgentProvider, string> = {
-    google: 'Google Cloud STT',
-    gemini: 'Gemini Live',
-    azure: 'Azure Speech',
-};
 
 export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     const httpBackendUrl = toHttpUrl(backendUrl);
@@ -80,10 +74,8 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     const [isDeletingRoom, setIsDeletingRoom] = useState(false);
     const [isGeneratingTranscriptLink, setIsGeneratingTranscriptLink] = useState(false);
     const [transcriptLink, setTranscriptLink] = useState<TranscriptLinkState | null>(null);
-    const [error, setError] = useState<string | null>(null);
     const [notice, setNotice] = useState<Notice | null>(null);
     const createRoomInputRef = useRef<HTMLInputElement>(null);
-    const noticeTimerRef = useRef<number | null>(null);
     const roomsRequestRef = useRef(0);
     const agentStatusRequestRef = useRef(0);
 
@@ -92,6 +84,13 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         () => agentStatus.agents.filter(agent => agent.room === selectedRoomName),
         [agentStatus.agents, selectedRoomName],
     );
+    const runningAgentCounts = useMemo(() => {
+        const counts = new Map<string, number>();
+        agentStatus.agents.forEach(agent => {
+            counts.set(agent.room, (counts.get(agent.room) ?? 0) + 1);
+        });
+        return counts;
+    }, [agentStatus.agents]);
     const filteredRooms = useMemo(() => {
         const query = searchQuery.trim().toLowerCase();
         if (!query) return rooms;
@@ -104,14 +103,6 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
 
     const showNotice = useCallback((nextNotice: Notice) => {
         setNotice(nextNotice);
-        if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
-        noticeTimerRef.current = window.setTimeout(() => setNotice(null), 3600);
-    }, []);
-
-    useEffect(() => {
-        return () => {
-            if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
-        };
     }, []);
 
     useEffect(() => {
@@ -135,14 +126,13 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             const nextRooms = await fetchDetailedRooms(backendUrl);
             if (requestId !== roomsRequestRef.current) return;
             setRooms(nextRooms);
-            setError(null);
         } catch (err) {
             if (requestId !== roomsRequestRef.current) return;
-            setError(err instanceof Error ? err.message : 'Failed to load rooms');
+            showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to load rooms' });
         } finally {
             if (requestId === roomsRequestRef.current) setIsLoadingRooms(false);
         }
-    }, [backendUrl]);
+    }, [backendUrl, showNotice]);
 
     const refreshAgentStatus = useCallback(async () => {
         const requestId = ++agentStatusRequestRef.current;
@@ -158,13 +148,17 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     }, [backendUrl]);
 
     useEffect(() => {
-        void refreshRooms();
-        void refreshAgentStatus();
-        const interval = window.setInterval(() => {
-            void refreshRooms();
-            void refreshAgentStatus();
-        }, 5000);
-        return () => window.clearInterval(interval);
+        let disposed = false;
+        let nextPoll: number | undefined;
+        const poll = async () => {
+            await Promise.allSettled([refreshRooms(), refreshAgentStatus()]);
+            if (!disposed) nextPoll = window.setTimeout(poll, 5000);
+        };
+        void poll();
+        return () => {
+            disposed = true;
+            if (nextPoll !== undefined) window.clearTimeout(nextPoll);
+        };
     }, [refreshAgentStatus, refreshRooms]);
 
     const handleCreateRoom = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -198,7 +192,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     const startAgent = async () => {
         if (!selectedRoom) return;
         setIsStartingAgent(true);
-        setError(null);
+        setNotice(null);
         try {
             const response = await fetch(`${httpBackendUrl}/livekit/agent/start`, {
                 method: 'POST',
@@ -210,7 +204,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             await refreshAgentStatus();
             showNotice({ tone: 'success', message: `${providerLabels[agentProvider]} is connecting to “${selectedRoom.name}”.` });
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to start agent');
+            showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to start agent' });
         } finally {
             setIsStartingAgent(false);
         }
@@ -218,7 +212,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
 
     const stopAgent = async (agent: RunningAgent) => {
         setStoppingAgentKey(agent.key);
-        setError(null);
+        setNotice(null);
         try {
             const response = await fetch(`${httpBackendUrl}/livekit/agent/stop`, {
                 method: 'POST',
@@ -230,7 +224,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             await refreshAgentStatus();
             showNotice({ tone: 'success', message: `Agent stopped for “${agent.room}”.` });
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to stop agent');
+            showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to stop agent' });
         } finally {
             setStoppingAgentKey(null);
         }
@@ -247,7 +241,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             await refreshRooms();
             showNotice({ tone: 'success', message: `${identity} was removed from the room.` });
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to remove participant');
+            showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to remove participant' });
         }
     };
 
@@ -269,7 +263,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             setDeleteConfirm(null);
             showNotice({ tone: 'success', message: `Room “${roomToDelete}” deleted.` });
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to delete room');
+            showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to delete room' });
         } finally {
             setIsDeletingRoom(false);
         }
@@ -284,7 +278,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             setTranscriptLink({ roomName: selectedRoom.name, response });
             return response;
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to generate transcript link');
+            showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to generate transcript link' });
             return null;
         } finally {
             setIsGeneratingTranscriptLink(false);
@@ -296,7 +290,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             await navigator.clipboard.writeText(value);
             showNotice({ tone: 'success', message: `${label} copied to clipboard.` });
         } catch {
-            setError(`Could not copy ${label.toLowerCase()}. Check browser clipboard permissions.`);
+            showNotice({ tone: 'error', message: `Could not copy ${label.toLowerCase()}. Check browser clipboard permissions.` });
         }
     };
 
@@ -314,11 +308,14 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
 
     return (
         <div className="app-shell admin-workspace">
+            <ToastViewport notices={[
+                notice && { id: `admin-notice-${notice.message}`, tone: notice.tone, message: notice.message, onDismiss: () => setNotice(null) },
+            ]} />
             <header className="app-header">
                 <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
                     <div className="flex min-w-0 items-center gap-3">
                         {onBack && (
-                            <button onClick={onBack} className="control-button control-button--quiet !min-h-10 !px-2.5" aria-label="Close admin">
+                            <button onClick={onBack} className="control-button control-button--quiet !min-h-11 !px-2.5" aria-label="Close admin">
                                 <ArrowLeft size={18} />
                             </button>
                         )}
@@ -351,22 +348,6 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             </header>
 
             <main className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-7">
-                {notice && (
-                    <div className={`mb-4 flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${notice.tone === 'success' ? 'border-emerald-400/30 bg-emerald-950/30 text-emerald-200' : 'border-red-400/30 bg-red-950/30 text-red-200'}`} role="status" aria-live="polite">
-                        {notice.tone === 'success' ? <Check size={16} /> : <AlertTriangle size={16} />}
-                        <span>{notice.message}</span>
-                    </div>
-                )}
-                {error && (
-                    <div className="mb-4 flex items-center gap-3 rounded-lg border border-red-400/35 bg-red-950/35 p-3" role="alert">
-                        <AlertTriangle size={17} className="shrink-0 text-red-300" />
-                        <p className="flex-1 text-sm text-red-200">{error}</p>
-                        <button onClick={() => setError(null)} className="control-button control-button--quiet !min-h-8 !px-2" aria-label="Dismiss error">
-                            <X size={15} />
-                        </button>
-                    </div>
-                )}
-
                 <div className="grid gap-5 lg:grid-cols-[19rem_minmax(0,1fr)]">
                     <aside className="app-panel flex min-h-[32rem] flex-col">
                         <div className="border-b border-slate-700/70 p-4">
@@ -379,7 +360,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                             </div>
                             <label className="relative block">
                                 <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true" />
-                                <input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search rooms" className="h-10 w-full rounded-lg border border-slate-700 bg-slate-950/35 pl-9 pr-3 text-sm text-white placeholder:text-slate-500" aria-label="Search rooms" />
+                                <input value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Search rooms" className="h-11 w-full rounded-lg border border-slate-700 bg-slate-950/35 pl-9 pr-3 text-sm text-white placeholder:text-slate-500" aria-label="Search rooms" />
                             </label>
                         </div>
                         <div className="flex-1 overflow-y-auto p-2">
@@ -397,13 +378,12 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                 <div className="space-y-1">
                                     {filteredRooms.map(room => {
                                         const isSelected = room.name === selectedRoomName;
-                                        const runningAgents = agentStatus.agents.filter(agent => agent.room === room.name);
-                                        const runningCount = runningAgents.length;
+                                        const runningCount = runningAgentCounts.get(room.name) ?? 0;
                                         return (
                                             <button key={room.name} onClick={() => setSelectedRoomName(room.name)} className={`w-full rounded-lg border px-3 py-3 text-left transition-colors ${isSelected ? 'border-violet-400/55 bg-violet-400/10' : 'border-transparent hover:border-slate-700 hover:bg-slate-800/55'}`} aria-current={isSelected ? 'page' : undefined}>
                                                 <div className="flex items-start justify-between gap-3">
                                                     <span className={`min-w-0 truncate text-sm font-semibold ${isSelected ? 'text-white' : 'text-slate-200'}`}>{room.name}</span>
-                                                    <span className={`status-dot shrink-0 ${runningCount > 0 ? 'status-dot--live' : ''}`} aria-label={runningCount > 0 ? 'agent running' : 'agent stopped'} />
+                                                    <span className={`status-dot shrink-0 ${runningCount > 0 ? 'status-dot--live' : ''}`} aria-hidden="true" />
                                                 </div>
                                                 <div className="mt-1.5 flex items-center gap-3 text-xs text-slate-500">
                                                     <span className="inline-flex items-center gap-1"><Users size={12} /> {room.numParticipants}</span>
@@ -465,7 +445,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                                     {selectedAgents.map(agent => (
                                                         <div key={agent.key} className="flex items-center justify-between gap-3 text-sm">
                                                             <span className="inline-flex min-w-0 items-center gap-2 text-slate-200"><span className="status-dot status-dot--live" />{providerLabels[agent.provider as AgentProvider] || agent.provider}</span>
-                                                            <button onClick={() => void stopAgent(agent)} disabled={stoppingAgentKey === agent.key} className="control-button control-button--quiet !min-h-8 !px-2 text-red-200" aria-label={`Stop ${agent.provider} agent`}>
+                                                            <button onClick={() => void stopAgent(agent)} disabled={stoppingAgentKey === agent.key} className="control-button control-button--quiet !min-h-11 !px-2 text-red-200" aria-label={`Stop ${agent.provider} agent`}>
                                                                 {stoppingAgentKey === agent.key ? <LoaderCircle size={14} className="animate-spin" /> : <UserMinus size={14} />} Stop
                                                             </button>
                                                         </div>
@@ -475,10 +455,10 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                         </div>
                                         <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
                                             <label className="sr-only" htmlFor="admin-agent-provider">Provider</label>
-                                            <select id="admin-agent-provider" value={agentProvider} onChange={event => setAgentProvider(event.target.value as AgentProvider)} className="h-10 min-w-0 rounded-lg border border-slate-700 bg-slate-950/35 px-3 text-sm text-white">
+                                            <select id="admin-agent-provider" value={agentProvider} onChange={event => setAgentProvider(event.target.value as AgentProvider)} className="h-11 min-w-0 rounded-lg border border-slate-700 bg-slate-950/35 px-3 text-sm text-white">
                                                 {(Object.keys(providerLabels) as AgentProvider[]).map(provider => <option key={provider} value={provider}>{providerLabels[provider]}</option>)}
                                             </select>
-                                            <button onClick={() => void startAgent()} disabled={isStartingAgent || selectedAgents.some(agent => agent.provider === agentProvider)} className="control-button control-button--primary h-10 whitespace-nowrap">
+                                            <button onClick={() => void startAgent()} disabled={isStartingAgent || selectedAgents.some(agent => agent.provider === agentProvider)} className="control-button control-button--primary h-11 whitespace-nowrap">
                                                 {isStartingAgent ? <LoaderCircle size={15} className="animate-spin" /> : <Bot size={15} />} {selectedAgents.some(agent => agent.provider === agentProvider) ? 'Running' : 'Start Agent'}
                                             </button>
                                         </div>
@@ -487,7 +467,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                     <section className="admin-section" aria-labelledby="share-heading">
                                         <SectionHeading id="share-heading" icon={<Link2 size={16} />} title="Room Access Links" detail="Connect to send audio or view transcripts." />
                                         <div className="mt-4 space-y-2">
-                                            <ShareRow icon={<Radio size={16} />} label="Audio Sender" description="Send microphone audio" onOpen={() => openLink(streamUrl)} onCopy={() => void copyText(streamUrl, 'Audio Sender link')} />
+                                            <ShareRow icon={<Radio size={16} />} label="Audio Sender" description="Send microphone or Chrome Tab audio" onOpen={() => openLink(streamUrl)} onCopy={() => void copyText(streamUrl, 'Audio Sender link')} />
                                             <ShareRow icon={<Eye size={16} />} label="Viewer" description="Read-only live transcript" onOpen={() => openLink(viewerUrl)} onCopy={() => void copyText(viewerUrl, 'Viewer link')} />
                                         </div>
                                     </section>
@@ -533,7 +513,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                                             </div>
                                                             <div className="flex items-center gap-2">
                                                                 {participant.isAgent && <span className="rounded-full bg-violet-400/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-200">Agent</span>}
-                                                                <button onClick={() => void removeParticipant(selectedRoom.name, participant.identity)} className="control-button control-button--quiet !min-h-8 !px-2 text-red-200" aria-label={`Remove ${participant.identity}`}><UserMinus size={14} /> Remove</button>
+                                                                <button onClick={() => void removeParticipant(selectedRoom.name, participant.identity)} className="control-button control-button--quiet !min-h-11 !px-2 text-red-200" aria-label={`Remove ${participant.identity}`}><UserMinus size={14} /> Remove</button>
                                                             </div>
                                                         </div>
                                                     ))}
@@ -548,14 +528,12 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                 </div>
             </main>
 
-            <div className="sr-only" aria-live="polite">{notice?.message || ''}</div>
-
             {isCreateDialogOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={() => !isCreatingRoom && setIsCreateDialogOpen(false)}>
                     <div className="app-panel w-full max-w-md p-5" role="dialog" aria-modal="true" aria-labelledby="create-room-title" onMouseDown={event => event.stopPropagation()}>
                         <div className="flex items-start justify-between gap-4">
                             <div><h3 id="create-room-title" className="text-lg font-semibold text-white">Create room</h3><p className="mt-1 text-sm leading-5 text-slate-400">Set up the room now. The agent will remain stopped until you start it.</p></div>
-                            <button onClick={() => setIsCreateDialogOpen(false)} disabled={isCreatingRoom} className="control-button control-button--quiet !min-h-8 !px-2" aria-label="Close create room dialog"><X size={16} /></button>
+                            <button onClick={() => setIsCreateDialogOpen(false)} disabled={isCreatingRoom} className="control-button control-button--quiet !min-h-11 !min-w-11 !px-2" aria-label="Close create room dialog"><X size={16} /></button>
                         </div>
                         <form onSubmit={handleCreateRoom} className="mt-5">
                             <label htmlFor="new-room-name" className="mb-2 block text-sm font-medium text-slate-300">Room name</label>
@@ -601,7 +579,7 @@ function ShareRow({ icon, label, description, onOpen, onCopy }: { icon: React.Re
     return (
         <div className="flex flex-col gap-3 rounded-lg border border-slate-700/70 bg-slate-950/20 p-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-3"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-400/10 text-violet-200">{icon}</span><div className="min-w-0"><p className="text-sm font-medium text-white">{label}</p><p className="text-xs text-violet-100/65">{description}</p></div></div>
-            <div className="flex shrink-0 gap-2"><button onClick={onOpen} className="control-button control-button--quiet !min-h-8 !px-2.5"><ExternalLink size={14} /> Open</button><button onClick={onCopy} className="control-button control-button--quiet !min-h-8 !px-2.5"><Copy size={14} /> Copy</button></div>
+            <div className="flex shrink-0 gap-2"><button onClick={onOpen} className="control-button control-button--quiet !min-h-11 !px-2.5"><ExternalLink size={14} /> Open</button><button onClick={onCopy} className="control-button control-button--quiet !min-h-11 !px-2.5"><Copy size={14} /> Copy</button></div>
         </div>
     );
 }

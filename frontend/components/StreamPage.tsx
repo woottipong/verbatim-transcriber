@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Hash, Mic2, Radio, Settings } from 'lucide-react';
+import { Mic2, MonitorUp, Radio } from 'lucide-react';
 import { useAudioDevices } from '../hooks/useAudioDevices';
 import { useLiveKit } from '../hooks/useLiveKit';
-import SettingsModal from './SettingsModal';
 import LiveKitPanel from './LiveKitPanel';
 import MicrophoneInputStrip from './MicrophoneInputStrip';
-import { AppConfig, ConnectionState } from '../types';
+import { AppConfig, AudioSource, ConnectionState } from '../types';
 import { toHttpUrl } from '../lib/runtime';
 import { buildStreamUrl } from '../lib/appRoutes';
+import { AUDIO_SOURCE_LABELS } from '../lib/audioSources';
 
 interface StreamPageProps {
   config: AppConfig;
@@ -16,14 +16,15 @@ interface StreamPageProps {
 }
 
 export default function StreamPage({ config, initialRoomName, onConfigSave }: StreamPageProps) {
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [livekitRoomName, setLivekitRoomName] = useState(initialRoomName);
+  const [audioSource, setAudioSource] = useState<AudioSource>('microphone');
   const { devices: audioDevices } = useAudioDevices();
   const livekitHook = useLiveKit({
     serverUrl: import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880',
     tokenEndpoint: `${toHttpUrl(config.backendUrl)}/livekit/token`,
     roomName: livekitRoomName,
     audioDeviceId: config.audioDeviceId,
+    audioSource,
     autoConnect: false,
   });
 
@@ -37,10 +38,7 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
     onConfigSave({ ...config, audioDeviceId: deviceId });
   }, [config, onConfigSave]);
 
-  const isAnyConnected = livekitHook.connectionState === ConnectionState.CONNECTED;
-  const microphoneSource = livekitHook.mediaStream
-    ? { mediaStream: livekitHook.mediaStream, label: 'LiveKit', isMicrophoneEnabled: livekitHook.isMicrophoneEnabled }
-    : { mediaStream: null, label: null, isMicrophoneEnabled: false };
+  const canChangeAudioSource = livekitHook.connectionState === ConnectionState.DISCONNECTED;
 
   return (
     <div className="app-shell">
@@ -66,7 +64,7 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
                       const nextUrl = buildStreamUrl(window.location.origin + window.location.pathname, '');
                       window.location.hash = new URL(nextUrl).hash;
                     }}
-                    className="text-[10px] text-violet-400 hover:text-violet-300 underline font-medium cursor-pointer"
+                    className="inline-flex min-h-11 items-center px-1 text-xs font-medium text-violet-300 underline hover:text-violet-200"
                     aria-label="Change room"
                   >
                     Change
@@ -78,22 +76,24 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
           </div>
 
           <MicrophoneInputStrip
-            mediaStream={microphoneSource.mediaStream}
-            sourceLabel={microphoneSource.label}
-            isMicrophoneEnabled={microphoneSource.isMicrophoneEnabled}
+            mediaStream={livekitHook.mediaStream}
+            audioSource={audioSource}
+            sourceLabel={livekitHook.audioSourceLabel}
+            isAudioInputEnabled={livekitHook.isAudioInputEnabled}
+            isAudioInputStopped={livekitHook.isAudioInputStopped}
             connectionState={livekitHook.connectionState}
             variant="navbar"
             showIdentity={false}
           />
 
           <div className="stream-navbar__controls flex items-center gap-1.5 sm:gap-2">
-            {audioDevices.length > 1 && (
-              <div className="hidden items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-800/70 px-2.5 py-2 lg:flex">
+            {audioSource === 'microphone' && audioDevices.length > 1 && (
+              <div className="hidden h-11 items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-800/70 px-2.5 lg:flex">
                 <Mic2 size={14} className="text-slate-400" />
                 <select
                   value={config.audioDeviceId || 'default'}
                   onChange={event => handleAudioDeviceChange(event.target.value)}
-                  disabled={isAnyConnected}
+                  disabled={!canChangeAudioSource}
                   className="max-w-[120px] cursor-pointer truncate bg-transparent text-sm font-medium text-slate-200 focus:outline-none disabled:opacity-50"
                   aria-label="Input Device"
                 >
@@ -103,9 +103,30 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
               </div>
             )}
 
-            <button onClick={() => setIsSettingsOpen(true)} className="control-button control-button--quiet !min-h-10 !px-2.5" title="Settings" aria-label="Open settings">
-              <Settings size={20} />
-            </button>
+            <div className="flex shrink-0 items-center rounded-lg border border-slate-700 bg-slate-950/45 p-0.5" role="group" aria-label="Audio source">
+              {(['microphone', 'chrome-tab'] as const).map(source => {
+                const SourceIcon = source === 'chrome-tab' ? MonitorUp : Mic2;
+                const isSelected = audioSource === source;
+                return (
+                  <button
+                    key={source}
+                    type="button"
+                    onClick={() => setAudioSource(source)}
+                    disabled={!canChangeAudioSource}
+                    aria-pressed={isSelected}
+                    aria-label={AUDIO_SOURCE_LABELS[source]}
+                    className={`flex min-h-11 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-60 ${isSelected
+                      ? 'bg-violet-500 text-white'
+                      : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
+                    }`}
+                  >
+                    <SourceIcon size={14} aria-hidden="true" />
+                    <span className={source === 'chrome-tab' ? 'hidden xl:inline' : 'hidden sm:inline'}>{AUDIO_SOURCE_LABELS[source]}</span>
+                  </button>
+                );
+              })}
+            </div>
+
           </div>
         </div>
       </header>
@@ -148,25 +169,21 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
                 connectionState={livekitHook.connectionState}
                 isAgentConnected={livekitHook.isAgentConnected}
                 agentIdentity={livekitHook.agentIdentity}
-                isMicrophoneEnabled={livekitHook.isMicrophoneEnabled}
+                audioSource={audioSource}
+                isAudioInputEnabled={livekitHook.isAudioInputEnabled}
+                isAudioInputStopped={livekitHook.isAudioInputStopped}
                 participantCount={livekitHook.participants.length + 1}
                 error={livekitHook.error}
                 roomName={livekitRoomName}
                 onConnect={livekitHook.connect}
                 onDisconnect={livekitHook.disconnect}
-                onToggleMicrophone={livekitHook.toggleMicrophone}
+                onToggleAudioInput={livekitHook.toggleAudioInput}
                 onClear={livekitHook.clearTranscripts}
               />
           </section>
         )}
       </main>
 
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        config={config}
-        onSave={onConfigSave}
-      />
     </div>
   );
 }

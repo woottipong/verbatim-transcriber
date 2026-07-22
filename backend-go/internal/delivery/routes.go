@@ -26,10 +26,11 @@ func setupHealthRoutes(app *fiber.App, cfg *config.Config) {
 
 	app.Get("/providers", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
-			"google":  cfg.HasGoogleKey(),
-			"gemini":  cfg.HasGeminiKey(),
-			"azure":   cfg.HasAzureKey(),
-			"livekit": cfg.HasLiveKitKey(),
+			"google":               cfg.HasGoogleKey(),
+			"gemini":               cfg.HasGeminiKey(),
+			"gpt-realtime-whisper": cfg.HasOpenAITranscriptionKey(),
+			"azure":                cfg.HasAzureKey(),
+			"livekit":              cfg.HasLiveKitKey(),
 		})
 	})
 }
@@ -61,13 +62,13 @@ func setupLiveKitRoutes(app *fiber.App, cfg *config.Config) {
 	log.Println("✅ [LiveKit] Room management enabled at /livekit/rooms/*")
 
 	// Agent (requires ASR provider)
-	if cfg.HasGoogleKey() || cfg.HasGeminiKey() || cfg.HasAzureKey() {
+	if cfg.HasGoogleKey() || cfg.HasGeminiKey() || cfg.HasAzureKey() || cfg.HasOpenAITranscriptionKey() {
 		agent := app.Group("/livekit/agent")
 		agent.Post("/start", controlAuth, func(c *fiber.Ctx) error { return handler.HandleAgentStart(c, cfg) })
 		agent.Post("/stop", controlAuth, func(c *fiber.Ctx) error { return handler.HandleAgentStop(c, cfg) })
 		agent.Get("/status", controlAuth, func(c *fiber.Ctx) error { return handler.HandleAgentStatus(c, cfg) })
 		log.Println("✅ [LiveKit Agent] Enabled at /livekit/agent/*")
 	} else {
-		log.Println("⚠️  [LiveKit Agent] Disabled - No ASR provider configured (Google, Gemini, or Azure)")
+		log.Println("⚠️  [LiveKit Agent] Disabled - No ASR provider configured (Google, Gemini, Azure, or OpenAI Realtime Whisper)")
 	}
 }

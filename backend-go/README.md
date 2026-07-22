@@ -8,7 +8,7 @@ The Go service exposes HTTP endpoints for provider status, LiveKit tokens, room 
 - CGO enabled
 - A C compiler, `pkg-config`, and Opus development library
 - Reachable LiveKit server
-- Credentials for Google, Gemini, or Azure
+- Credentials for Google, Gemini, Azure, or OpenAI Realtime Whisper
 
 ```bash
 # macOS
@@ -40,10 +40,11 @@ LiveKit room audio
   └── internal/infrastructure/agent/agent.go
         ├── Opus decode at 48 kHz mono
         ├── 40 ms PCM batching
-        ├── optional 48→16 kHz decimation
+        ├── anti-aliased 48→24/16 kHz downsampling
         └── internal/infrastructure/asr/
               ├── google.go
               ├── gemini.go
+              ├── openai_transcription.go
               └── azure.go
 ```
 
@@ -54,10 +55,19 @@ Provider-independent types and Thai spacing normalization live in `internal/doma
 | Provider | Input from agent | Important behavior |
 | --- | --- | --- |
 | Google | 48 kHz Linear16 PCM | Speech-to-Text V2 streaming, interim enabled, automatic punctuation, pre-limit reconnect and one-second replay buffer |
-| Gemini | 16 kHz PCM | Source input transcription only; required model audio response is discarded |
+| Gemini | 16 kHz PCM | Source plus configured-target transcription paired by application `turnId`; required model audio response is discarded |
+| GPT Realtime Whisper | 24 kHz PCM16 | `/v1/realtime?intent=transcription`; source interim deltas and completed finals; 650 ms silence/30-second hard boundary; bounded reconnect with one-second audio replay |
 | Azure | 16 kHz PCM/WAV stream | Azure upstream WebSocket conversation recognition with interim hypotheses and endpointing settings |
 
-Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `gemini-3.5-live-translate-preview` with `th` source and `en` target by default.
+Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `gemini-3.5-live-translate-preview`, detects the source language unless a hint is configured, and translates to Thai by default. Gemini requests an application boundary after 650 ms of low-energy PCM or 30 seconds of continuous audio, then waits a fixed 500 ms for delayed translation. GPT Realtime Whisper uses the dedicated Realtime transcription intent with `gpt-realtime-whisper` as the input transcription model, streams 24 kHz PCM16, commits after the shared 650 ms silence boundary or a 30-second hard duration, and publishes only source transcript text. Recoverable WebSocket failures use bounded exponential-backoff reconnects and replay up to one second of recent PCM; exhausting retries closes the result stream so the room agent becomes unhealthy instead of remaining falsely connected.
+
+## Agent and audio-track lifecycle
+
+- An agent is keyed by room and provider and remains subscribed after it joins the LiveKit room.
+- Each incoming audio track creates a track-scoped ASR provider. A normal sender disconnect, unpublish, or end-of-track releases that provider while the agent stays in the room and waits for another track.
+- A provider start failure or unexpected provider error stops the agent so `/livekit/agent/status` cannot report a falsely healthy transcriber.
+- Explicit Admin stop remains the operation that disconnects the agent participant from the room.
+- The current lifecycle is designed for one active Audio Sender per room/provider agent.
 
 ## Environment variables
 
@@ -78,12 +88,45 @@ Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `g
 | `GOOGLE_SPEECH_MODEL` | `chirp_2` | Recognition model |
 | `GEMINI_API_KEY` | — | Required for Gemini |
 | `GEMINI_MODEL` | `gemini-3.5-live-translate-preview` | Live model |
-| `GEMINI_LANGUAGE_CODE` | `th` | Input language hint |
-| `GEMINI_TARGET_LANGUAGE_CODE` | `en` | Required translation target; output discarded |
+| `GEMINI_LANGUAGE_CODE` | — | Optional input language hint; empty enables detection |
+| `GEMINI_TARGET_LANGUAGE_CODE` | `th` | Supported BCP-47 translation target; also used for UI language metadata |
+| `OPENAI_API_KEY` | — | Required for the `gpt-realtime-whisper` provider |
+| `OPENAI_LANGUAGE_CODE` | `th` | Source-language hint for the transcription session |
 | `AZURE_SUBSCRIPTION_KEY` | — | Required for Azure |
 | `AZURE_REGION` | `southeastasia` | Azure Speech region |
 
-`HasGoogleKey`, `HasGeminiKey`, `HasAzureKey`, and `HasLiveKitKey` in `config/config.go` define availability shown by `/providers`.
+`HasGoogleKey`, `HasGeminiKey`, `HasOpenAITranscriptionKey`, `HasAzureKey`, and `HasLiveKitKey` in `config/config.go` define availability shown by `/providers`.
+
+### Gemini Live translation target languages
+
+`GEMINI_TARGET_LANGUAGE_CODE` is the source of truth for Gemini translation output metadata. The backend canonicalizes supported codes (for example, `PT_br` becomes `pt-BR`), rejects unsupported values when the Gemini provider is created, and publishes the configured target code with every translation so the UI badge matches the environment setting.
+
+Use one of these BCP-47 codes supported by `gemini-3.5-live-translate-preview`:
+
+```text
+af ak sq am ar hy az eu be bn bg my ca zh-Hans zh-Hant hr cs da nl en
+et fil fi fr gl ka de el gu ha he hi hu is id it ja jv kn kk km rw ko
+lo lv lt mk ms ml mr mn ne no nb fa pl pt-BR pt-PT pa ro ru sr sd si
+sk sl es su sw sv ta te th tr uk ur uz vi zu
+```
+
+Common examples:
+
+| Language | Value |
+| --- | --- |
+| Thai | `th` |
+| English | `en` |
+| German | `de` |
+| Spanish | `es` |
+| Japanese | `ja` |
+| Korean | `ko` |
+| Vietnamese | `vi` |
+| Chinese, Simplified | `zh-Hans` |
+| Chinese, Traditional | `zh-Hant` |
+| Portuguese, Brazil | `pt-BR` |
+| Portuguese, Portugal | `pt-PT` |
+
+The complete upstream list is maintained in the [Gemini Live Translation documentation](https://ai.google.dev/gemini-api/docs/live-api/live-translate#supported-languages). This list is specific to Live Translation and is not the broader Gemini Live Agent language list.
 
 When `HOST` is remote (for example `0.0.0.0`), room, agent, participant-token,
 and transcript-link management endpoints require `Authorization: Bearer
@@ -120,7 +163,7 @@ curl -X POST http://localhost:3000/livekit/agent/start \
 
 There are no public `/google`, `/azure`, or `/gemini` audio WebSocket routes.
 
-The transcript WebSocket is text-only and separate from the upstream Azure provider WebSocket. It authenticates with a signed HS256 JWT containing the room, current LiveKit room SID, issuer and subject `transcript:subscribe`, and an expiry 24 hours from issuance. Deleting a room invalidates active subscribers and prevents the old link from attaching to a recreated room with the same name. It sends `session.ready`, `transcript.interim`, and `transcript.final` events. It has no history/replay and does not accept audio or commands.
+The transcript WebSocket is text-only and separate from the upstream Azure provider WebSocket. It authenticates with a signed HS256 JWT containing the room, current LiveKit room SID, issuer and subject `transcript:subscribe`, and an expiry 24 hours from issuance. Deleting a room invalidates active subscribers and prevents the old link from attaching to a recreated room with the same name. It sends source transcripts as `transcript.interim` and `transcript.final` events; Gemini translation packets remain on the LiveKit data channel for bilingual UI rows. It has no history/replay and does not accept audio or commands.
 
 ```json
 {"schemaVersion":"1.0","type":"session.ready","room":"test","timestamp":"2026-07-16T10:00:00.000Z"}
@@ -147,16 +190,21 @@ The agent publishes reliable packets with this shape:
 ```json
 {
   "type": "transcript",
-  "text": "ข้อความภาษาไทย",
+  "text": "emergency room",
   "isFinal": true,
   "confidence": 0.9,
-  "provider": "google",
+  "provider": "gemini",
   "timestamp": 1784196259000,
-  "speaker": "user-123"
+  "speaker": "user-123",
+  "role": "source",
+  "languageCode": "en",
+  "turnId": "gemini-1"
 }
 ```
 
-Thai spacing is normalized once at the agent output boundary.
+`role`, `languageCode`, and `turnId` are additive metadata used by Gemini source/translation pairs. GPT Realtime Whisper publishes `role: "source"` with the configured `OPENAI_LANGUAGE_CODE`; it does not emit translation packets. Thai spacing is normalized once at the agent output boundary.
+
+Gemini `turnId` values are application-level pseudo-turns rather than deterministic model turns. The provider observes the unchanged PCM stream and requests a turn boundary after 650 ms of low-energy audio, then allows a fixed 500 ms translation grace period. This keeps delayed translated output with the preceding source in typical pauses, but alignment remains best-effort rather than sentence-perfect.
 
 ## Test and build
 

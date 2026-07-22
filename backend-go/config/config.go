@@ -14,6 +14,7 @@ type Config struct {
 	GoogleApplicationCredentials string
 	GoogleCloudProject           string
 	GeminiAPIKey                 string
+	OpenAIAPIKey                 string
 	AzureSubscriptionKey         string
 	AzureRegion                  string
 	LiveKitAPIKey                string
@@ -23,6 +24,7 @@ type Config struct {
 	ControlAPIKey                string
 	GoogleConfig                 GoogleConfig
 	GeminiConfig                 GeminiConfig
+	OpenAIConfig                 OpenAIConfig
 	AzureConfig                  AzureConfig
 	LiveKitConfig                LiveKitConfig
 }
@@ -51,6 +53,11 @@ type GeminiConfig struct {
 	SampleRate         int
 }
 
+type OpenAIConfig struct {
+	LanguageCode string
+	SampleRate   int
+}
+
 type LiveKitConfig struct {
 	TokenExpiry int // seconds
 }
@@ -64,6 +71,7 @@ func Load() *Config {
 		GoogleApplicationCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
 		GoogleCloudProject:           os.Getenv("GOOGLE_CLOUD_PROJECT"),
 		GeminiAPIKey:                 os.Getenv("GEMINI_API_KEY"),
+		OpenAIAPIKey:                 os.Getenv("OPENAI_API_KEY"),
 		AzureSubscriptionKey:         os.Getenv("AZURE_SUBSCRIPTION_KEY"),
 		AzureRegion:                  getEnv("AZURE_REGION", "southeastasia"),
 		LiveKitAPIKey:                os.Getenv("LIVEKIT_API_KEY"),
@@ -80,9 +88,13 @@ func Load() *Config {
 		},
 		GeminiConfig: GeminiConfig{
 			Model:              getEnv("GEMINI_MODEL", "gemini-3.5-live-translate-preview"),
-			LanguageCode:       getEnv("GEMINI_LANGUAGE_CODE", "th"),
-			TargetLanguageCode: getEnv("GEMINI_TARGET_LANGUAGE_CODE", "en"),
+			LanguageCode:       os.Getenv("GEMINI_LANGUAGE_CODE"),
+			TargetLanguageCode: getEnv("GEMINI_TARGET_LANGUAGE_CODE", "th"),
 			SampleRate:         16000,
+		},
+		OpenAIConfig: OpenAIConfig{
+			LanguageCode: getEnv("OPENAI_LANGUAGE_CODE", "th"),
+			SampleRate:   24000,
 		},
 		AzureConfig: AzureConfig{
 			Language:                       "th-TH",
@@ -112,6 +124,10 @@ func (c *Config) HasGoogleKey() bool {
 
 func (c *Config) HasGeminiKey() bool {
 	return c.GeminiAPIKey != ""
+}
+
+func (c *Config) HasOpenAITranscriptionKey() bool {
+	return c.OpenAIAPIKey != ""
 }
 
 func (c *Config) HasAzureKey() bool {

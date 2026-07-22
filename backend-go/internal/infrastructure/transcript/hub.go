@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"thai-transcriber-backend/internal/domain"
 	"thai-transcriber-backend/internal/infrastructure/agent"
 
 	"github.com/google/uuid"
@@ -16,11 +17,14 @@ const (
 )
 
 type TranscriptPayload struct {
-	Text       string  `json:"text"`
-	IsFinal    bool    `json:"isFinal"`
-	Confidence float64 `json:"confidence,omitempty"`
-	Provider   string  `json:"provider"`
-	Speaker    string  `json:"speaker,omitempty"`
+	Text         string                `json:"text"`
+	IsFinal      bool                  `json:"isFinal"`
+	Confidence   float64               `json:"confidence,omitempty"`
+	Provider     string                `json:"provider"`
+	Speaker      string                `json:"speaker,omitempty"`
+	Role         domain.TranscriptRole `json:"role,omitempty"`
+	LanguageCode string                `json:"languageCode,omitempty"`
+	TurnID       string                `json:"turnId,omitempty"`
 }
 
 type Event struct {
@@ -127,7 +131,9 @@ func (h *Hub) Unsubscribe(room string, subscription *Subscription) {
 }
 
 func (h *Hub) Publish(room string, message agent.TranscriptMessage) {
-	if room == "" || message.Text == "" {
+	// The external transcript socket predates bilingual rows and remains a
+	// source-only stream. Translation packets are paired in LiveKit clients.
+	if room == "" || message.Text == "" || message.Role == domain.TranscriptRoleTranslation {
 		return
 	}
 
@@ -146,11 +152,14 @@ func (h *Hub) Publish(room string, message agent.TranscriptMessage) {
 		Room:          room,
 		Timestamp:     h.now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
 		Transcript: TranscriptPayload{
-			Text:       message.Text,
-			IsFinal:    message.IsFinal,
-			Confidence: message.Confidence,
-			Provider:   message.Provider,
-			Speaker:    message.Speaker,
+			Text:         message.Text,
+			IsFinal:      message.IsFinal,
+			Confidence:   message.Confidence,
+			Provider:     message.Provider,
+			Speaker:      message.Speaker,
+			Role:         message.Role,
+			LanguageCode: message.LanguageCode,
+			TurnID:       message.TurnID,
 		},
 	}
 	if message.IsFinal {

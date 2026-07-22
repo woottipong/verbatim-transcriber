@@ -42,6 +42,7 @@ export interface ProvidersResponse {
     google: boolean;
     gemini: boolean;
     azure: boolean;
+    'gpt-realtime-whisper': boolean;
     livekit: boolean;
 }
 
@@ -83,7 +84,7 @@ export function isProviderEnabled(
     if (!providersResponse) return true;
 
     const provider = providerName.toLowerCase() as keyof ProvidersResponse;
-    if (!['google', 'gemini', 'azure'].includes(provider)) return false;
+    if (!['google', 'gemini', 'azure', 'gpt-realtime-whisper'].includes(provider)) return false;
     return providersResponse[provider] === true;
 }
 

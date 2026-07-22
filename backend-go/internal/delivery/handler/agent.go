@@ -166,12 +166,16 @@ func validateAgentProvider(cfg *config.Config, provider string) (string, error) 
 		if !cfg.HasGeminiKey() {
 			return "", fmt.Errorf("gemini provider is not configured")
 		}
+	case "gpt-realtime-whisper":
+		if !cfg.HasOpenAITranscriptionKey() {
+			return "", fmt.Errorf("gpt-realtime-whisper provider is not configured")
+		}
 	case "azure":
 		if !cfg.HasAzureKey() {
 			return "", fmt.Errorf("azure provider is not configured")
 		}
 	default:
-		return "", fmt.Errorf("provider must be google, gemini, or azure")
+		return "", fmt.Errorf("provider must be google, gemini, azure, or gpt-realtime-whisper")
 	}
 	return provider, nil
 }
