@@ -14,11 +14,11 @@ import { ConnectionState } from '../types';
 import { toHttpUrl } from '../lib/runtime';
 import { shouldStickToLatest } from '../lib/transcriptViewport';
 import TranslationBlock from './TranslationBlock';
-import { formatLanguageLabel, isTranscriptTurnLive, normalizeLanguageTag } from '../lib/transcriptMessages';
+import { formatLanguageLabel, groupFinalTranscriptRows, isTranscriptTurnLive, normalizeLanguageTag } from '../lib/transcriptMessages';
 import { shouldAutoConnectViewer } from '../lib/viewerLaunch';
 import ConnectionBadge from './ConnectionBadge';
 import { buildViewerUrl } from '../lib/appRoutes';
-import { formatProviderName, hasSourceLanguageLabel } from '../lib/providers';
+import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel, transcriptStatusClasses } from '../lib/providers';
 
 interface RoomInfo {
     name: string;
@@ -112,10 +112,10 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
 
     // Filter transcripts by selected provider
     const filteredTranscripts = useMemo(() => {
-        if (filterProvider === 'all') {
-            return viewer.transcripts; // Show all
-        }
-        return viewer.transcripts.filter(t => t.provider === filterProvider);
+        const matching = filterProvider === 'all'
+            ? viewer.transcripts
+            : viewer.transcripts.filter(t => t.provider === filterProvider);
+        return groupFinalTranscriptRows(matching);
     }, [viewer.transcripts, filterProvider]);
 
     const filteredInterims = useMemo(() => {
@@ -134,19 +134,9 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
         return () => window.cancelAnimationFrame(frame);
     }, [filteredInterims, filteredTranscripts, isFollowingLatest]);
 
-    // Provider color mapping
-    const getProviderColor = (provider: string) => {
-        switch (provider.toLowerCase()) {
-            case 'google': return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
-            case 'gemini': return 'text-violet-400 bg-violet-500/20 border-violet-500/30';
-            case 'azure': return 'text-cyan-400 bg-cyan-500/20 border-cyan-500/30';
-            case 'gpt-realtime-whisper': return 'text-emerald-400 bg-emerald-500/20 border-emerald-500/30';
-            default: return 'text-slate-400 bg-slate-500/20 border-slate-500/30';
-        }
-    };
-
     return (
         <div className="app-shell">
+            <span className="sr-only" aria-live="polite" aria-atomic="true">{viewer.transcripts.at(-1)?.text ?? ''}</span>
             {/* Header */}
             <header className="app-header">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
@@ -282,7 +272,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                         {viewer.agents.map(agent => (
                                             <div
                                                 key={agent.identity}
-                                                className={`flex items-center justify-between rounded-lg border px-2.5 py-2 ${getProviderColor(agent.provider)}`}
+                                                className={`flex items-center justify-between rounded-lg border px-2.5 py-2 ${getProviderPresentation(agent.provider).badge}`}
                                             >
                                                 <span className="text-sm font-medium">{formatProviderName(agent.provider)}</span>
                                                 <span className="status-dot status-dot--live" aria-hidden="true" />
@@ -383,7 +373,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                             {/* Transcript List */}
                             <div
                                 ref={transcriptScrollRef}
-                                className="transcript-scroller h-[500px] overflow-y-auto px-4 py-2"
+                                className="transcript-scroller h-[clamp(24rem,65dvh,52rem)] overflow-y-auto px-4 py-2"
                                 onScroll={(event) => setIsFollowingLatest(shouldStickToLatest(event.currentTarget))}
                             >
                                 {viewer.connectionState !== ConnectionState.CONNECTED ? (
@@ -410,7 +400,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                                     className="transcript-row transcript-turn grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 py-3"
                                                 >
                                                     {segment.provider && (
-                                                        <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(segment.provider)}`}>
+                                                        <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderPresentation(segment.provider).badge}`}>
                                                             {formatProviderName(segment.provider)}
                                                         </span>
                                                     )}
@@ -449,25 +439,31 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                         {filteredInterims.map(interim => (
                                             <div
                                                 key={interim.key}
-                                                className="transcript-row transcript-row--interim grid grid-cols-[auto_minmax(0,1fr)] gap-3 py-3"
+                                                className="transcript-row transcript-row--interim transcript-turn grid grid-cols-[auto_minmax(0,1fr)] gap-2 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3"
                                             >
-                                                <span className="transcript-row__marker pt-0.5 text-sm text-violet-300" aria-hidden="true">↳</span>
-                                                <div className="transcript-row__content flex min-w-0 flex-wrap items-baseline gap-x-2.5 gap-y-1">
-                                                    <span className={`inline-flex shrink-0 items-center gap-1.5 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(interim.provider)}`}>
-                                                        <span className="transcript-live-dot" aria-hidden="true" />
-                                                        {formatProviderName(interim.provider)} · Live draft
-                                                    </span>
-                                                    <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-violet-300/70">กำลังถอดเสียง</span>
+                                                <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderPresentation(interim.provider).badge}`}>
+                                                    {formatProviderName(interim.provider)}
+                                                </span>
+                                                <div className="transcript-bilingual col-span-2 min-w-0 sm:col-span-1">
                                                     <p
-                                                        className="transcript-row__text basis-full min-w-0 text-[1rem] leading-7 text-slate-300"
-                                                        role="status"
-                                                        aria-live="polite"
-                                                        aria-atomic="true"
+                                                        className={`transcript-source-line break-words text-[1rem] leading-7 text-slate-300 ${hasSourceLanguageLabel(interim.provider, interim.languageCode) ? 'transcript-source-line--labeled' : ''}`}
+                                                        lang={normalizeLanguageTag(interim.languageCode)}
+                                                        dir="auto"
                                                     >
                                                         <span className="sr-only">Live interim transcript from {interim.speaker}: </span>
-                                                        {interim.text}
+                                                        {hasSourceLanguageLabel(interim.provider, interim.languageCode) && (
+                                                            <span className="source-language-label" title={formatLanguageLabel(interim.languageCode)} aria-hidden="true">
+                                                                <span className="language-label__text">{formatLanguageLabel(interim.languageCode)}</span>
+                                                            </span>
+                                                        )}
+                                                        <span className="transcript-source-line__text">{interim.text}</span>
                                                     </p>
+                                                    <TranslationBlock translation={interim.translation} />
                                                 </div>
+                                                <span className={`transcript-status-badge col-start-2 row-start-1 inline-flex shrink-0 items-center justify-self-end rounded border uppercase sm:col-start-3 ${transcriptStatusClasses.draftBadge}`}>
+                                                    <span className="transcript-live-dot" aria-hidden="true" />
+                                                    Draft
+                                                </span>
                                             </div>
                                         ))}
                                         <div ref={transcriptEndRef} aria-hidden="true" />

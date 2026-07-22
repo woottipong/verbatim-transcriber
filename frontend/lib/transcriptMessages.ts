@@ -21,6 +21,9 @@ export interface InterimTranscript {
     provider: string;
     speaker: string;
     sourceIdentity: string;
+    languageCode?: string;
+    turnId?: string;
+    translation?: TranscriptTranslation;
 }
 
 export interface PendingTranslation {
@@ -31,6 +34,58 @@ export interface PendingTranslation {
 
 const MAX_PENDING_TRANSLATIONS = 64;
 const PENDING_TRANSLATION_TTL_MS = 30_000;
+const MAX_INTERIM_TRANSCRIPTS = 64;
+const FINAL_DISPLAY_GROUP_WINDOW_MS = 1_600;
+const STRONG_SENTENCE_END = /[.!?…。！？]$/u;
+
+function joinTranscriptChunks(previous: string, next: string): string {
+    const left = previous.trim();
+    const right = next.trim();
+    if (!left) return right;
+    if (!right || left === right) return left;
+    if (right.startsWith(left)) return right;
+    return `${left} ${right}`;
+}
+
+export function groupFinalTranscriptRows(
+    segments: readonly TranscriptSegment[],
+    windowMs = FINAL_DISPLAY_GROUP_WINDOW_MS,
+): TranscriptSegment[] {
+    return segments.reduce<TranscriptSegment[]>((rows, segment) => {
+        const previous = rows.at(-1);
+        const gap = previous ? segment.timestamp - previous.timestamp : Number.POSITIVE_INFINITY;
+        const canGroup = Boolean(
+            previous &&
+            previous.isFinal && segment.isFinal &&
+            previous.role !== 'translation' && segment.role !== 'translation' &&
+            previous.provider === segment.provider &&
+            previous.speaker === segment.speaker &&
+            normalizeLanguageTag(previous.languageCode) === normalizeLanguageTag(segment.languageCode) &&
+            gap >= 0 && gap <= windowMs &&
+            !STRONG_SENTENCE_END.test(previous.text.trim())
+        );
+        if (!canGroup || !previous) return [...rows, segment];
+
+        const previousTranslation = previous.translation;
+        const nextTranslation = segment.translation;
+        const canCombineTranslation = previousTranslation && nextTranslation &&
+            normalizeLanguageTag(previousTranslation.languageCode) === normalizeLanguageTag(nextTranslation.languageCode);
+        const translation = canCombineTranslation
+            ? {
+                text: joinTranscriptChunks(previousTranslation.text, nextTranslation.text),
+                languageCode: nextTranslation.languageCode,
+                isFinal: previousTranslation.isFinal && nextTranslation.isFinal,
+            }
+            : undefined;
+        const grouped: TranscriptSegment = {
+            ...previous,
+            text: joinTranscriptChunks(previous.text, segment.text),
+            timestamp: segment.timestamp,
+            translation,
+        };
+        return [...rows.slice(0, -1), grouped];
+    }, []);
+}
 
 export function isAppendOnlyInterimProvider(provider: string): boolean {
     return provider.toLowerCase() === 'gemini';
@@ -248,12 +303,82 @@ export function clearPendingTranslationsBySource(
     return new Map(Array.from(current).filter(([, pending]) => pending.sourceIdentity !== sourceIdentity));
 }
 
+export function createInterimTranscript(
+    message: TranscriptMessage,
+    sourceIdentity: string,
+    providerOverride?: string,
+): InterimTranscript {
+    const provider = providerOverride || message.provider || 'unknown';
+    const speaker = message.speaker || sourceIdentity;
+    const normalizedMessage = { ...message, provider, speaker };
+    return {
+        key: getTranscriptKey(normalizedMessage, sourceIdentity),
+        text: message.text,
+        provider,
+        speaker,
+        sourceIdentity,
+        ...(message.languageCode ? { languageCode: message.languageCode } : {}),
+        ...(message.turnId ? { turnId: message.turnId } : {}),
+    };
+}
+
+export function attachTranslationToInterims(
+    current: ReadonlyMap<string, InterimTranscript>,
+    message: TranscriptMessage,
+    sourceIdentity: string,
+): { interims: Map<string, InterimTranscript>; attached: boolean } {
+    if (message.role !== 'translation' || !message.turnId) {
+        return { interims: new Map(current), attached: false };
+    }
+
+    const provider = message.provider || 'unknown';
+    const speaker = message.speaker || sourceIdentity;
+    const entries = Array.from(current);
+    let matchingKey: string | undefined;
+    for (let index = entries.length - 1; index >= 0; index--) {
+        const [key, interim] = entries[index];
+        if (interim.provider === provider && interim.speaker === speaker && interim.turnId === message.turnId) {
+            matchingKey = key;
+            break;
+        }
+    }
+    if (!matchingKey) return { interims: new Map(current), attached: false };
+
+    const next = new Map(current);
+    const source = next.get(matchingKey)!;
+    const normalizedSource = source.text.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+    const normalizedTranslation = message.text.replace(/\s+/g, ' ').trim().toLocaleLowerCase();
+    if (areEquivalentLanguageTags(source.languageCode, message.languageCode) || normalizedSource === normalizedTranslation) {
+        next.set(matchingKey, { ...source, translation: undefined });
+        return { interims: next, attached: true };
+    }
+
+    next.set(matchingKey, {
+        ...source,
+        translation: {
+            text: message.text,
+            languageCode: message.languageCode || '',
+            isFinal: message.isFinal,
+        },
+    });
+    return { interims: next, attached: true };
+}
+
 export function upsertInterim(
     current: ReadonlyMap<string, InterimTranscript>,
     interim: InterimTranscript,
 ): Map<string, InterimTranscript> {
     const next = new Map(current);
-    next.set(interim.key, interim);
+    const existing = next.get(interim.key);
+    next.set(interim.key, {
+        ...interim,
+        ...(existing?.translation && !interim.translation ? { translation: existing.translation } : {}),
+    });
+    while (next.size > MAX_INTERIM_TRANSCRIPTS) {
+        const oldestKey = next.keys().next().value;
+        if (oldestKey === undefined) break;
+        next.delete(oldestKey);
+    }
     return next;
 }
 

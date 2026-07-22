@@ -4,8 +4,8 @@ import { TranscriptSegment, ConnectionState, AudioSource } from '../types';
 import { getLiveKitSessionPresentation } from '../lib/liveKitSession';
 import { shouldStickToLatest } from '../lib/transcriptViewport';
 import TranslationBlock from './TranslationBlock';
-import { formatLanguageLabel, isTranscriptTurnLive, normalizeLanguageTag, type InterimTranscript } from '../lib/transcriptMessages';
-import { formatProviderName, hasSourceLanguageLabel, providerAccents, providerDraftClasses, providerFromAgentIdentity } from '../lib/providers';
+import { formatLanguageLabel, groupFinalTranscriptRows, isTranscriptTurnLive, normalizeLanguageTag, type InterimTranscript } from '../lib/transcriptMessages';
+import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel, providerFromAgentIdentity, transcriptStatusClasses } from '../lib/providers';
 import { buildTranscriptFilename, downloadTranscriptText, formatTranscriptText } from '../lib/transcriptExport';
 
 interface LiveKitPanelProps {
@@ -33,13 +33,6 @@ const formatAgentProvider = (identity: string | null): string => {
     .map(id => formatProviderName(providerFromAgentIdentity(id.trim())))
     .join(', ');
 };
-
-interface DraftClass {
-  bg: string;
-  text: string;
-}
-
-const draftClasses: Record<string, DraftClass> = providerDraftClasses;
 
 const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
   transcripts,
@@ -119,6 +112,10 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
     }
     if (groups.size === 0) ensureGroup('google');
 
+    groups.forEach(group => {
+      group.transcripts = groupFinalTranscriptRows(group.transcripts);
+    });
+
     const order = ['google', 'gemini', 'azure', 'gpt-realtime-whisper'];
     return Array.from(groups.entries()).sort(([left], [right]) => {
       const leftOrder = order.indexOf(left);
@@ -132,6 +129,8 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
   const visibleMobileProvider = activeProviders.includes(selectedProvider)
     ? selectedProvider
     : activeProviders[0];
+  const displayLineCount = providerGroups.reduce((count, [, group]) => count + group.transcripts.length, 0);
+  const latestFinalText = transcripts.at(-1)?.text ?? '';
 
   const session = getLiveKitSessionPresentation(
     connectionState,
@@ -150,6 +149,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
 
   return (
     <article className="livekit-panel app-panel flex min-h-[500px] h-[calc(100vh-12rem)] flex-col" aria-label="LiveKit transcription workspace">
+      <span className="sr-only" aria-live="polite" aria-atomic="true">{latestFinalText}</span>
       <header className="panel-header px-4 py-3 sm:px-5">
         <div className="session-toolbar">
           <div className="session-toolbar__identity">
@@ -328,7 +328,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                 >
                   <div className="px-4 py-2.5 bg-slate-900/40 border-b border-slate-800 flex items-center justify-between text-xs font-semibold text-slate-400 select-none shrink-0">
                     <span className="flex items-center gap-2 uppercase tracking-wider">
-                      <span className={`w-1 h-3 rounded ${providerAccents[provider] ?? 'bg-slate-500'}`} aria-hidden="true" />
+                      <span className={`w-1 h-3 rounded ${getProviderPresentation(provider).accent}`} aria-hidden="true" />
                       {formatProviderName(provider)}
                     </span>
                     <span className="flex items-center gap-2">
@@ -352,26 +352,26 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                   >
                     {!hasProviderContent ? (
                       <div className="h-full flex flex-col items-center justify-center text-center p-6 select-none opacity-40 py-20">
-                        <span className={`w-1.5 h-1.5 rounded-full animate-pulse mb-2 ${providerAccents[provider] ?? 'bg-slate-500'}`} />
+                        <span className={`w-1.5 h-1.5 rounded-full animate-pulse mb-2 ${getProviderPresentation(provider).accent}`} />
                         <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Awaiting Signal</p>
                       </div>
                     ) : viewMode === 'timeline' ? (
-                      <div className="space-y-1">
+                      <div className="transcript-timeline">
                         {providerTranscripts.map((segment, idx) => {
                           const isTurnLive = isTranscriptTurnLive(segment);
                           return (
                             <div
                               key={segment.id}
-                              className="transcript-turn group -mx-2 flex items-start gap-2 rounded px-2 py-2 transition-colors duration-100 hover:bg-slate-900/25"
+                              className="transcript-turn transcript-turn--line group -mx-2 flex items-start rounded px-2 transition-colors duration-100 hover:bg-slate-900/25"
                             >
-                              <span className="transcript-turn__index w-5 shrink-0 select-none pt-1 text-[10px] tabular-nums text-slate-400">
+                              <span className="transcript-turn__index shrink-0 select-none tabular-nums text-slate-400">
                                 <span className="sr-only">{isTurnLive ? 'Live turn ' : 'Turn '}</span>
                                 <span aria-hidden="true">{String(idx + 1).padStart(2, '0')}</span>
                                 {isTurnLive && <span className="transcript-live-dot transcript-turn__live-dot" aria-hidden="true" />}
                               </span>
                               <div className="transcript-bilingual min-w-0 flex-1">
                                 <p
-                                  className={`transcript-source-line break-words text-[1.05rem] font-medium leading-7 text-slate-100 ${hasSourceLanguageLabel(segment.provider, segment.languageCode) ? 'transcript-source-line--labeled' : ''}`}
+                                  className={`transcript-source-line text-slate-100 ${hasSourceLanguageLabel(segment.provider, segment.languageCode) ? 'transcript-source-line--labeled' : ''}`}
                                   lang={normalizeLanguageTag(segment.languageCode)}
                                   dir="auto"
                                 >
@@ -387,37 +387,51 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                             </div>
                           );
                         })}
-                        {providerInterims.map(interim => {
-                          const classes = draftClasses[interim.provider] ?? { bg: 'bg-violet-500/5 border-violet-500/10', text: 'text-violet-400' };
-                          return (
-                            <div
-                              key={interim.key}
-                              className={`py-1 flex items-baseline gap-2.5 rounded px-2.5 -mx-1 border shadow-sm ${classes.bg}`}
-                              role="status"
-                              aria-live="polite"
-                              aria-atomic="true"
-                            >
-                              <span className={`text-sm select-none w-5 shrink-0 ${classes.text}`}>↳</span>
-                              <p className="min-w-0 flex-1 text-[1.05rem] leading-7 text-slate-300 font-medium tracking-wide italic">{interim.text}</p>
-                              <span className={`text-[9px] font-bold select-none uppercase tracking-[0.1em] ml-auto shrink-0 px-1 py-0.5 rounded border ${classes.text} border-current/20 bg-current/5`}>Draft</span>
+                        {providerInterims.map((interim, draftIndex) => (
+                          <div
+                            key={interim.key}
+                            className="transcript-turn transcript-turn--line group -mx-2 flex items-start rounded px-2 transition-colors duration-100 hover:bg-slate-900/25"
+                          >
+                            <span className="transcript-turn__index shrink-0 select-none tabular-nums text-slate-400">
+                              <span className="sr-only">Live draft </span>
+                              <span aria-hidden="true">{String(providerTranscripts.length + draftIndex + 1).padStart(2, '0')}</span>
+                              <span className="transcript-live-dot transcript-turn__live-dot" aria-hidden="true" />
+                            </span>
+                            <div className="transcript-bilingual min-w-0 flex-1">
+                              <p
+                                className={`transcript-source-line min-w-0 text-slate-300 ${hasSourceLanguageLabel(interim.provider, interim.languageCode) ? 'transcript-source-line--labeled' : ''}`}
+                                lang={normalizeLanguageTag(interim.languageCode)}
+                                dir="auto"
+                              >
+                                {hasSourceLanguageLabel(interim.provider, interim.languageCode) && (
+                                  <span className="source-language-label" title={formatLanguageLabel(interim.languageCode)} aria-hidden="true">
+                                    <span className="language-label__text">{formatLanguageLabel(interim.languageCode)}</span>
+                                  </span>
+                                )}
+                                <span className="transcript-source-line__text">{interim.text}</span>
+                              </p>
+                              <TranslationBlock translation={interim.translation} />
                             </div>
-                          );
-                        })}
+                            <span className={`transcript-status-badge shrink-0 rounded border uppercase ${transcriptStatusClasses.draftBadge}`}>Draft</span>
+                          </div>
+                        ))}
                       </div>
                     ) : (
-                      <p className="w-full break-words text-[1.05rem] font-medium leading-8 text-slate-100">
+                      <p className="transcript-paragraph-source min-w-0 break-words text-slate-100">
                         {providerTranscripts.map(segment => (
                           <React.Fragment key={segment.id}>
-                            <span lang={normalizeLanguageTag(segment.languageCode)} dir="auto">
-                              {segment.text}
-                            </span>{' '}
+                            <span lang={normalizeLanguageTag(segment.languageCode)} dir="auto">{segment.text}</span>{' '}
                           </React.Fragment>
                         ))}
                         {providerInterims.map(interim => {
-                          const classes = draftClasses[interim.provider] ?? { bg: 'bg-violet-500/5 border-violet-500/10', text: 'text-violet-400' };
+                          const presentation = getProviderPresentation(interim.provider);
                           return (
                             <React.Fragment key={interim.key}>
-                              <span className={`italic ${classes.text}`}>{interim.text}…</span>{' '}
+                              <span className="transcript-inline-draft">
+                                <span className="transcript-inline-draft__dot" aria-hidden="true" />
+                                Draft
+                              </span>{' '}
+                              <span className={`italic ${presentation.draftText}`} lang={normalizeLanguageTag(interim.languageCode)} dir="auto">{interim.text}</span>{' '}
                             </React.Fragment>
                           );
                         })}
@@ -447,7 +461,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
 
       <footer className="flex items-center justify-between border-t border-slate-700/70 px-4 py-2.5 text-xs text-slate-400 sm:px-5">
         <span className="min-w-0 truncate pr-3">{session.headline} · {session.detail}</span>
-        <span className="shrink-0 tabular-nums text-violet-300">{transcripts.length} Lines</span>
+        <span className="shrink-0 tabular-nums text-violet-300">{displayLineCount} Lines</span>
       </footer>
     </article>
   );

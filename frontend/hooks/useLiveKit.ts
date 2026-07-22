@@ -22,10 +22,11 @@ import {
     PendingTranslation,
     TranscriptMessage,
     attachTranslation,
-    appendTranscriptIfNew,
+    attachTranslationToInterims,
     clearInterimsBySource,
     clearPendingTranslationsBySource,
     createCommittedTranscript,
+    createInterimTranscript,
     getTranscriptKey,
     getTranscriptTurnKey,
     isAppendOnlyInterimProvider,
@@ -119,8 +120,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
 
     const applyTranscriptUpdate = useCallback((message: BufferedTranscriptMessage) => {
         const provider = message.provider || 'unknown';
-        const isAppendOnly = isAppendOnlyInterimProvider(provider);
-        if (message.isFinal || isAppendOnly) {
+        if (message.isFinal) {
             segmentIdRef.current++;
             const segment = createCommittedTranscript(
                 `lk-${segmentIdRef.current}`,
@@ -129,9 +129,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 message.speaker || message.sourceIdentity,
             );
             setTranscripts(prev => {
-                let next = isAppendOnly
-                    ? appendTranscriptIfNew(prev, segment)
-                    : appendBounded(prev, segment);
+                let next = appendBounded(prev, segment);
                 if (message.turnId) {
                     translationsByTurnRef.current = prunePendingTranslations(translationsByTurnRef.current);
                     const pending = translationsByTurnRef.current.get(getTranscriptTurnKey(message, message.sourceIdentity));
@@ -143,13 +141,17 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             return;
         }
 
-        setInterimTranscripts(prev => upsertInterim(prev, {
-            key: message.key,
-            text: message.text,
-            provider: message.provider || 'unknown',
-            speaker: message.speaker || message.sourceIdentity,
-            sourceIdentity: message.sourceIdentity,
-        }));
+        setInterimTranscripts(prev => {
+            let next = upsertInterim(prev, createInterimTranscript(message, message.sourceIdentity, provider));
+            if (message.turnId) {
+                translationsByTurnRef.current = prunePendingTranslations(translationsByTurnRef.current);
+                const pending = translationsByTurnRef.current.get(getTranscriptTurnKey(message, message.sourceIdentity));
+                if (pending) {
+                    next = attachTranslationToInterims(next, pending.message, pending.sourceIdentity).interims;
+                }
+            }
+            return next;
+        });
     }, []);
 
     const transcriptUpdatesRef = useRef<TranscriptUpdateBuffer<BufferedTranscriptMessage> | null>(null);
@@ -172,6 +174,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 message.sourceIdentity,
             );
             setTranscripts(prev => attachTranslation(prev, message, message.sourceIdentity).transcripts);
+            setInterimTranscripts(prev => attachTranslationToInterims(prev, message, message.sourceIdentity).interims);
             return;
         }
         applyTranscriptUpdate(message);
@@ -241,6 +244,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                     sourceIdentity,
                 );
                 setTranscripts(prev => attachTranslation(prev, message, sourceIdentity).transcripts);
+                setInterimTranscripts(prev => attachTranslationToInterims(prev, message, sourceIdentity).interims);
                 return;
             }
 

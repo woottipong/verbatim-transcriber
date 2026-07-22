@@ -7,19 +7,31 @@ import {
 
 test('exports committed source rows in order and removes empty rows', () => {
   const text = formatTranscriptText([
-    { text: ' First source row ' },
-    { text: '   ' },
-    { text: 'Second source row' },
+    { text: ' First source row ', isFinal: true },
+    { text: '   ', isFinal: true },
+    { text: 'Second source row', isFinal: true },
   ]);
 
   assert.equal(text, 'First source row\nSecond source row');
 });
 
-test('does not require isFinal so committed Gemini chunks remain exportable', () => {
+test('exports only finalized source rows', () => {
   assert.equal(
-    formatTranscriptText([{ text: 'Committed Gemini chunk' }]),
-    'Committed Gemini chunk',
+    formatTranscriptText([
+      { text: 'Live draft', isFinal: false },
+      { text: 'Final source', isFinal: true },
+    ]),
+    'Final source',
   );
+});
+
+test('exports nearby finalized chunks using the same rows shown in the UI', () => {
+  const text = formatTranscriptText([
+    { id: '1', text: 'First chunk', isFinal: true, timestamp: 1_000, provider: 'gemini', speaker: 'one' },
+    { id: '2', text: 'continues here', isFinal: true, timestamp: 2_200, provider: 'gemini', speaker: 'one' },
+  ]);
+
+  assert.equal(text, 'First chunk continues here');
 });
 
 test('builds a safe provider transcript filename', () => {

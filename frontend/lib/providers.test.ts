@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatProviderName, hasSourceLanguageLabel, providerFromAgentIdentity } from './providers.ts';
+import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel, providerFromAgentIdentity, transcriptStatusClasses } from './providers.ts';
 
 test('preserves the full hyphenated OpenAI provider identity', () => {
     assert.equal(providerFromAgentIdentity('agent-gpt-realtime-whisper'), 'gpt-realtime-whisper');
@@ -18,4 +18,24 @@ test('only bilingual providers show source language labels', () => {
     assert.equal(hasSourceLanguageLabel('gpt-realtime-whisper', 'th'), true);
     assert.equal(hasSourceLanguageLabel('gemini', 'th'), true);
     assert.equal(hasSourceLanguageLabel('google', 'th-TH'), false);
+});
+
+test('provides one shared visual presentation for every provider surface', () => {
+    assert.deepEqual(getProviderPresentation('gemini'), {
+        accent: 'bg-violet-400',
+        badge: 'text-violet-300 bg-violet-500/15 border-violet-400/30',
+        draftText: 'text-violet-300',
+    });
+    assert.deepEqual(getProviderPresentation('unknown'), {
+        accent: 'bg-slate-500',
+        badge: 'text-slate-300 bg-slate-500/15 border-slate-400/30',
+        draftText: 'text-slate-300',
+    });
+});
+
+test('uses a provider-neutral visual token for draft status', () => {
+    assert.equal(
+        transcriptStatusClasses.draftBadge,
+        'border-slate-500/50 bg-slate-700/30 text-slate-200',
+    );
 });

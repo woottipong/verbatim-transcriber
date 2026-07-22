@@ -24,16 +24,45 @@ export function providerFromAgentIdentity(identity: string): string {
     return known || remainder || 'unknown';
 }
 
-export const providerAccents: Record<string, string> = {
-    google: 'bg-sky-400',
-    gemini: 'bg-violet-400',
-    azure: 'bg-cyan-400',
-    'gpt-realtime-whisper': 'bg-emerald-400',
+export interface ProviderPresentation {
+    accent: string;
+    badge: string;
+    draftText: string;
+}
+
+const fallbackProviderPresentation: ProviderPresentation = {
+    accent: 'bg-slate-500',
+    badge: 'text-slate-300 bg-slate-500/15 border-slate-400/30',
+    draftText: 'text-slate-300',
 };
 
-export const providerDraftClasses: Record<string, { bg: string; text: string }> = {
-    google: { bg: 'bg-sky-500/5 border-sky-500/10', text: 'text-sky-400' },
-    gemini: { bg: 'bg-violet-500/5 border-violet-500/10', text: 'text-violet-400' },
-    azure: { bg: 'bg-cyan-500/5 border-cyan-500/10', text: 'text-cyan-400' },
-    'gpt-realtime-whisper': { bg: 'bg-emerald-500/5 border-emerald-500/10', text: 'text-emerald-400' },
+const providerPresentations: Record<AgentProvider, ProviderPresentation> = {
+    google: {
+        accent: 'bg-sky-400',
+        badge: 'text-sky-300 bg-sky-500/15 border-sky-400/30',
+        draftText: 'text-sky-300',
+    },
+    gemini: {
+        accent: 'bg-violet-400',
+        badge: 'text-violet-300 bg-violet-500/15 border-violet-400/30',
+        draftText: 'text-violet-300',
+    },
+    azure: {
+        accent: 'bg-cyan-400',
+        badge: 'text-cyan-300 bg-cyan-500/15 border-cyan-400/30',
+        draftText: 'text-cyan-300',
+    },
+    'gpt-realtime-whisper': {
+        accent: 'bg-emerald-400',
+        badge: 'text-emerald-300 bg-emerald-500/15 border-emerald-400/30',
+        draftText: 'text-emerald-300',
+    },
 };
+
+export function getProviderPresentation(provider: string): ProviderPresentation {
+    return providerPresentations[provider as AgentProvider] ?? fallbackProviderPresentation;
+}
+
+export const transcriptStatusClasses = {
+    draftBadge: 'border-slate-500/50 bg-slate-700/30 text-slate-200',
+} as const;

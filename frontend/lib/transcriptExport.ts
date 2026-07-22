@@ -1,6 +1,7 @@
 import type { TranscriptSegment } from '../types';
+import { groupFinalTranscriptRows } from './transcriptMessages.ts';
 
-type TranscriptTextSegment = Pick<TranscriptSegment, 'text'>;
+type TranscriptTextSegment = Pick<TranscriptSegment, 'text' | 'isFinal'> & Partial<Pick<TranscriptSegment, 'id' | 'timestamp' | 'provider' | 'speaker' | 'role' | 'languageCode' | 'turnId' | 'translation'>>;
 
 function toFilenameSlug(value: string, fallback: string): string {
   const slug = value
@@ -14,7 +15,14 @@ function toFilenameSlug(value: string, fallback: string): string {
 export function formatTranscriptText(
   segments: readonly TranscriptTextSegment[],
 ): string {
-  return segments
+  const finalized = segments.filter(segment => segment.isFinal);
+  const completeSegments = finalized.filter((segment): segment is TranscriptSegment => (
+    typeof segment.id === 'string' && typeof segment.timestamp === 'number'
+  ));
+  const rows = completeSegments.length === finalized.length
+    ? groupFinalTranscriptRows(completeSegments)
+    : finalized;
+  return rows
     .map(segment => segment.text.trim())
     .filter(Boolean)
     .join('\n');

@@ -22,13 +22,13 @@ import {
     InterimTranscript,
     PendingTranslation,
     attachTranslation,
-    appendTranscriptIfNew,
+    attachTranslationToInterims,
     clearInterimsBySource,
     clearPendingTranslationsBySource,
     createCommittedTranscript,
+    createInterimTranscript,
     getTranscriptKey,
     getTranscriptTurnKey,
-    isAppendOnlyInterimProvider,
     parseTranscriptMessage,
     prunePendingTranslations,
     removeInterim,
@@ -213,13 +213,6 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             const provider = message.provider || getProviderFromIdentity(agentIdentity);
             const key = getTranscriptKey(message, agentIdentity);
 
-            console.log('[Viewer] 📝 Transcript:', {
-                text: message.text,
-                isFinal: message.isFinal,
-                provider,
-                from: agentIdentity,
-            });
-
             // Update agent provider if we got it from the message
             if (message.provider && isAgent(agentIdentity)) {
                 setAgents(prev => prev.map(a =>
@@ -228,7 +221,6 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             }
 
             const speaker = message.speaker || agentIdentity;
-            const isAppendOnly = isAppendOnlyInterimProvider(provider);
 
             if (message.role === 'translation') {
                 translationsByTurnRef.current = storePendingTranslation(
@@ -237,10 +229,11 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
                     agentIdentity,
                 );
                 setTranscripts(prev => attachTranslation(prev, message, agentIdentity).transcripts);
+                setInterimTranscripts(prev => attachTranslationToInterims(prev, message, agentIdentity).interims);
                 return;
             }
 
-            if (isAppendOnly || message.isFinal) {
+            if (message.isFinal) {
                 segmentIdRef.current++;
                 const segment = createCommittedTranscript(
                     `view-${segmentIdRef.current}`,
@@ -249,9 +242,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
                     speaker,
                 );
                 setTranscripts(prev => {
-                    let next = isAppendOnly
-                        ? appendTranscriptIfNew(prev, segment)
-                        : appendBounded(prev, segment);
+                    let next = appendBounded(prev, segment);
                     if (message.turnId) {
                         translationsByTurnRef.current = prunePendingTranslations(translationsByTurnRef.current);
                         const pending = translationsByTurnRef.current.get(getTranscriptTurnKey(message, agentIdentity));
@@ -262,13 +253,17 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
 
                 setInterimTranscripts(prev => removeInterim(prev, key));
             } else {
-                setInterimTranscripts(prev => upsertInterim(prev, {
-                    key,
-                    text: message.text,
-                    provider,
-                    speaker,
-                    sourceIdentity: agentIdentity,
-                }));
+                setInterimTranscripts(prev => {
+                    let next = upsertInterim(prev, createInterimTranscript(message, agentIdentity, provider));
+                    if (message.turnId) {
+                        translationsByTurnRef.current = prunePendingTranslations(translationsByTurnRef.current);
+                        const pending = translationsByTurnRef.current.get(getTranscriptTurnKey(message, agentIdentity));
+                        if (pending) {
+                            next = attachTranslationToInterims(next, pending.message, pending.sourceIdentity).interims;
+                        }
+                    }
+                    return next;
+                });
             }
         } catch (err) {
             console.error('[Viewer] Failed to parse transcript data:', err);
