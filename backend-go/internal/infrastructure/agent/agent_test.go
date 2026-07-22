@@ -170,7 +170,7 @@ func TestNewTranscriptMessageNormalizesThaiSpacing(t *testing.T) {
 		"speaker-1",
 	)
 
-	if got, want := message.Text, "ทดสอบถอดความ 1 2 3 4"; got != want {
+	if got, want := message.Text, "ทด สอบ ถอด ความ 1 2 3 4"; got != want {
 		t.Fatalf("message text = %q, want %q", got, want)
 	}
 }
@@ -185,8 +185,21 @@ func TestNewInterimTranscriptMessageKeepsNormalizedThaiText(t *testing.T) {
 	if message.IsFinal {
 		t.Fatal("interim message was marked final")
 	}
-	if got, want := message.Text, "กำลังทดสอบ"; got != want {
+	if got, want := message.Text, "กำ ลัง ทด สอบ"; got != want {
 		t.Fatalf("interim message text = %q, want %q", got, want)
+	}
+}
+
+func TestNewFinalTranscriptMessagePreservesThaiAndEnglishPhraseBoundaries(t *testing.T) {
+	const transcript = "ค่ะ ครับ สระภาษาอังกฤษคือ a e i o u นั่นเองนะคะ"
+	message := newTranscriptMessage(
+		domain.TranscriptResult{Text: transcript, IsFinal: true},
+		"gpt-realtime-whisper",
+		"speaker-1",
+	)
+
+	if got := message.Text; got != transcript {
+		t.Fatalf("message text = %q, want %q", got, transcript)
 	}
 }
 
@@ -205,7 +218,7 @@ func TestNewTranscriptMessagePreservesTranslationMetadata(t *testing.T) {
 	if message.Role != domain.TranscriptRoleTranslation || message.LanguageCode != "th" || message.TurnID != "gemini-1" {
 		t.Fatalf("translation metadata = role:%q language:%q turn:%q", message.Role, message.LanguageCode, message.TurnID)
 	}
-	if got, want := message.Text, "ห้องฉุกเฉิน"; got != want {
+	if got, want := message.Text, "ห้อง ฉุกเฉิน"; got != want {
 		t.Fatalf("message text = %q, want %q", got, want)
 	}
 }

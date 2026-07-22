@@ -154,7 +154,7 @@ Open:
 | Provider | Agent input | Default | Transcript behavior |
 | --- | --- | --- | --- |
 | Google | 48 kHz Linear16 PCM | `chirp_2`, `th-TH`, `asia-southeast1`, punctuation on | Interim snapshots and final utterances; reconnects before the five-minute limit |
-| Gemini | 16 kHz PCM | `gemini-3.5-live-translate-preview`, optional source hint, target defaults to `th` | Replaceable source/translation Draft state is paired by application turn; finalized bilingual rows are available in Lines view and model audio is discarded |
+| Gemini | 16 kHz PCM | `gemini-3.5-live-translate-preview`, optional source hint, target defaults to `th` | Replaceable source/translation Draft state is paired by application turn; session resumption, context compression, safe nine-minute rotation, and bounded reconnect keep long-running audio connected |
 | GPT Realtime Whisper | 24 kHz PCM16 | Realtime transcription intent with model `gpt-realtime-whisper`, source language defaults to `th` | Replaceable source Draft deltas and completed finals; 650 ms silence/30-second hard boundary; bounded reconnect with recent-audio replay; no translation output |
 | Azure | 16 kHz PCM/WAV stream | Thai conversation recognition, `southeastasia` | Interim hypotheses and finalized phrases |
 
@@ -274,7 +274,7 @@ Transcript events use a room-scoped sequence:
 
 Thai spacing is normalized in the Go agent. Non-final source text is replaceable Draft state keyed by provider and speaker; Gemini also keys source/translation pairs by its application `turnId`. Final values become bounded committed rows. The Lines view can show Gemini translation beneath its source. Text view shows source only and marks any active Draft inline; per-provider `.txt` export contains finalized source text only. For readability, adjacent finals from the same provider, speaker, and language are displayed together when they arrive within 1.6 seconds and the previous chunk has no strong sentence-ending punctuation.
 
-The Stream page coalesces Draft rendering without delaying the first update or a final result: 33 ms for general interim traffic and 100 ms for Gemini. GPT Realtime Whisper continuously streams 24 kHz PCM16, commits after 650 ms of low-energy audio or a 30-second hard duration, and retries recoverable upstream failures with bounded backoff plus up to one second of recent-audio replay. Gemini uses the same 650 ms silence boundary with a fixed 500 ms translation grace period.
+The Stream page coalesces Draft rendering without delaying the first update or a final result: 33 ms for general interim traffic and 100 ms for Gemini. GPT Realtime Whisper continuously streams 24 kHz PCM16, commits after 650 ms of low-energy audio or a 30-second hard duration, and retries recoverable upstream failures with bounded backoff plus up to one second of recent-audio replay. Gemini uses the same 650 ms silence boundary with a fixed 500 ms translation grace period. Gemini also enables Live API session resumption and sliding-window context compression, reconnects on `GoAway` or transport failure, and attempts a nine-minute connection rotation when the server has supplied a safe resumption handle; up to fifteen seconds of audio received during the handoff is replayed.
 
 When an Audio Sender disconnects or unpublishes its track normally, the track-scoped provider is released but the room agent remains connected and waits for the next audio track. An unexpected provider error stops the agent so Admin status does not report a falsely healthy transcriber.
 

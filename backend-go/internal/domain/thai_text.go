@@ -17,11 +17,10 @@ func isLatinOrDigit(r rune) bool {
 		(r >= 0x00C0 && r <= 0x024F)
 }
 
-// NormalizeThaiSpacing removes tokenization spaces inside Thai text while
-// preserving separators around Latin text, numbers, and punctuation. It also
-// dynamically inserts spaces at the boundaries between Thai characters and
-// Latin letters/digits to improve readability.
-func NormalizeThaiSpacing(text string) string {
+// NormalizeTranscriptSpacing collapses repeated whitespace while preserving explicit
+// Thai text boundaries. It also inserts spaces at boundaries between Thai
+// characters and Latin letters/digits to improve readability.
+func NormalizeTranscriptSpacing(text string) string {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return ""
@@ -45,15 +44,9 @@ func NormalizeThaiSpacing(text string) string {
 				break
 			}
 
-			nextRune := runes[i]
 			if lastNonSpace != 0 {
-				if isThai(lastNonSpace) && isThai(nextRune) {
-					// Skip tokenization spaces between consecutive Thai characters
-					spaceWritten = false
-				} else {
-					normalized.WriteByte(' ')
-					spaceWritten = true
-				}
+				normalized.WriteByte(' ')
+				spaceWritten = true
 			}
 			continue
 		}
@@ -72,4 +65,9 @@ func NormalizeThaiSpacing(text string) string {
 	}
 
 	return normalized.String()
+}
+
+// NormalizeThaiSpacing is retained for callers using the original API name.
+func NormalizeThaiSpacing(text string) string {
+	return NormalizeTranscriptSpacing(text)
 }

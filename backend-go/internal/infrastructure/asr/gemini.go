@@ -2,12 +2,14 @@ package asr
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"thai-transcriber-backend/internal/domain"
 
@@ -15,6 +17,12 @@ import (
 )
 
 const geminiDefaultModel = "gemini-3.5-live-translate-preview"
+
+const (
+	geminiConnectionRotation   = 9 * time.Minute
+	geminiReconnectAudio       = 15 * time.Second
+	geminiMaxReconnectAttempts = 3
+)
 
 var geminiSupportedTargetLanguageCodes = func() map[string]string {
 	// Canonical BCP-47 codes published for gemini-3.5-live-translate-preview.
@@ -40,8 +48,72 @@ type GeminiConfig struct {
 	SampleRate         int
 }
 
+type geminiSession interface {
+	SendRealtimeInput(genai.LiveRealtimeInput) error
+	Receive() (*genai.LiveServerMessage, error)
+	Close() error
+}
+
+type geminiConnectFunc func(context.Context, string) (geminiSession, error)
+
+type geminiReconnectBuffer struct {
+	data     []byte
+	capacity int
+	dropped  int64
+}
+
+func newGeminiReconnectBuffer(capacity int) *geminiReconnectBuffer {
+	return &geminiReconnectBuffer{
+		data:     make([]byte, 0, max(capacity, 0)),
+		capacity: max(capacity, 0),
+	}
+}
+
+func (b *geminiReconnectBuffer) Add(data []byte) {
+	if len(data) == 0 {
+		return
+	}
+	if b.capacity == 0 {
+		b.dropped += int64(len(data))
+		return
+	}
+	overflow := len(b.data) + len(data) - b.capacity
+	if overflow <= 0 {
+		b.data = append(b.data, data...)
+		return
+	}
+	b.dropped += int64(overflow)
+	if overflow >= len(b.data) {
+		skip := overflow - len(b.data)
+		b.data = append(b.data[:0], data[skip:]...)
+		return
+	}
+	b.data = append(b.data[overflow:], data...)
+}
+
+func (b *geminiReconnectBuffer) Reset() {
+	b.data = b.data[:0]
+	b.dropped = 0
+}
+
+func (b *geminiReconnectBuffer) Drain() ([]byte, int64) {
+	data := append([]byte(nil), b.data...)
+	dropped := b.dropped
+	b.Reset()
+	return data, dropped
+}
+
+func (b *geminiReconnectBuffer) RestoreFront(data []byte, dropped int64) {
+	tail := append([]byte(nil), b.data...)
+	tailDropped := b.dropped
+	b.Reset()
+	b.dropped = dropped + tailDropped
+	b.Add(data)
+	b.Add(tail)
+}
+
 type GeminiProvider struct {
-	session                *genai.Session
+	session                geminiSession
 	results                chan domain.TranscriptResult
 	cfg                    GeminiConfig
 	ctx                    context.Context
@@ -57,6 +129,10 @@ type GeminiProvider struct {
 	started                bool
 	stopped                bool
 	resultsClosed          bool
+	reconnecting           bool
+	reconnectCount         int
+	resumptionHandle       string
+	resumptionAvailable    bool
 	turnSequence           uint64
 	sourceAccumulator      geminiTranscriptAccumulator
 	translationAccumulator geminiTranscriptAccumulator
@@ -68,6 +144,11 @@ type GeminiProvider struct {
 	segmenter              geminiSegmenter
 	boundaryTimer          *time.Timer
 	boundaryVersion        uint64
+	rotationTimer          *time.Timer
+	rotationAfter          time.Duration
+	audioBuf               *geminiReconnectBuffer
+	connect                geminiConnectFunc
+	reconnectDelay         func(int) time.Duration
 	now                    func() time.Time
 }
 
@@ -83,7 +164,7 @@ func normalizeGeminiConfig(cfg GeminiConfig) GeminiConfig {
 	} else {
 		cfg.TargetLanguageCode = targetLanguageCode
 	}
-	if cfg.SampleRate == 0 {
+	if cfg.SampleRate <= 0 {
 		cfg.SampleRate = 16000
 	}
 	return cfg
@@ -99,12 +180,22 @@ func NewGeminiProvider(ctx context.Context, cfg GeminiConfig) (*GeminiProvider, 
 		return nil, fmt.Errorf("unsupported Gemini target language code %q", normalized.TargetLanguageCode)
 	}
 	return &GeminiProvider{
-		cfg:       normalized,
-		results:   make(chan domain.TranscriptResult, 100),
-		done:      make(chan struct{}),
-		segmenter: newGeminiSegmenter(normalized.SampleRate),
-		now:       time.Now,
+		cfg:            normalized,
+		results:        make(chan domain.TranscriptResult, 100),
+		done:           make(chan struct{}),
+		segmenter:      newGeminiSegmenter(normalized.SampleRate),
+		rotationAfter:  geminiConnectionRotation,
+		audioBuf:       newGeminiReconnectBuffer(normalized.SampleRate * 2 * int(geminiReconnectAudio/time.Second)),
+		reconnectDelay: defaultGeminiReconnectDelay,
+		now:            time.Now,
 	}, nil
+}
+
+func defaultGeminiReconnectDelay(attempt int) time.Duration {
+	if attempt < 1 {
+		attempt = 1
+	}
+	return min(100*time.Millisecond*time.Duration(1<<(attempt-1)), 2*time.Second)
 }
 
 func (g *GeminiProvider) Name() string {
@@ -132,32 +223,33 @@ func (g *GeminiProvider) Start(ctx context.Context) error {
 	g.starting = true
 	g.mu.Unlock()
 
-	client, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  g.cfg.APIKey,
-		Backend: genai.BackendGeminiAPI,
-		HTTPOptions: genai.HTTPOptions{
-			// Live API is currently exposed on the v1alpha Gemini API surface.
-			APIVersion: "v1alpha",
-		},
-	})
-	if err != nil {
-		g.markStartFailed()
-		return fmt.Errorf("create Gemini client: %w", err)
+	streamCtx, cancel := context.WithCancel(ctx)
+	g.mu.Lock()
+	connect := g.connect
+	g.mu.Unlock()
+	if connect == nil {
+		client, err := genai.NewClient(ctx, &genai.ClientConfig{
+			APIKey:  g.cfg.APIKey,
+			Backend: genai.BackendGeminiAPI,
+			HTTPOptions: genai.HTTPOptions{
+				// Live API is currently exposed on the v1alpha Gemini API surface.
+				APIVersion: "v1alpha",
+			},
+		})
+		if err != nil {
+			cancel()
+			g.markStartFailed()
+			return fmt.Errorf("create Gemini client: %w", err)
+		}
+		connect = func(connectCtx context.Context, handle string) (geminiSession, error) {
+			return client.Live.Connect(connectCtx, g.cfg.Model, geminiLiveConnectConfig(g.cfg, handle))
+		}
+		g.mu.Lock()
+		g.connect = connect
+		g.mu.Unlock()
 	}
 
-	streamCtx, cancel := context.WithCancel(ctx)
-	echoTargetLanguage := false
-	session, err := client.Live.Connect(streamCtx, g.cfg.Model, &genai.LiveConnectConfig{
-		// The translation model requires AUDIO responses. Model audio remains
-		// discarded; input and translated output text are exposed.
-		ResponseModalities:       []genai.Modality{genai.ModalityAudio},
-		InputAudioTranscription:  geminiInputTranscriptionConfig(g.cfg.LanguageCode),
-		OutputAudioTranscription: &genai.AudioTranscriptionConfig{},
-		TranslationConfig: &genai.TranslationConfig{
-			TargetLanguageCode: g.cfg.TargetLanguageCode,
-			EchoTargetLanguage: &echoTargetLanguage,
-		},
-	})
+	session, err := connect(streamCtx, "")
 	if err != nil {
 		cancel()
 		g.markStartFailed()
@@ -176,11 +268,12 @@ func (g *GeminiProvider) Start(ctx context.Context) error {
 	g.ctx = streamCtx
 	g.cancel = cancel
 	g.started = true
+	g.scheduleRotationLocked(session)
 	g.mu.Unlock()
 
 	log.Printf("✅ [Gemini] Live connected (model=%s, language=%s, target=%s, response=audio-discarded)",
 		g.cfg.Model, g.cfg.LanguageCode, g.cfg.TargetLanguageCode)
-	go g.receiveResponses()
+	go g.receiveResponses(session)
 	return nil
 }
 
@@ -194,7 +287,11 @@ func (g *GeminiProvider) SendAudio(audio []byte) error {
 	ctx := g.ctx
 	started := g.started
 	stopped := g.stopped
+	reconnecting := g.reconnecting
 	rate := g.cfg.SampleRate
+	if reconnecting && g.audioBuf != nil {
+		g.audioBuf.Add(audio)
+	}
 	g.mu.Unlock()
 
 	if stopped {
@@ -209,13 +306,22 @@ func (g *GeminiProvider) SendAudio(audio []byte) error {
 	default:
 	}
 
+	if reconnecting {
+		finals := g.observeAudioForSegmentation(audio, g.currentTime())
+		if len(finals) > 0 {
+			g.publishResults(finals, ctx)
+		}
+		return nil
+	}
+
 	if err := session.SendRealtimeInput(genai.LiveRealtimeInput{
 		Audio: &genai.Blob{
 			Data:     audio,
 			MIMEType: fmt.Sprintf("audio/pcm;rate=%d", rate),
 		},
 	}); err != nil {
-		return err
+		g.beginReconnect(session, err, audio)
+		return nil
 	}
 
 	finals := g.observeAudioForSegmentation(audio, g.currentTime())
@@ -238,8 +344,8 @@ func (g *GeminiProvider) Stop() error {
 	g.stopped = true
 	cancel := g.cancel
 	session := g.session
-	started := g.started
 	done := g.done
+	g.stopRotationLocked()
 	if done == nil {
 		done = make(chan struct{})
 		g.done = done
@@ -255,9 +361,7 @@ func (g *GeminiProvider) Stop() error {
 	if session != nil {
 		closeErr = session.Close()
 	}
-	if !started {
-		g.closeResults()
-	}
+	g.closeResults()
 	return closeErr
 }
 
@@ -267,15 +371,13 @@ func (g *GeminiProvider) Err() error {
 	return g.lastErr
 }
 
-func (g *GeminiProvider) receiveResponses() {
-	defer g.closeResults()
-
+func (g *GeminiProvider) receiveResponses(session geminiSession) {
 	for {
 		g.mu.Lock()
-		session := g.session
 		ctx := g.ctx
+		stopped := g.stopped
 		g.mu.Unlock()
-		if session == nil {
+		if session == nil || stopped {
 			return
 		}
 
@@ -283,14 +385,40 @@ func (g *GeminiProvider) receiveResponses() {
 		if err != nil {
 			g.mu.Lock()
 			stopped := g.stopped
-			if err != io.EOF && !stopped {
-				g.lastErr = err
-			}
 			g.mu.Unlock()
+			if stopped || ctx.Err() != nil {
+				return
+			}
 			if err != io.EOF && !stopped {
 				log.Printf("❌ [Gemini] Receive error: %v", err)
 			}
+			g.beginReconnect(session, err, nil)
 			return
+		}
+		if message == nil {
+			continue
+		}
+
+		if update := message.SessionResumptionUpdate; update != nil {
+			g.mu.Lock()
+			if g.session == session {
+				g.resumptionAvailable = update.Resumable && update.NewHandle != ""
+				if g.resumptionAvailable {
+					g.resumptionHandle = update.NewHandle
+				}
+			}
+			g.mu.Unlock()
+		}
+		if goAway := message.GoAway; goAway != nil {
+			g.mu.Lock()
+			resumptionAvailable := g.session == session && g.resumptionAvailable
+			g.mu.Unlock()
+			if resumptionAvailable {
+				log.Printf("🔄 [Gemini] Server requested connection rotation (time_left=%s)", goAway.TimeLeft)
+				g.beginReconnect(session, errors.New("Gemini Live server sent GoAway"), nil)
+				return
+			}
+			log.Printf("ℹ️ [Gemini] Deferring GoAway rotation until the connection closes because no safe resumption handle is available (time_left=%s)", goAway.TimeLeft)
 		}
 
 		if !g.publishResults(g.transcriptResults(message), ctx) {
@@ -299,12 +427,234 @@ func (g *GeminiProvider) receiveResponses() {
 	}
 }
 
+func (g *GeminiProvider) scheduleRotationLocked(session geminiSession) {
+	g.stopRotationLocked()
+	rotationAfter := g.rotationAfter
+	if rotationAfter <= 0 {
+		rotationAfter = geminiConnectionRotation
+	}
+	g.rotationTimer = time.AfterFunc(rotationAfter, func() {
+		g.requestScheduledRotation(session)
+	})
+}
+
+func (g *GeminiProvider) requestScheduledRotation(session geminiSession) {
+	g.mu.Lock()
+	if g.stopped || g.reconnecting || g.session != session || g.ctx == nil || g.ctx.Err() != nil {
+		g.mu.Unlock()
+		return
+	}
+	if !g.resumptionAvailable {
+		g.scheduleRotationLocked(session)
+		g.mu.Unlock()
+		log.Printf("ℹ️ [Gemini] Deferred scheduled rotation because no safe resumption handle is available")
+		return
+	}
+	g.mu.Unlock()
+	g.beginReconnect(session, errors.New("Gemini Live scheduled connection rotation"), nil)
+}
+
+func (g *GeminiProvider) stopRotationLocked() {
+	if g.rotationTimer != nil {
+		g.rotationTimer.Stop()
+		g.rotationTimer = nil
+	}
+}
+
+func (g *GeminiProvider) beginReconnect(failedSession geminiSession, cause error, initialAudio []byte) {
+	g.mu.Lock()
+	if g.stopped || g.ctx == nil || g.ctx.Err() != nil {
+		g.mu.Unlock()
+		return
+	}
+	if g.reconnecting {
+		if g.session == failedSession && g.audioBuf != nil && len(initialAudio) > 0 {
+			g.audioBuf.Add(initialAudio)
+		}
+		g.mu.Unlock()
+		return
+	}
+	if g.session != failedSession {
+		g.mu.Unlock()
+		return
+	}
+	g.reconnecting = true
+	g.stopRotationLocked()
+	if g.audioBuf != nil {
+		g.audioBuf.Reset()
+		g.audioBuf.Add(initialAudio)
+	}
+	ctx := g.ctx
+	g.mu.Unlock()
+	go g.reconnect(ctx, failedSession, cause)
+}
+
+func (g *GeminiProvider) reconnect(ctx context.Context, failedSession geminiSession, cause error) {
+	_ = failedSession.Close()
+	lastErr := cause
+	freshSessionPrepared := false
+	for attempt := 1; attempt <= geminiMaxReconnectAttempts; attempt++ {
+		g.mu.Lock()
+		if g.stopped || ctx.Err() != nil {
+			g.reconnecting = false
+			g.mu.Unlock()
+			return
+		}
+		connect := g.connect
+		delayFn := g.reconnectDelay
+		handle := ""
+		if g.resumptionAvailable {
+			handle = g.resumptionHandle
+		}
+		// Preserve two attempts for transient resume failures, then start a fresh
+		// session rather than making an otherwise healthy room permanently fail.
+		if attempt == geminiMaxReconnectAttempts {
+			handle = ""
+		}
+		g.mu.Unlock()
+		if handle == "" && !freshSessionPrepared {
+			if !g.prepareFreshSession(ctx) {
+				return
+			}
+			freshSessionPrepared = true
+		}
+
+		if delayFn == nil {
+			delayFn = defaultGeminiReconnectDelay
+		}
+		if delay := delayFn(attempt); delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				g.mu.Lock()
+				g.reconnecting = false
+				g.mu.Unlock()
+				return
+			case <-timer.C:
+			}
+		}
+
+		log.Printf("🔄 [Gemini] Reconnecting Live session (attempt=%d/%d resume=%t)",
+			attempt, geminiMaxReconnectAttempts, handle != "")
+		if connect == nil {
+			lastErr = errors.New("Gemini Live connector is unavailable")
+			continue
+		}
+		newSession, err := connect(ctx, handle)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		count, err := g.activateReconnectedSession(newSession, handle)
+		if err != nil {
+			lastErr = err
+			_ = newSession.Close()
+			continue
+		}
+
+		go g.receiveResponses(newSession)
+		log.Printf("✅ [Gemini] Live session reconnected (#%d resume=%t)", count, handle != "")
+		return
+	}
+	g.finishReconnectFailure(lastErr)
+}
+
+func (g *GeminiProvider) prepareFreshSession(ctx context.Context) bool {
+	g.transcriptMu.Lock()
+	results := g.finalizeUpstreamTurnLocked()
+	g.resetUpstreamTurnLocked()
+	g.transcriptMu.Unlock()
+	return g.publishResults(results, ctx)
+}
+
+func (g *GeminiProvider) activateReconnectedSession(session geminiSession, handle string) (int, error) {
+	for {
+		g.mu.Lock()
+		if g.stopped {
+			g.mu.Unlock()
+			return 0, context.Canceled
+		}
+		replay, dropped := g.audioBuf.Drain()
+		rate := g.cfg.SampleRate
+		if len(replay) == 0 {
+			g.logDroppedReconnectAudio(dropped, rate)
+			g.session = session
+			g.reconnecting = false
+			g.reconnectCount++
+			g.lastErr = nil
+			g.resumptionHandle = ""
+			g.resumptionAvailable = false
+			count := g.reconnectCount
+			g.scheduleRotationLocked(session)
+			g.mu.Unlock()
+			return count, nil
+		}
+		g.mu.Unlock()
+		if err := session.SendRealtimeInput(genai.LiveRealtimeInput{Audio: &genai.Blob{
+			Data: replay, MIMEType: fmt.Sprintf("audio/pcm;rate=%d", rate),
+		}}); err != nil {
+			g.mu.Lock()
+			g.audioBuf.RestoreFront(replay, dropped)
+			g.mu.Unlock()
+			return 0, fmt.Errorf("replay audio after Gemini reconnect: %w", err)
+		}
+		g.logDroppedReconnectAudio(dropped, rate)
+		log.Printf("🔄 [Gemini] Replayed %d bytes of buffered audio", len(replay))
+	}
+}
+
+func (g *GeminiProvider) logDroppedReconnectAudio(dropped int64, rate int) {
+	if dropped <= 0 {
+		return
+	}
+	log.Printf("⚠️ [Gemini] Reconnect audio buffer overflowed (dropped_bytes=%d dropped_ms=%d)",
+		dropped, dropped*1000/int64(rate*2))
+}
+
+func (g *GeminiProvider) finishReconnectFailure(err error) {
+	g.mu.Lock()
+	if g.stopped {
+		g.reconnecting = false
+		g.mu.Unlock()
+		return
+	}
+	g.reconnecting = false
+	g.started = false
+	g.lastErr = fmt.Errorf("Gemini Live reconnect failed: %w", err)
+	g.mu.Unlock()
+	log.Printf("❌ [Gemini] Reconnect exhausted: %v", err)
+	g.closeResults()
+}
+
 func geminiInputTranscriptionConfig(languageCode string) *genai.AudioTranscriptionConfig {
 	cfg := &genai.AudioTranscriptionConfig{}
 	if code := strings.TrimSpace(languageCode); code != "" {
 		cfg.LanguageHints = &genai.LanguageHints{LanguageCodes: []string{code}}
 	}
 	return cfg
+}
+
+func geminiLiveConnectConfig(cfg GeminiConfig, resumptionHandle string) *genai.LiveConnectConfig {
+	echoTargetLanguage := false
+	return &genai.LiveConnectConfig{
+		// The translation model requires AUDIO responses. Model audio remains
+		// discarded; input and translated output text are exposed.
+		ResponseModalities:       []genai.Modality{genai.ModalityAudio},
+		InputAudioTranscription:  geminiInputTranscriptionConfig(cfg.LanguageCode),
+		OutputAudioTranscription: &genai.AudioTranscriptionConfig{},
+		TranslationConfig: &genai.TranslationConfig{
+			TargetLanguageCode: cfg.TargetLanguageCode,
+			EchoTargetLanguage: &echoTargetLanguage,
+		},
+		SessionResumption: &genai.SessionResumptionConfig{
+			Handle: resumptionHandle,
+		},
+		ContextWindowCompression: &genai.ContextWindowCompressionConfig{
+			SlidingWindow: &genai.SlidingWindow{},
+		},
+	}
 }
 
 func (g *GeminiProvider) transcriptResults(message *genai.LiveServerMessage) []domain.TranscriptResult {
@@ -595,7 +945,19 @@ func mergeGeminiTranscript(current, incoming string) (string, bool) {
 	if current == "" || strings.HasPrefix(incoming, current) {
 		return incoming, incoming != current
 	}
-	return domain.NormalizeThaiSpacing(current + " " + incoming), true
+	separator := " "
+	lastCurrent, _ := utf8.DecodeLastRuneInString(current)
+	firstIncoming, _ := utf8.DecodeRuneInString(incoming)
+	if isGeminiThaiRune(lastCurrent) && isGeminiThaiRune(firstIncoming) {
+		// Gemini may stream adjacent pieces of one Thai word. The separator here
+		// is synthetic, so do not let conservative output normalization preserve it.
+		separator = ""
+	}
+	return domain.NormalizeTranscriptSpacing(current + separator + incoming), true
+}
+
+func isGeminiThaiRune(r rune) bool {
+	return r >= 0x0E00 && r <= 0x0E7F
 }
 
 func (g *GeminiProvider) markStartFailed() {

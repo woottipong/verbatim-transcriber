@@ -566,15 +566,35 @@ test('preserves source finality when creating a committed display row', async ()
     assert.equal(segment.isFinal, false);
 });
 
-test('groups nearby finalized source chunks from the same speaker into one display row', async () => {
+test('keeps nearby finalized Thai chunks in separate display rows', async () => {
     const { groupFinalTranscriptRows } = await import('./transcriptMessages.ts');
     const grouped = groupFinalTranscriptRows([
         { id: '1', text: 'วันนี้เริ่มต้นบท', isFinal: true, timestamp: 1_000, provider: 'gemini', speaker: 'user-1', role: 'source' },
         { id: '2', text: 'เรียนเรื่องภาษาไทย', isFinal: true, timestamp: 2_200, provider: 'gemini', speaker: 'user-1', role: 'source' },
     ]);
 
-    assert.equal(grouped.length, 1);
-    assert.equal(grouped[0].text, 'วันนี้เริ่มต้นบท เรียนเรื่องภาษาไทย');
+    assert.deepEqual(grouped.map(row => row.text), [
+        'วันนี้เริ่มต้นบท',
+        'เรียนเรื่องภาษาไทย',
+    ]);
+});
+
+test('keeps rows separate when their paired translations contain Thai text', async () => {
+    const { groupFinalTranscriptRows } = await import('./transcriptMessages.ts');
+    const grouped = groupFinalTranscriptRows([
+        {
+            id: '1', text: 'Hello', isFinal: true, timestamp: 1_000,
+            provider: 'gemini', speaker: 'user-1', role: 'source', languageCode: 'en',
+            translation: { text: 'สวัสดี', languageCode: 'th', isFinal: true },
+        },
+        {
+            id: '2', text: 'everyone', isFinal: true, timestamp: 2_000,
+            provider: 'gemini', speaker: 'user-1', role: 'source', languageCode: 'en',
+            translation: { text: 'ทุกคน', languageCode: 'th', isFinal: true },
+        },
+    ]);
+
+    assert.equal(grouped.length, 2);
 });
 
 test('keeps finalized rows separate across speakers, providers, punctuation, and long pauses', async () => {
@@ -593,7 +613,8 @@ test('keeps finalized rows separate across speakers, providers, punctuation, and
         'ประโยคจบครับ',
         'คนเดิมแต่พักนาน',
         'คนละคน',
-        'คนละระบบ จบด้วย punctuation.',
+        'คนละระบบ',
+        'จบด้วย punctuation.',
         'ต้องขึ้นบรรทัดใหม่',
     ]);
 });
@@ -608,8 +629,9 @@ test('does not present a partial translation as covering a grouped source row', 
         { id: '2', text: 'everyone', isFinal: true, timestamp: 2_000, provider: 'gemini', speaker: 'one', role: 'source' },
     ]);
 
-    assert.equal(grouped.length, 1);
-    assert.equal(grouped[0].translation, undefined);
+    assert.equal(grouped.length, 2);
+    assert.deepEqual(grouped[0].translation, { text: 'สวัสดี', languageCode: 'th', isFinal: true });
+    assert.equal(grouped[1].translation, undefined);
 });
 
 test('normalizes API language codes for HTML lang attributes', async () => {
