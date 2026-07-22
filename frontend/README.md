@@ -71,7 +71,7 @@ The frontend has no direct ASR-provider capture hooks and does not stream audio 
 
 - Every packet is validated with `parseTranscriptMessage`.
 - Non-final source values are replaceable Draft entries keyed by provider and speaker; Gemini also uses `turnId` to pair source and translation state.
-- Draft rendering is coalesced at 33 ms for general interim traffic and 100 ms for Gemini, with the first update and final result applied immediately.
+- Draft rendering is coalesced at 33 ms for general interim traffic and 50 ms for Gemini, with the first update and final result applied immediately.
 - Final values become bounded committed rows. At most 500 final rows and 64 active Draft entries are retained.
 - Lines view can show a Gemini translation beneath its source. Text view deliberately shows source text only and marks active Draft text inline.
 - Per-provider `.txt` export includes finalized source text only; it excludes Draft and translation text.

@@ -74,14 +74,16 @@ test('keeps independent interim updates for different speakers', () => {
     assert.deepEqual(delivered.map(update => update.text), ['หนึ่ง', 'สอง', 'หนึ่งล่าสุด']);
 });
 
-test('coalesces Gemini source and translation keys at 100 ms', () => {
+test('coalesces Gemini source and translation keys at 50 ms', () => {
     const scheduled = new Map<number, () => void>();
     const delivered: Update[] = [];
+    const delays: number[] = [];
     let nextTimerId = 0;
     const buffer = new TranscriptUpdateBuffer<Update>(
         update => delivered.push(update),
         GEMINI_TRANSCRIPT_UPDATE_INTERVAL_MS,
-        callback => {
+        (callback, delayMs) => {
+            delays.push(delayMs);
             const timerId = ++nextTimerId;
             scheduled.set(timerId, callback);
             return timerId;
@@ -97,6 +99,8 @@ test('coalesces Gemini source and translation keys at 100 ms', () => {
     buffer.push({ text: 'translation-1', isFinal: false, speaker: 'translation' });
     buffer.push({ text: 'source-3', isFinal: false, speaker: 'source' });
     buffer.push({ text: 'translation-2', isFinal: false, speaker: 'translation' });
+
+    assert.deepEqual(delays, [50]);
 
     const next = scheduled.entries().next().value as [number, () => void];
     scheduled.delete(next[0]);
