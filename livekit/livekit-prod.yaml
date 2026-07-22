@@ -1,0 +1,41 @@
+# LiveKit Production Configuration
+# Path: livekit/livekit-prod.yaml
+
+port: 7880
+
+rtc:
+  # Port range for WebRTC UDP audio/video channels
+  port_range_start: 50000
+  port_range_end: 50100
+  # Resolves the public IP of this server via STUN for WebRTC connections
+  use_external_ip: true
+  # WebRTC TCP fallback port (if UDP is blocked by firewalls)
+  tcp_port: 7881
+  
+  # ICE servers sent to browser clients for NAT traversal
+  stun_servers:
+    - stun.l.google.com:19302
+    - stun1.l.google.com:19302
+
+# Redis configuration for room states and token coordination
+redis:
+  address: redis:6379
+
+room:
+  max_participants: 50
+  empty_timeout: 300 # closes room 5 mins after last participant leaves
+  max_metadata_size: 65536
+
+# Built-in TURN server configuration for firewall traversal (3G/4G/Office network clients)
+turn:
+  enabled: true
+  domain: turn.yourdomain.com # Replace with your real TURN subdomain (e.g., turn.verbatim.com)
+  udp_port: 3478
+  tls_port: 5349
+  # Production TLS certificate paths (mounted from host Let's Encrypt/Certbot directory)
+  cert_file: /etc/certs/fullchain.pem
+  key_file: /etc/certs/privkey.pem
+
+logging:
+  level: info
+  json: true

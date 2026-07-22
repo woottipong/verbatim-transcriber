@@ -2,17 +2,48 @@
  * API utilities for checking backend provider availability
  */
 
-import { toHttpUrl } from './runtime';
+import { getControlAuthHeaders, toHttpUrl } from './runtime.ts';
 
-export interface ProviderStatus {
-    enabled: boolean;
+export interface ParticipantInfo {
+    identity: string;
+    name: string;
+    isAgent: boolean;
+    state: string;
+}
+
+export interface RoomDetails {
+    name: string;
+    numParticipants: number;
+    maxParticipants: number;
+    creationTime: number;
+    emptyTimeout: number;
+    participants: ParticipantInfo[];
+}
+
+export interface RunningAgent {
+    key: string;
+    running: boolean;
     provider: string;
+    room: string;
+}
+
+export interface AgentStatus {
+    count: number;
+    agents: RunningAgent[];
+}
+
+export interface TranscriptTokenResponse {
+    token: string;
+    expiresAt: string;
+    websocketUrl: string;
 }
 
 export interface ProvidersResponse {
-    providers: ProviderStatus[];
-    enabledCount: number;
-    totalCount: number;
+    google: boolean;
+    gemini: boolean;
+    azure: boolean;
+    'gpt-realtime-whisper': boolean;
+    livekit: boolean;
 }
 
 /**
@@ -52,15 +83,46 @@ export function isProviderEnabled(
     // This provides graceful fallback if backend check fails
     if (!providersResponse) return true;
 
-    // Validate that providers array exists
-    if (!providersResponse.providers || !Array.isArray(providersResponse.providers)) {
-        console.warn('Invalid providers response format, allowing all providers');
-        return true;
-    }
+    const provider = providerName.toLowerCase() as keyof ProvidersResponse;
+    if (!['google', 'gemini', 'azure', 'gpt-realtime-whisper'].includes(provider)) return false;
+    return providersResponse[provider] === true;
+}
 
-    const provider = providersResponse.providers.find(
-        p => p.provider.toLowerCase() === providerName.toLowerCase()
+export async function createRoom(backendUrl: string, name: string): Promise<RoomDetails> {
+    const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/rooms/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
+        body: JSON.stringify({ name }),
+    });
+    return parseApiResponse<RoomDetails>(response, 'Failed to create room');
+}
+
+export async function createTranscriptToken(
+    backendUrl: string,
+    roomName: string,
+): Promise<TranscriptTokenResponse> {
+    const response = await fetch(
+        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/transcript-token`,
+        { method: 'POST', headers: getControlAuthHeaders() },
     );
+    return parseApiResponse<TranscriptTokenResponse>(response, 'Failed to generate transcript link');
+}
 
-    return provider?.enabled ?? false;
+export async function fetchDetailedRooms(backendUrl: string): Promise<RoomDetails[]> {
+    const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/rooms/detailed`, { headers: getControlAuthHeaders() });
+    const data = await parseApiResponse<{ rooms?: RoomDetails[] }>(response, 'Failed to load rooms');
+    return data.rooms || [];
+}
+
+export async function fetchAgentStatus(backendUrl: string): Promise<AgentStatus> {
+    const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/agent/status`, { headers: getControlAuthHeaders() });
+    return parseApiResponse<AgentStatus>(response, 'Failed to load agent status');
+}
+
+async function parseApiResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+        throw new Error(typeof data.error === 'string' ? data.error : `${fallbackMessage}: ${response.status}`);
+    }
+    return data as T;
 }

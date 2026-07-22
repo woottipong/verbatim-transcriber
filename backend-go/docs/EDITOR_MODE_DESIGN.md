@@ -1,5 +1,7 @@
 # Editor Mode Design: Transcript Review Before Broadcast
 
+> Status: design proposal, not implemented in the current LiveKit transcription flow. Validate this document against current packet/state helpers before implementation.
+
 **Status**: Design Phase (Not Implemented)
 **Updated**: February 7, 2026
 **Purpose**: ให้ Publisher ตรวจสอบและแก้ไข transcript ก่อนส่งออกไปยัง Viewers

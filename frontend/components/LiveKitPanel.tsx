@@ -1,30 +1,38 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Check, Copy, LogOut, Mic, MicOff, Play, Radio, Trash2, Users } from 'lucide-react';
-import { ConnectionState, TranscriptSegment } from '../types';
-import { InterimTranscript } from '../lib/transcriptMessages';
-import { shouldStickToLatest } from '../lib/transcriptViewport';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Download, Radio, Users, Volume2, VolumeX, LogOut, Eraser } from 'lucide-react';
+import { TranscriptSegment, ConnectionState, AudioSource } from '../types';
 import { getLiveKitSessionPresentation } from '../lib/liveKitSession';
+import { shouldStickToLatest } from '../lib/transcriptViewport';
+import TranslationBlock from './TranslationBlock';
+import { formatLanguageLabel, groupFinalTranscriptRows, isTranscriptTurnLive, normalizeLanguageTag, type InterimTranscript } from '../lib/transcriptMessages';
+import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel, providerFromAgentIdentity } from '../lib/providers';
+import { buildTranscriptFilename, downloadTranscriptText, formatTranscriptText } from '../lib/transcriptExport';
+import ToastViewport from './ToastViewport';
 
 interface LiveKitPanelProps {
   transcripts: TranscriptSegment[];
   interimTranscripts: ReadonlyMap<string, InterimTranscript>;
   connectionState: ConnectionState;
   isAgentConnected: boolean;
-  isMicrophoneEnabled: boolean;
+  agentIdentity: string | null;
+  audioSource: AudioSource;
+  isAudioInputEnabled: boolean;
+  isAudioInputStopped: boolean;
   participantCount: number;
   error: string | null;
   roomName: string;
-  onRoomNameChange: (name: string) => void;
   onConnect: () => void;
   onDisconnect: () => void;
-  onToggleMicrophone: () => void;
+  onToggleAudioInput: () => void;
   onClear: () => void;
-  roomPlaceholder?: string;
 }
 
-const providerClasses: Record<string, string> = {
-  google: 'border-sky-400/30 bg-sky-400/10 text-sky-200',
-  azure: 'border-cyan-400/30 bg-cyan-400/10 text-cyan-200',
+const formatAgentProvider = (identity: string | null): string => {
+  if (!identity) return '';
+  return identity
+    .split(',')
+    .map(id => formatProviderName(providerFromAgentIdentity(id.trim())))
+    .join(', ');
 };
 
 const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
@@ -32,34 +40,134 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
   interimTranscripts,
   connectionState,
   isAgentConnected,
-  isMicrophoneEnabled,
+  agentIdentity,
+  audioSource,
+  isAudioInputEnabled,
+  isAudioInputStopped,
   participantCount,
   error,
   roomName,
-  onRoomNameChange,
   onConnect,
   onDisconnect,
-  onToggleMicrophone,
+  onToggleAudioInput,
   onClear,
-  roomPlaceholder = 'Room name',
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [copied, setCopied] = useState(false);
   const [isFollowingLatest, setIsFollowingLatest] = useState(true);
+  const [viewMode, setViewMode] = useState<'timeline' | 'paragraph'>('timeline');
+  const [selectedProvider, setSelectedProvider] = useState('');
+  const [exportError, setExportError] = useState<string | null>(null);
+
+  const scrollToLatest = useCallback(() => {
+    const scrollers = scrollRef.current?.querySelectorAll<HTMLElement>('[data-transcript-scroller]');
+    scrollers?.forEach(scroller => {
+      scroller.scrollTop = scroller.scrollHeight;
+    });
+  }, []);
+
+  const handleExportProvider = useCallback((provider: string, text: string) => {
+    try {
+      setExportError(null);
+      if (!text) return;
+      downloadTranscriptText(text, buildTranscriptFilename(roomName, provider));
+    } catch {
+      setExportError(`Unable to export ${formatProviderName(provider)} transcript.`);
+    }
+  }, [roomName]);
 
   useEffect(() => {
-    if (scrollRef.current && isFollowingLatest) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
-  }, [interimTranscripts, isFollowingLatest, transcripts]);
+    if (!isFollowingLatest) return;
+
+    const frame = window.requestAnimationFrame(scrollToLatest);
+    return () => window.cancelAnimationFrame(frame);
+  }, [interimTranscripts, isFollowingLatest, scrollToLatest, transcripts]);
 
   const isConnected = connectionState === ConnectionState.CONNECTED;
   const isConnecting = connectionState === ConnectionState.CONNECTING;
   const hasContent = transcripts.length > 0 || interimTranscripts.size > 0;
+
+  const finalizedByProvider = useMemo(() => {
+    const groups = new Map<string, TranscriptSegment[]>();
+    transcripts.forEach(segment => {
+      if (!segment.provider) return;
+      const providerTranscripts = groups.get(segment.provider);
+      if (providerTranscripts) {
+        providerTranscripts.push(segment);
+      } else {
+        groups.set(segment.provider, [segment]);
+      }
+    });
+
+    const finalized = new Map<string, {
+      transcripts: TranscriptSegment[];
+      exportText: string;
+    }>();
+    groups.forEach((providerTranscripts, provider) => {
+      const groupedTranscripts = groupFinalTranscriptRows(providerTranscripts);
+      finalized.set(provider, {
+        transcripts: groupedTranscripts,
+        exportText: formatTranscriptText(groupedTranscripts),
+      });
+    });
+    return finalized;
+  }, [transcripts]);
+
+  const interimsByProvider = useMemo(() => {
+    const groups = new Map<string, InterimTranscript[]>();
+    interimTranscripts.forEach(interim => {
+      if (!interim.provider) return;
+      const providerInterims = groups.get(interim.provider);
+      if (providerInterims) {
+        providerInterims.push(interim);
+      } else {
+        groups.set(interim.provider, [interim]);
+      }
+    });
+    return groups;
+  }, [interimTranscripts]);
+
+  const providerGroups = useMemo(() => {
+    const providers = new Set([
+      ...finalizedByProvider.keys(),
+      ...interimsByProvider.keys(),
+    ]);
+    if (isAgentConnected && agentIdentity) {
+      agentIdentity.split(',').forEach(identity => {
+        const provider = providerFromAgentIdentity(identity.trim());
+        if (provider) providers.add(provider);
+      });
+    }
+    if (providers.size === 0) providers.add('google');
+
+    const order = ['google', 'gemini', 'azure', 'gpt-realtime-whisper'];
+    return Array.from(providers, provider => {
+      const finalized = finalizedByProvider.get(provider);
+      return [provider, {
+        transcripts: finalized?.transcripts ?? [],
+        interims: interimsByProvider.get(provider) ?? [],
+        exportText: finalized?.exportText ?? '',
+      }] as const;
+    }).sort(([left], [right]) => {
+      const leftOrder = order.indexOf(left);
+      const rightOrder = order.indexOf(right);
+      if (leftOrder === -1) return rightOrder === -1 ? left.localeCompare(right) : 1;
+      if (rightOrder === -1) return -1;
+      return leftOrder - rightOrder;
+    });
+  }, [agentIdentity, finalizedByProvider, interimsByProvider, isAgentConnected]);
+  const activeProviders = providerGroups.map(([provider]) => provider);
+  const visibleMobileProvider = activeProviders.includes(selectedProvider)
+    ? selectedProvider
+    : activeProviders[0];
+  const displayLineCount = providerGroups.reduce((count, [, group]) => count + group.transcripts.length, 0);
+  const latestFinalText = transcripts.at(-1)?.text ?? '';
+
   const session = getLiveKitSessionPresentation(
     connectionState,
-    isMicrophoneEnabled,
+    isAudioInputEnabled,
     isAgentConnected,
+    audioSource,
+    isAudioInputStopped,
   );
   const sessionToneDot = session.tone === 'ready'
     ? 'status-dot--live'
@@ -68,20 +176,16 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
       : session.tone === 'error'
         ? 'status-dot--error'
         : '';
-  const agentCommand = `curl -X POST localhost:3000/livekit/agent/start -H "Content-Type: application/json" -d '{"roomName":"${roomName}","provider":"google"}'`;
-
-  const copyAgentCommand = async () => {
-    try {
-      await navigator.clipboard.writeText(agentCommand);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setCopied(false);
-    }
-  };
 
   return (
-    <article className="app-panel flex min-h-[390px] flex-col" aria-label="LiveKit transcription workspace">
+    <article className="livekit-panel app-panel flex min-h-[500px] h-[calc(100vh-12rem)] flex-col" aria-label="LiveKit transcription workspace">
+      {(error || exportError) && (
+        <ToastViewport notices={[
+          error && { id: `livekit-error-${error}`, tone: 'error', title: 'Connection error', message: error },
+          exportError && { id: `export-error-${exportError}`, tone: 'error', title: 'Export failed', message: exportError, onDismiss: () => setExportError(null) },
+        ]} />
+      )}
+      <span className="sr-only" aria-live="polite" aria-atomic="true">{latestFinalText}</span>
       <header className="panel-header px-4 py-3 sm:px-5">
         <div className="session-toolbar">
           <div className="session-toolbar__identity">
@@ -89,16 +193,16 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
               <Radio size={16} aria-hidden="true" />
             </span>
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold text-slate-100">LiveKit / WebRTC</h3>
+              <h3 className="text-sm font-semibold text-slate-100">Audio Room Connection</h3>
               {isConnected ? (
-                <p className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
-                  <span className="truncate font-mono text-slate-300">Room: {roomName}</span>
-                  <span aria-hidden="true">·</span>
-                  <Users size={13} aria-hidden="true" />
-                  {participantCount}
+                <p className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-slate-400">
+                  <span className="flex items-center gap-1.5">
+                    <Users size={13} aria-hidden="true" />
+                    {participantCount} {participantCount === 1 ? 'user' : 'users'}
+                  </span>
                 </p>
               ) : (
-                <p className="mt-0.5 text-xs text-slate-500">Low-latency audio session</p>
+                <p className="mt-0.5 text-xs text-slate-400">Low-latency audio stream</p>
               )}
             </div>
           </div>
@@ -117,7 +221,9 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                   <dt>{item.label}</dt>
                   <dd>
                     <span className="session-health__indicator" aria-hidden="true" />
-                    {item.value}
+                    {item.label === 'Transcriber' && isAgentConnected && agentIdentity
+                      ? formatAgentProvider(agentIdentity)
+                      : item.value}
                   </dd>
                 </div>
               ))}
@@ -127,139 +233,259 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
           <div className="session-toolbar__actions">
             {!isConnected && !isConnecting && (
               <>
-                <label className="sr-only" htmlFor="livekit-room">LiveKit room name</label>
-                <input
-                  id="livekit-room"
-                  type="text"
-                  value={roomName}
-                  onChange={(event) => onRoomNameChange(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' && roomName.trim()) onConnect();
-                  }}
-                  placeholder={roomPlaceholder}
-                  className="h-9 w-full rounded-lg border border-slate-600 bg-slate-950/40 px-3 text-sm text-slate-100 placeholder:text-slate-400 sm:w-48"
-                />
-                <button onClick={onConnect} disabled={!roomName.trim()} className="control-button control-button--primary" aria-label="Join room and turn on microphone">
-                  <Play size={14} fill="currentColor" aria-hidden="true" /> Join &amp; turn on mic
+                <button onClick={onConnect} disabled={!roomName.trim()} className="control-button control-button--primary" aria-label={roomName.trim() ? 'Connect audio' : 'Room ID Required'}>
+                  {roomName.trim() ? 'Connect' : 'Room ID Required'}
                 </button>
               </>
             )}
             {isConnecting && (
-              <button disabled className="control-button control-button--primary" aria-label="Joining room and starting microphone">
-                <span className="status-dot status-dot--pending" aria-hidden="true" /> Joining &amp; starting mic…
+              <button disabled className="control-button control-button--primary" aria-label="Connecting audio input">
+                <span className="status-dot status-dot--pending" aria-hidden="true" /> Connecting…
               </button>
             )}
             {isConnected && (
               <>
-                <button onClick={onToggleMicrophone} className="control-button control-button--quiet" aria-label={isMicrophoneEnabled ? 'Mute microphone' : 'Turn on microphone'}>
-                  {isMicrophoneEnabled ? <MicOff size={14} aria-hidden="true" /> : <Mic size={14} aria-hidden="true" />}
-                  {isMicrophoneEnabled ? 'Mute' : 'Turn on mic'}
+                <button
+                  onClick={onToggleAudioInput}
+                  disabled={isAudioInputStopped}
+                  className="control-button control-button--quiet disabled:cursor-not-allowed disabled:opacity-55"
+                  aria-label={isAudioInputStopped ? 'Tab audio stopped' : isAudioInputEnabled ? 'Mute audio input' : 'Resume audio input'}
+                >
+                  {isAudioInputEnabled ? <VolumeX size={14} aria-hidden="true" /> : <Volume2 size={14} aria-hidden="true" />}
+                  {isAudioInputStopped ? 'Stopped' : isAudioInputEnabled ? 'Mute' : 'Resume'}
                 </button>
-                <button onClick={onDisconnect} className="control-button control-button--danger" aria-label="Leave LiveKit room">
-                  <LogOut size={14} aria-hidden="true" /> Leave room
+                <button onClick={onDisconnect} className="control-button control-button--danger" aria-label="Disconnect">
+                  <LogOut size={14} aria-hidden="true" /> Disconnect
                 </button>
               </>
             )}
-            <button onClick={onClear} className="control-button control-button--quiet !px-2.5" aria-label="Clear LiveKit transcripts">
-              <Trash2 size={14} aria-hidden="true" />
+            {isConnected && (
+              <div className="flex items-center rounded-lg border border-slate-700 bg-slate-950/45 p-0.5 select-none shrink-0" role="group" aria-label="View mode">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('timeline')}
+                  aria-pressed={viewMode === 'timeline'}
+                  className={`h-11 px-3 text-xs font-semibold rounded-md transition-colors cursor-pointer ${viewMode === 'timeline' ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  Lines
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('paragraph')}
+                  aria-pressed={viewMode === 'paragraph'}
+                  className={`h-11 px-3 text-xs font-semibold rounded-md transition-colors cursor-pointer ${viewMode === 'paragraph' ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                >
+                  Text
+                </button>
+              </div>
+            )}
+            <button onClick={onClear} className="control-button control-button--quiet !px-2.5 sm:!px-3" aria-label="Clear text" title="Clear text">
+              <Eraser size={14} aria-hidden="true" />
+              <span className="hidden sm:inline">Clear Text</span>
             </button>
           </div>
         </div>
       </header>
 
-      {error && (
-        <div className="border-b border-red-400/30 bg-red-950/35 px-4 py-2.5 text-sm text-red-200" role="alert">
-          {error}
-        </div>
-      )}
-
       {isConnected && !isAgentConnected && (
         <div className="border-b border-amber-300/25 bg-amber-300/5 px-4 py-3 sm:px-5">
-          <p className="text-sm text-amber-100">Room connected. Transcription will start automatically when the agent joins.</p>
-          <details className="mt-2 text-xs text-slate-400">
-            <summary className="w-fit cursor-pointer select-none rounded text-amber-200 hover:text-amber-100">Agent setup</summary>
-            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-center">
-              <code className="min-w-0 flex-1 overflow-x-auto rounded-md bg-slate-950/45 px-3 py-2 text-slate-300">{agentCommand}</code>
-              <button onClick={copyAgentCommand} className="control-button control-button--quiet shrink-0 text-amber-100" aria-label="Copy agent start command">
-                {copied ? <Check size={14} aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
-                {copied ? 'Copied' : 'Copy command'}
-              </button>
-            </div>
-          </details>
+          <p className="text-sm text-amber-100">Connected. Waiting for transcriber to start...</p>
+          <p className="mt-1 text-xs text-slate-400">Ask an administrator to start the transcription service if it is waiting.</p>
         </div>
       )}
 
-      <div className="relative min-h-[250px] flex-1">
-      <div
-        ref={scrollRef}
-        className="transcript-scroller absolute inset-0 overflow-y-auto px-4 py-2 sm:px-5"
-        onScroll={(event) => setIsFollowingLatest(shouldStickToLatest(event.currentTarget))}
-      >
+      <div className="relative min-h-[400px] flex-1" ref={scrollRef}>
         {!hasContent ? (
-          <div className="flex h-full min-h-[230px] max-w-sm flex-col justify-center">
-            <p className="text-base font-medium text-slate-300">
-              {session.canSpeak ? 'Speak normally. Your transcript will appear here.' : session.headline}
-            </p>
-            <p className="mt-2 text-sm leading-6 text-slate-500">
-              {session.canSpeak ? 'Interim text updates live, then settles into a final segment.' : session.detail}
-            </p>
+          <div className="absolute inset-0 overflow-y-auto px-4 py-2 sm:px-5">
+            <div className="transcript-empty-state">
+              <p className="text-base font-medium text-slate-300">
+                {connectionState === ConnectionState.DISCONNECTED
+                  ? 'Disconnected'
+                  : session.canSpeak
+                    ? audioSource === 'chrome-tab'
+                      ? 'Play audio in the shared tab. Your transcript will show here.'
+                      : 'Start speaking. Your transcript will show here.'
+                    : session.headline}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                {connectionState === ConnectionState.DISCONNECTED
+                  ? 'Connect to the room to start sending your audio.'
+                  : session.canSpeak
+                    ? 'Draft text updates live and finalizes when you pause speaking.'
+                    : session.detail}
+              </p>
+            </div>
           </div>
         ) : (
-          <div>
-            {transcripts.map((segment, index) => (
-              <div key={segment.id} className="transcript-row grid grid-cols-[2.25rem_minmax(0,1fr)] items-baseline gap-3 py-2.5">
-                <span className="pt-0.5 text-xs tabular-nums text-slate-500">{String(index + 1).padStart(2, '0')}</span>
-                <div className="flex min-w-0 items-baseline gap-2.5">
-                  {segment.provider && (
-                    <span className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${providerClasses[segment.provider] ?? 'border-violet-400/30 bg-violet-400/10 text-violet-200'}`}>
-                      {segment.provider.toUpperCase()}
+          <div className="absolute inset-0 flex flex-col bg-slate-950/20">
+            {activeProviders.length > 1 && (
+              <div className="flex shrink-0 gap-1 overflow-x-auto border-b border-slate-800 bg-slate-900/55 p-2 lg:hidden" role="group" aria-label="Transcription provider">
+                {activeProviders.map(provider => (
+                  <button
+                    key={provider}
+                    type="button"
+                    onClick={() => setSelectedProvider(provider)}
+                    aria-pressed={visibleMobileProvider === provider}
+                    className={`min-h-11 shrink-0 rounded-md px-3 text-xs font-semibold transition-colors ${visibleMobileProvider === provider
+                      ? 'bg-violet-500 text-white'
+                      : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                    }`}
+                  >
+                    {formatProviderName(provider)}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="flex min-h-0 flex-1 lg:divide-x lg:divide-slate-800/80">
+            {providerGroups.map(([provider, group]) => {
+              const providerTranscripts = group.transcripts;
+              const providerInterims = group.interims;
+              const hasProviderContent = providerTranscripts.length > 0 || providerInterims.length > 0;
+              const exportText = group.exportText;
+              
+              return (
+                <section
+                  key={provider}
+                  className={`${visibleMobileProvider === provider ? 'flex' : 'hidden'} h-full min-w-0 flex-1 flex-col lg:flex`}
+                  aria-label={`${provider} transcript`}
+                >
+                  <div className="px-4 py-2.5 bg-slate-900/40 border-b border-slate-800 flex items-center justify-between text-xs font-semibold text-slate-400 select-none shrink-0">
+                    <span className="flex items-center gap-2 uppercase tracking-wider">
+                      <span className={`w-1 h-3 rounded ${getProviderPresentation(provider).accent}`} aria-hidden="true" />
+                      {formatProviderName(provider)}
                     </span>
-                  )}
-                  <p className="min-w-0 text-[1.05rem] leading-7 text-slate-100">{segment.text}</p>
-                </div>
-              </div>
-            ))}
-            {Array.from<InterimTranscript>(interimTranscripts.values()).map(interim => (
-              <div
-                key={interim.key}
-                className="transcript-row transcript-row--interim grid grid-cols-[2.25rem_minmax(0,1fr)] items-baseline gap-3 py-2.5"
-                role="status"
-                aria-live="polite"
-                aria-atomic="true"
-                aria-label={`Live interim transcript from ${interim.speaker}`}
-              >
-                <span className="pt-0.5 text-xs tabular-nums text-slate-500">
-                  {String(transcripts.length + 1).padStart(2, '0')}
-                </span>
-                <div className="transcript-row__content flex min-w-0 items-baseline gap-2.5">
-                  <span className={`inline-flex shrink-0 items-center gap-1.5 rounded border px-1.5 py-0.5 text-[10px] font-semibold tracking-wide ${providerClasses[interim.provider] ?? 'border-violet-400/30 bg-violet-400/10 text-violet-200'}`}>
-                    <span className="transcript-live-dot" aria-hidden="true" />
-                    {interim.provider.toUpperCase()} · LIVE
-                  </span>
-                  <p className="transcript-row__text min-w-0 text-[1.05rem] leading-7 text-slate-300">{interim.text}</p>
-                </div>
-              </div>
-            ))}
+                    <span className="flex items-center gap-2">
+                      <span className="tabular-nums text-slate-400 font-medium">{providerTranscripts.length} lines</span>
+                      <button
+                        type="button"
+                        disabled={!exportText}
+                        onClick={() => handleExportProvider(provider, exportText)}
+                        aria-label={`Export ${formatProviderName(provider)} transcript as text`}
+                        className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Download size={13} aria-hidden="true" />
+                        Export .txt
+                      </button>
+                    </span>
+                  </div>
+                  
+                  <div 
+                    className="flex-1 overflow-y-auto px-4 py-3 transcript-scroller"
+                    data-transcript-scroller
+                    onScroll={(event) => setIsFollowingLatest(shouldStickToLatest(event.currentTarget))}
+                  >
+                    {!hasProviderContent ? (
+                      <div className="h-full flex flex-col items-center justify-center text-center p-6 select-none opacity-40 py-20">
+                        <span className={`w-1.5 h-1.5 rounded-full animate-pulse mb-2 ${getProviderPresentation(provider).accent}`} />
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Awaiting Signal</p>
+                      </div>
+                    ) : viewMode === 'timeline' ? (
+                      <div className="transcript-timeline">
+                        {providerTranscripts.map((segment, idx) => {
+                          const isTurnLive = isTranscriptTurnLive(segment);
+                          return (
+                            <div
+                              key={segment.id}
+                              className="transcript-turn transcript-turn--line group -mx-2 flex items-start rounded px-2 transition-colors duration-100 hover:bg-slate-900/25"
+                            >
+                              <span className="transcript-turn__index shrink-0 select-none tabular-nums text-slate-400">
+                                <span className="sr-only">{isTurnLive ? 'Live turn ' : 'Turn '}</span>
+                                <span aria-hidden="true">{String(idx + 1).padStart(2, '0')}</span>
+                                {isTurnLive && <span className="transcript-live-dot transcript-turn__live-dot" aria-hidden="true" />}
+                              </span>
+                              <div className="transcript-bilingual min-w-0 flex-1">
+                                <p
+                                  className={`transcript-source-line text-slate-100 ${hasSourceLanguageLabel(segment.provider, segment.languageCode) ? 'transcript-source-line--labeled' : ''}`}
+                                  lang={normalizeLanguageTag(segment.languageCode)}
+                                  dir="auto"
+                                >
+                                  {hasSourceLanguageLabel(segment.provider, segment.languageCode) && (
+                                    <span className="source-language-label" title={formatLanguageLabel(segment.languageCode)} aria-hidden="true">
+                                      <span className="language-label__text">{formatLanguageLabel(segment.languageCode)}</span>
+                                    </span>
+                                  )}
+                                  <span className="transcript-source-line__text">{segment.text}</span>
+                                </p>
+                                <TranslationBlock translation={segment.translation} />
+                              </div>
+                            </div>
+                          );
+                        })}
+                        {providerInterims.map((interim, draftIndex) => (
+                          <div
+                            key={interim.key}
+                            className="transcript-turn transcript-turn--draft transcript-turn--line group -mx-2 flex items-start rounded px-2 hover:bg-slate-900/25"
+                          >
+                            <span className="transcript-turn__index shrink-0 select-none tabular-nums text-slate-400">
+                              <span className="sr-only">Live draft </span>
+                              <span aria-hidden="true">{String(providerTranscripts.length + draftIndex + 1).padStart(2, '0')}</span>
+                              <span className="transcript-live-dot transcript-turn__live-dot" aria-hidden="true" />
+                              <span className="transcript-turn__draft-label" aria-hidden="true">Draft</span>
+                            </span>
+                            <div className="transcript-bilingual min-w-0 flex-1">
+                              <p
+                                className={`transcript-source-line min-w-0 text-slate-300 ${hasSourceLanguageLabel(interim.provider, interim.languageCode) ? 'transcript-source-line--labeled' : ''}`}
+                                lang={normalizeLanguageTag(interim.languageCode)}
+                                dir="auto"
+                              >
+                                {hasSourceLanguageLabel(interim.provider, interim.languageCode) && (
+                                  <span className="source-language-label" title={formatLanguageLabel(interim.languageCode)} aria-hidden="true">
+                                    <span className="language-label__text">{formatLanguageLabel(interim.languageCode)}</span>
+                                  </span>
+                                )}
+                                <span className="transcript-source-line__text">{interim.text}</span>
+                              </p>
+                              <TranslationBlock translation={interim.translation} />
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="transcript-paragraph-source min-w-0 break-words text-slate-100">
+                        {providerTranscripts.map(segment => (
+                          <React.Fragment key={segment.id}>
+                            <span lang={normalizeLanguageTag(segment.languageCode)} dir="auto">{segment.text}</span>{' '}
+                          </React.Fragment>
+                        ))}
+                        {providerInterims.map(interim => {
+                          const presentation = getProviderPresentation(interim.provider);
+                          return (
+                            <React.Fragment key={interim.key}>
+                              <span className="transcript-inline-draft">
+                                <span className="transcript-inline-draft__dot" aria-hidden="true" />
+                                Draft
+                              </span>{' '}
+                              <span className={`italic ${presentation.draftText}`} lang={normalizeLanguageTag(interim.languageCode)} dir="auto">{interim.text}</span>{' '}
+                            </React.Fragment>
+                          );
+                        })}
+                      </p>
+                    )}
+                    <div data-transcript-end aria-hidden="true" />
+                  </div>
+                </section>
+              );
+            })}
+            </div>
           </div>
         )}
       </div>
       {!isFollowingLatest && hasContent && (
         <button
           type="button"
-          className="control-button control-button--quiet absolute bottom-3 right-4 bg-slate-900/95 shadow-lg"
+          className="control-button control-button--quiet absolute bottom-3 right-4 bg-slate-900/95 shadow-lg z-10"
           onClick={() => {
-            if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            scrollToLatest();
             setIsFollowingLatest(true);
           }}
         >
-          Jump to latest
+          Jump to Latest
         </button>
       )}
-      </div>
 
-      <footer className="flex items-center justify-between border-t border-slate-700/70 px-4 py-2.5 text-xs text-slate-500 sm:px-5">
-        <span>WebRTC · target latency 200–500 ms</span>
-        <span className="tabular-nums text-violet-300">{transcripts.length} segments</span>
+      <footer className="flex items-center justify-between border-t border-slate-700/70 px-4 py-2.5 text-xs text-slate-400 sm:px-5">
+        <span className="min-w-0 truncate pr-3">{session.headline} · {session.detail}</span>
+        <span className="shrink-0 tabular-nums text-violet-300">{displayLineCount} Lines</span>
       </footer>
     </article>
   );

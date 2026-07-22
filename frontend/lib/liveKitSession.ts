@@ -1,3 +1,5 @@
+import type { AudioSource } from '../types';
+
 export type SessionStepState = 'idle' | 'pending' | 'complete' | 'error';
 
 export interface LiveKitSessionPresentation {
@@ -10,7 +12,7 @@ export interface LiveKitSessionPresentation {
 }
 
 export interface SessionHealthItem {
-  label: 'Room' | 'Microphone' | 'Transcription';
+  label: 'Room' | 'Audio Input' | 'Transcriber';
   value: string;
   state: SessionStepState;
 }
@@ -19,11 +21,12 @@ type ConnectionStateValue = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'ERROR
 
 function createSessionHealth(
   steps: [SessionStepState, SessionStepState, SessionStepState],
+  audioInputIdleValue = 'Off',
 ): SessionHealthItem[] {
   const values = [
-    { label: 'Room' as const, complete: 'Joined', pending: 'Joining', idle: 'Not joined' },
-    { label: 'Microphone' as const, complete: 'On', pending: 'Starting', idle: 'Off' },
-    { label: 'Transcription' as const, complete: 'Connected', pending: 'Waiting', idle: 'Not connected' },
+    { label: 'Room' as const, complete: 'Connected', pending: 'Connecting...', idle: 'Disconnected' },
+    { label: 'Audio Input' as const, complete: 'On', pending: 'Starting', idle: audioInputIdleValue },
+    { label: 'Transcriber' as const, complete: 'Connected', pending: 'Waiting', idle: 'Disconnected' },
   ];
 
   return values.map((item, index) => {
@@ -42,14 +45,18 @@ function createSessionHealth(
 
 export function getLiveKitSessionPresentation(
   connectionState: ConnectionStateValue,
-  isMicrophoneEnabled: boolean,
+  isAudioInputEnabled: boolean,
   isAgentConnected: boolean,
+  audioSource: AudioSource = 'microphone',
+  isAudioInputStopped = false,
 ): LiveKitSessionPresentation {
   if (connectionState === 'ERROR') {
     const steps: [SessionStepState, SessionStepState, SessionStepState] = ['error', 'idle', 'idle'];
     return {
-      headline: 'Unable to start session',
-      detail: 'Check the connection and microphone permission, then try again.',
+      headline: 'Connection Failed',
+      detail: audioSource === 'chrome-tab'
+        ? 'Check tab-sharing permission, then try again.'
+        : 'Check your connection and microphone permission, then try again.',
       canSpeak: false,
       tone: 'error',
       steps,
@@ -60,8 +67,12 @@ export function getLiveKitSessionPresentation(
   if (connectionState === 'CONNECTING') {
     const steps: [SessionStepState, SessionStepState, SessionStepState] = ['pending', 'pending', 'idle'];
     return {
-      headline: 'Joining room and starting microphone…',
-      detail: 'Your browser may ask for microphone permission.',
+      headline: audioSource === 'chrome-tab'
+        ? 'Connecting Chrome Tab audio...'
+        : 'Connecting and starting microphone...',
+      detail: audioSource === 'chrome-tab'
+        ? 'Select a Chrome tab and enable Share tab audio.'
+        : 'Please allow microphone access when prompted by your browser.',
       canSpeak: false,
       tone: 'pending',
       steps,
@@ -72,8 +83,8 @@ export function getLiveKitSessionPresentation(
   if (connectionState === 'DISCONNECTED') {
     const steps: [SessionStepState, SessionStepState, SessionStepState] = ['idle', 'idle', 'idle'];
     return {
-      headline: 'Join a room to start',
-      detail: 'Joining also turns on your microphone so transcription can begin.',
+      headline: 'Ready to Connect',
+      detail: 'Connect to the room to start sending your audio.',
       canSpeak: false,
       tone: 'neutral',
       steps,
@@ -82,14 +93,28 @@ export function getLiveKitSessionPresentation(
   }
 
   const roomStep: SessionStepState = 'complete';
-  const microphoneStep: SessionStepState = isMicrophoneEnabled ? 'complete' : 'idle';
+  const audioInputStep: SessionStepState = isAudioInputEnabled ? 'complete' : 'idle';
   const transcriptionStep: SessionStepState = isAgentConnected ? 'complete' : 'pending';
 
-  if (!isMicrophoneEnabled) {
-    const steps: [SessionStepState, SessionStepState, SessionStepState] = [roomStep, microphoneStep, transcriptionStep];
+  if (isAudioInputStopped) {
+    const steps: [SessionStepState, SessionStepState, SessionStepState] = [roomStep, 'idle', transcriptionStep];
     return {
-      headline: 'Microphone is muted',
-      detail: 'Turn on the microphone when you are ready to speak.',
+      headline: 'Tab audio stopped',
+      detail: 'Disconnect and reconnect to choose a Chrome tab again.',
+      canSpeak: false,
+      tone: 'warning',
+      steps,
+      health: createSessionHealth(steps, 'Stopped'),
+    };
+  }
+
+  if (!isAudioInputEnabled) {
+    const steps: [SessionStepState, SessionStepState, SessionStepState] = [roomStep, audioInputStep, transcriptionStep];
+    return {
+      headline: audioSource === 'chrome-tab' ? 'Chrome Tab audio is muted' : 'Microphone is muted',
+      detail: audioSource === 'chrome-tab'
+        ? 'Resume the audio input to continue transcription.'
+        : 'Unmute your microphone when you are ready to speak.',
       canSpeak: false,
       tone: 'warning',
       steps,
@@ -98,10 +123,10 @@ export function getLiveKitSessionPresentation(
   }
 
   if (!isAgentConnected) {
-    const steps: [SessionStepState, SessionStepState, SessionStepState] = [roomStep, microphoneStep, transcriptionStep];
+    const steps: [SessionStepState, SessionStepState, SessionStepState] = [roomStep, audioInputStep, transcriptionStep];
     return {
-      headline: 'Waiting for transcription agent',
-      detail: 'You are in the room and your microphone is on.',
+      headline: 'Waiting for transcriber',
+      detail: 'You are connected. Waiting for the transcription service to start.',
       canSpeak: false,
       tone: 'pending',
       steps,
@@ -109,10 +134,12 @@ export function getLiveKitSessionPresentation(
     };
   }
 
-  const steps: [SessionStepState, SessionStepState, SessionStepState] = [roomStep, microphoneStep, transcriptionStep];
+  const steps: [SessionStepState, SessionStepState, SessionStepState] = [roomStep, audioInputStep, transcriptionStep];
   return {
-    headline: 'Ready to speak',
-    detail: 'Your microphone is live and transcription is connected.',
+    headline: audioSource === 'chrome-tab' ? 'Ready to transcribe' : 'Ready to speak',
+    detail: audioSource === 'chrome-tab'
+      ? 'Chrome Tab audio is live and transcription is running.'
+      : 'Your microphone is live and transcription is running.',
     canSpeak: true,
     tone: 'ready',
     steps,

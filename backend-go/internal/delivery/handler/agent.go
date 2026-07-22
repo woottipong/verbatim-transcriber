@@ -61,7 +61,7 @@ func HandleAgentStart(c *fiber.Ctx, cfg *config.Config) error {
 	}
 
 	// Create and start agent with provider preference
-	newAgent := agent.New(cfg, req.Provider)
+	newAgent := agent.New(cfg, req.Provider, TranscriptHub())
 	agents[key] = newAgent
 
 	go func() {
@@ -70,7 +70,9 @@ func HandleAgentStart(c *fiber.Ctx, cfg *config.Config) error {
 			log.Printf("❌ [Agent] Failed to start %s agent in room %s: %v", req.Provider, req.RoomName, err)
 			// Log error and remove from map
 			agentsMu.Lock()
-			delete(agents, key)
+			if current, exists := agents[key]; exists && current == newAgent {
+				delete(agents, key)
+			}
 			agentsMu.Unlock()
 		}
 	}()
@@ -108,18 +110,18 @@ func HandleAgentStop(c *fiber.Ctx, cfg *config.Config) error {
 	key := agentKey(req.RoomName, req.Provider)
 
 	agentsMu.Lock()
-	defer agentsMu.Unlock()
-
 	agentInstance, exists := agents[key]
 	if !exists || !agentInstance.IsRunning() {
+		agentsMu.Unlock()
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error":   "Agent not running",
 			"message": fmt.Sprintf("No agent for %s in room %s", req.Provider, req.RoomName),
 		})
 	}
+	delete(agents, key)
+	agentsMu.Unlock()
 
 	agentInstance.Stop()
-	delete(agents, key)
 
 	return c.JSON(fiber.Map{
 		"status":   "stopped",
@@ -160,12 +162,36 @@ func validateAgentProvider(cfg *config.Config, provider string) (string, error) 
 		if !cfg.HasGoogleKey() {
 			return "", fmt.Errorf("google provider is not configured")
 		}
+	case "gemini":
+		if !cfg.HasGeminiKey() {
+			return "", fmt.Errorf("gemini provider is not configured")
+		}
+	case "gpt-realtime-whisper":
+		if !cfg.HasOpenAITranscriptionKey() {
+			return "", fmt.Errorf("gpt-realtime-whisper provider is not configured")
+		}
 	case "azure":
 		if !cfg.HasAzureKey() {
 			return "", fmt.Errorf("azure provider is not configured")
 		}
 	default:
-		return "", fmt.Errorf("provider must be google or azure")
+		return "", fmt.Errorf("provider must be google, gemini, azure, or gpt-realtime-whisper")
 	}
 	return provider, nil
+}
+
+func stopAgentsForRoom(roomName string) {
+	toStop := make([]*agent.Agent, 0)
+	agentsMu.Lock()
+	for key, instance := range agents {
+		if instance.GetRoom() == roomName || strings.HasPrefix(key, roomName+"-") {
+			delete(agents, key)
+			toStop = append(toStop, instance)
+		}
+	}
+	agentsMu.Unlock()
+
+	for _, instance := range toStop {
+		instance.Stop()
+	}
 }

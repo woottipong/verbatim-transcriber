@@ -1,6 +1,10 @@
 package config
 
-import "os"
+import (
+	"net"
+	"os"
+	"strings"
+)
 
 type Config struct {
 	Port                         string
@@ -9,12 +13,18 @@ type Config struct {
 	GoogleAPIKey                 string
 	GoogleApplicationCredentials string
 	GoogleCloudProject           string
+	GeminiAPIKey                 string
+	OpenAIAPIKey                 string
 	AzureSubscriptionKey         string
 	AzureRegion                  string
 	LiveKitAPIKey                string
 	LiveKitAPISecret             string
 	LiveKitURL                   string
+	TranscriptWSSecret           string
+	ControlAPIKey                string
 	GoogleConfig                 GoogleConfig
+	GeminiConfig                 GeminiConfig
+	OpenAIConfig                 OpenAIConfig
 	AzureConfig                  AzureConfig
 	LiveKitConfig                LiveKitConfig
 }
@@ -36,6 +46,18 @@ type AzureConfig struct {
 	SegmentationMaxSilenceDuration int // milliseconds - max silence ก่อน force finalize
 }
 
+type GeminiConfig struct {
+	Model              string
+	LanguageCode       string
+	TargetLanguageCode string
+	SampleRate         int
+}
+
+type OpenAIConfig struct {
+	LanguageCode string
+	SampleRate   int
+}
+
 type LiveKitConfig struct {
 	TokenExpiry int // seconds
 }
@@ -48,17 +70,31 @@ func Load() *Config {
 		GoogleAPIKey:                 os.Getenv("GOOGLE_API_KEY"),
 		GoogleApplicationCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
 		GoogleCloudProject:           os.Getenv("GOOGLE_CLOUD_PROJECT"),
+		GeminiAPIKey:                 os.Getenv("GEMINI_API_KEY"),
+		OpenAIAPIKey:                 os.Getenv("OPENAI_API_KEY"),
 		AzureSubscriptionKey:         os.Getenv("AZURE_SUBSCRIPTION_KEY"),
 		AzureRegion:                  getEnv("AZURE_REGION", "southeastasia"),
 		LiveKitAPIKey:                os.Getenv("LIVEKIT_API_KEY"),
 		LiveKitAPISecret:             os.Getenv("LIVEKIT_API_SECRET"),
 		LiveKitURL:                   getEnv("LIVEKIT_WS_URL", "ws://localhost:7880"),
+		TranscriptWSSecret:           os.Getenv("TRANSCRIPT_WS_SECRET"),
+		ControlAPIKey:                os.Getenv("CONTROL_API_KEY"),
 		GoogleConfig: GoogleConfig{
 			Location:              getEnv("GOOGLE_CLOUD_LOCATION", "asia-southeast1"),
 			Model:                 getEnv("GOOGLE_SPEECH_MODEL", "chirp_2"),
 			LanguageCode:          "th-TH",
 			SampleRate:            48000,
 			EnableAutoPunctuation: true, // Let Google add punctuation for more natural sentence formatting
+		},
+		GeminiConfig: GeminiConfig{
+			Model:              getEnv("GEMINI_MODEL", "gemini-3.5-live-translate-preview"),
+			LanguageCode:       os.Getenv("GEMINI_LANGUAGE_CODE"),
+			TargetLanguageCode: getEnv("GEMINI_TARGET_LANGUAGE_CODE", "th"),
+			SampleRate:         16000,
+		},
+		OpenAIConfig: OpenAIConfig{
+			LanguageCode: getEnv("OPENAI_LANGUAGE_CODE", "th"),
+			SampleRate:   24000,
 		},
 		AzureConfig: AzureConfig{
 			Language:                       "th-TH",
@@ -86,10 +122,41 @@ func (c *Config) HasGoogleKey() bool {
 	return c.GoogleCloudProject != "" && (c.GoogleAPIKey != "" || c.GoogleApplicationCredentials != "")
 }
 
+func (c *Config) HasGeminiKey() bool {
+	return c.GeminiAPIKey != ""
+}
+
+func (c *Config) HasOpenAITranscriptionKey() bool {
+	return c.OpenAIAPIKey != ""
+}
+
 func (c *Config) HasAzureKey() bool {
 	return c.AzureSubscriptionKey != "" && c.AzureRegion != ""
 }
 
 func (c *Config) HasLiveKitKey() bool {
 	return c.LiveKitAPIKey != "" && c.LiveKitAPISecret != ""
+}
+
+func (c *Config) HasControlAPIKey() bool {
+	return c != nil && len(strings.TrimSpace(c.ControlAPIKey)) >= 32
+}
+
+// RequiresControlAuth keeps local development available without a key while
+// failing closed whenever the backend is configured to listen remotely.
+func (c *Config) RequiresControlAuth() bool {
+	if c == nil {
+		return true
+	}
+	if c.HasControlAPIKey() {
+		return true
+	}
+	host := strings.TrimSpace(strings.Trim(c.Host, "[]"))
+	if strings.EqualFold(host, "localhost") {
+		return false
+	}
+	if parsed := net.ParseIP(host); parsed != nil {
+		return !parsed.IsLoopback()
+	}
+	return true
 }

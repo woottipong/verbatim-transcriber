@@ -1,0 +1,42 @@
+# LiveKit Server for Thai Transcription Production Orchestration
+# Usage: docker compose -f docker-compose-prod.yml up -d
+
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: livekit-server-prod
+    ports:
+      - "7880:7880"       # HTTP API / WebSocket signaling
+      - "7881:7881"       # WebRTC TCP fallback
+      - "7882:7882/udp"   # WebRTC UDP signaling
+      - "50000-50100:50000-50100/udp" # WebRTC media stream UDP range
+      - "3478:3478/udp"   # TURN server standard port
+      - "5349:5349/tcp"   # TURN server over TLS
+    environment:
+      # Inject API key and Secret via env variables or .env file
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    volumes:
+      # Mount the production yaml config
+      - ./livekit-prod.yaml:/etc/livekit.yaml:ro
+      # Mount SSL certificate folder from host (e.g. Let's Encrypt /etc/letsencrypt/live/turn.yourdomain.com)
+      # Ensure you link these files correctly in livekit-prod.yaml
+      - /etc/letsencrypt/live/turn.yourdomain.com/fullchain.pem:/etc/certs/fullchain.pem:ro
+      - /etc/letsencrypt/live/turn.yourdomain.com/privkey.pem:/etc/certs/privkey.pem:ro
+    command: --config /etc/livekit.yaml
+    restart: unless-stopped
+    depends_on:
+      - redis
+
+  redis:
+    image: redis:alpine
+    container_name: livekit-redis-prod
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      # Persistent storage for room and session data
+      - redis-data-prod:/data
+    restart: unless-stopped
+
+volumes:
+  redis-data-prod:

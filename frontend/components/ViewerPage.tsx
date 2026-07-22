@@ -13,7 +13,13 @@ import { useRoomViewer } from '../hooks/useRoomViewer';
 import { ConnectionState } from '../types';
 import { toHttpUrl } from '../lib/runtime';
 import { shouldStickToLatest } from '../lib/transcriptViewport';
+import TranslationBlock from './TranslationBlock';
+import { formatLanguageLabel, groupFinalTranscriptRows, isTranscriptTurnLive, normalizeLanguageTag } from '../lib/transcriptMessages';
+import { shouldAutoConnectViewer } from '../lib/viewerLaunch';
 import ConnectionBadge from './ConnectionBadge';
+import { buildViewerUrl } from '../lib/appRoutes';
+import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel } from '../lib/providers';
+import ToastViewport from './ToastViewport';
 
 interface RoomInfo {
     name: string;
@@ -22,11 +28,13 @@ interface RoomInfo {
 }
 
 interface ViewerPageProps {
-    onBack?: () => void;  // Callback to go back to main app
+    onBack?: () => void;
     backendUrl: string;
+    initialRoomName?: string;
+    autoConnect?: boolean;
 }
 
-export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
+export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', autoConnect = false }: ViewerPageProps) {
     // Room list state
     const [rooms, setRooms] = useState<RoomInfo[]>([]);
     const [isLoadingRooms, setIsLoadingRooms] = useState(false);
@@ -36,6 +44,12 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
     const [filterProvider, setFilterProvider] = useState<string>('all');
     const [isFollowingLatest, setIsFollowingLatest] = useState(true);
     const transcriptScrollRef = useRef<HTMLDivElement>(null);
+    const autoConnectAttemptedRef = useRef<string | null>(null);
+
+    const scrollToLatest = useCallback(() => {
+        const scroller = transcriptScrollRef.current;
+        if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    }, []);
 
     // Convert backend URL to HTTP
     const httpBackendUrl = toHttpUrl(backendUrl);
@@ -44,6 +58,21 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
     const viewer = useRoomViewer({
         tokenEndpoint: `${httpBackendUrl}/livekit/token`,
     });
+
+    useEffect(() => {
+        const attempted = autoConnectAttemptedRef.current === initialRoomName;
+        if (!shouldAutoConnectViewer({
+            autoConnect,
+            roomName: initialRoomName,
+            attempted,
+            connected: viewer.connectionState !== ConnectionState.DISCONNECTED,
+        })) {
+            return;
+        }
+
+        autoConnectAttemptedRef.current = initialRoomName;
+        void viewer.connect(initialRoomName);
+    }, [autoConnect, initialRoomName, viewer.connect, viewer.connectionState]);
 
     // Fetch available rooms
     const fetchRooms = useCallback(async () => {
@@ -67,9 +96,17 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
 
     // Fetch rooms on mount and periodically
     useEffect(() => {
-        fetchRooms();
-        const interval = setInterval(fetchRooms, 10000); // Refresh every 10s
-        return () => clearInterval(interval);
+        let disposed = false;
+        let nextPoll: number | undefined;
+        const poll = async () => {
+            await fetchRooms();
+            if (!disposed) nextPoll = window.setTimeout(poll, 10000);
+        };
+        void poll();
+        return () => {
+            disposed = true;
+            if (nextPoll !== undefined) window.clearTimeout(nextPoll);
+        };
     }, [fetchRooms]);
 
     // Get unique providers from agents
@@ -88,10 +125,10 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
 
     // Filter transcripts by selected provider
     const filteredTranscripts = useMemo(() => {
-        if (filterProvider === 'all') {
-            return viewer.transcripts; // Show all
-        }
-        return viewer.transcripts.filter(t => t.provider === filterProvider);
+        const matching = filterProvider === 'all'
+            ? viewer.transcripts
+            : viewer.transcripts.filter(t => t.provider === filterProvider);
+        return groupFinalTranscriptRows(matching);
     }, [viewer.transcripts, filterProvider]);
 
     const filteredInterims = useMemo(() => {
@@ -102,22 +139,19 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
     }, [filterProvider, viewer.interimTranscripts]);
 
     useEffect(() => {
-        if (transcriptScrollRef.current && isFollowingLatest) {
-            transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
-        }
-    }, [filteredInterims, filteredTranscripts, isFollowingLatest]);
+        if (!isFollowingLatest) return;
 
-    // Provider color mapping
-    const getProviderColor = (provider: string) => {
-        switch (provider.toLowerCase()) {
-            case 'google': return 'text-blue-400 bg-blue-500/20 border-blue-500/30';
-            case 'azure': return 'text-cyan-400 bg-cyan-500/20 border-cyan-500/30';
-            default: return 'text-slate-400 bg-slate-500/20 border-slate-500/30';
-        }
-    };
+        const frame = window.requestAnimationFrame(scrollToLatest);
+        return () => window.cancelAnimationFrame(frame);
+    }, [filteredInterims, filteredTranscripts, isFollowingLatest, scrollToLatest]);
 
     return (
         <div className="app-shell">
+            <ToastViewport notices={[
+                roomsError && { id: `rooms-error-${roomsError}`, tone: 'error', title: 'Rooms unavailable', message: roomsError, onDismiss: () => setRoomsError(null) },
+                viewer.error && { id: `viewer-error-${viewer.error}`, tone: 'error', title: 'Connection error', message: viewer.error },
+            ]} />
+            <span className="sr-only" aria-live="polite" aria-atomic="true">{viewer.transcripts.at(-1)?.text ?? ''}</span>
             {/* Header */}
             <header className="app-header">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
@@ -125,7 +159,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                         {onBack && (
                             <button
                                 onClick={onBack}
-                                className="control-button control-button--quiet !min-h-10 !px-2.5"
+                                className="control-button control-button--quiet !min-h-11 !px-2.5"
                                 title="Close Viewer"
                             >
                                 <X size={20} />
@@ -151,7 +185,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                             {viewer.audioParticipants.length > 0 && (
                                 <button
                                     onClick={viewer.toggleAudioMute}
-                                    className={`p-2 rounded-lg transition ${viewer.isAudioMuted
+                                    className={`min-h-11 min-w-11 rounded-lg p-2 transition ${viewer.isAudioMuted
                                         ? 'text-red-400 hover:text-red-300 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30'
                                         : 'text-emerald-400 hover:text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30'
                                         }`}
@@ -181,19 +215,15 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                 <button
                                     onClick={fetchRooms}
                                     disabled={isLoadingRooms}
-                                    className="control-button control-button--quiet !min-h-8 !px-2 disabled:opacity-50"
+                                    className="control-button control-button--quiet !min-h-11 !px-2 disabled:opacity-50"
                                     title="Refresh rooms"
                                 >
                                     <RefreshCw size={14} className={isLoadingRooms ? 'animate-spin' : ''} />
                                 </button>
                             </div>
 
-                            {roomsError && (
-                                <p className="text-xs text-red-400 mb-3">{roomsError}</p>
-                            )}
-
                             {rooms.length === 0 ? (
-                                <p className="text-sm text-slate-500 text-center py-4">
+                                <p className="text-center text-sm text-slate-400 py-4">
                                     {isLoadingRooms ? 'Loading...' : 'No active rooms'}
                                 </p>
                             ) : (
@@ -201,7 +231,11 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                     {rooms.map(room => (
                                         <button
                                             key={room.name}
-                                            onClick={() => viewer.connect(room.name)}
+                                            onClick={() => {
+                                                void viewer.connect(room.name);
+                                                const nextUrl = buildViewerUrl(window.location.origin + window.location.pathname, room.name);
+                                                window.location.hash = new URL(nextUrl).hash;
+                                            }}
                                             disabled={viewer.connectionState === ConnectionState.CONNECTING}
                                             className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${viewer.currentRoomName === room.name
                                                 ? 'border-violet-400/55 bg-violet-400/10 text-white'
@@ -220,7 +254,11 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
 
                             {viewer.connectionState === ConnectionState.CONNECTED && (
                                 <button
-                                    onClick={viewer.disconnect}
+                                    onClick={() => {
+                                        viewer.disconnect();
+                                        const nextUrl = buildViewerUrl(window.location.origin + window.location.pathname, '');
+                                        window.location.hash = new URL(nextUrl).hash;
+                                    }}
                                     className="control-button control-button--danger mt-4 w-full"
                                 >
                                     Disconnect
@@ -237,7 +275,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                 </h2>
 
                                 {viewer.agents.length === 0 ? (
-                                    <p className="text-sm text-slate-500 text-center py-2">
+                                    <p className="text-center text-sm text-slate-400 py-2">
                                         No agents connected
                                     </p>
                                 ) : (
@@ -245,10 +283,10 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                         {viewer.agents.map(agent => (
                                             <div
                                                 key={agent.identity}
-                                                className={`flex items-center justify-between rounded-lg border px-2.5 py-2 ${getProviderColor(agent.provider)}`}
+                                                className={`flex items-center justify-between rounded-lg border px-2.5 py-2 ${getProviderPresentation(agent.provider).badge}`}
                                             >
-                                                <span className="text-sm font-medium">{agent.provider}</span>
-                                                <span className="status-dot status-dot--live" aria-label="Connected" />
+                                                <span className="text-sm font-medium">{formatProviderName(agent.provider)}</span>
+                                                <span className="status-dot status-dot--live" aria-hidden="true" />
                                             </div>
                                         ))}
                                     </div>
@@ -270,7 +308,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                     </h2>
                                     <button
                                         onClick={viewer.toggleAudioMute}
-                                        className={`control-button !min-h-8 !px-2.5 ${viewer.isAudioMuted
+                                        className={`control-button !min-h-11 !px-2.5 ${viewer.isAudioMuted
                                             ? 'control-button--danger'
                                             : 'control-button--quiet text-emerald-200'
                                             }`}
@@ -307,7 +345,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                     <h2 className="text-sm font-semibold text-white">
                                         Transcripts
                                     </h2>
-                                    <span className="text-xs text-slate-500">
+                                    <span className="text-xs text-slate-400">
                                         {filteredTranscripts.length} segment{filteredTranscripts.length !== 1 ? 's' : ''}
                                     </span>
                                 </div>
@@ -320,12 +358,12 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                             value={filterProvider}
                                             onChange={(e) => setFilterProvider(e.target.value)}
                                             aria-label="Filter transcripts by provider"
-                                            className="h-9 rounded-lg border border-slate-600 bg-slate-950/40 px-3 text-xs font-medium text-white"
+                                            className="h-11 rounded-lg border border-slate-600 bg-slate-950/40 px-3 text-xs font-medium text-white"
                                         >
                                             <option value="all">All Providers</option>
                                             {availableProviders.map(provider => (
                                                 <option key={provider} value={provider}>
-                                                    {provider}
+                                                    {formatProviderName(provider)}
                                                 </option>
                                             ))}
                                         </select>
@@ -346,57 +384,100 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                             {/* Transcript List */}
                             <div
                                 ref={transcriptScrollRef}
-                                className="transcript-scroller h-[500px] overflow-y-auto px-4 py-2"
+                                className="transcript-scroller h-[clamp(24rem,65dvh,52rem)] overflow-y-auto px-4 py-2"
                                 onScroll={(event) => setIsFollowingLatest(shouldStickToLatest(event.currentTarget))}
                             >
                                 {viewer.connectionState !== ConnectionState.CONNECTED ? (
-                                    <div className="flex flex-col items-center justify-center h-full text-slate-500">
+                                    <div className="flex h-full flex-col items-center justify-center text-slate-400">
                                         <Radio size={32} className="mb-3 opacity-50" />
                                         <p className="text-sm">Select a room to start viewing</p>
                                     </div>
                                 ) : filteredTranscripts.length === 0 && filteredInterims.length === 0 ? (
-                                    <div className="flex flex-col items-center justify-center h-full text-slate-500">
+                                    <div className="flex h-full flex-col items-center justify-center text-slate-400">
                                         <Bot size={32} className="mb-3 opacity-50" />
                                         <p className="text-sm">Waiting for transcripts...</p>
                                         {viewer.agents.length === 0 && (
-                                            <p className="text-xs text-slate-600 mt-1">No agents connected yet</p>
+                                            <p className="mt-1 text-xs text-slate-400">No agents connected yet</p>
                                         )}
                                     </div>
                                 ) : (
                                     <>
                                         {/* Final transcripts */}
-                                        {filteredTranscripts.map(segment => (
-                                            <div
-                                                key={segment.id}
-                                                className="transcript-row grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 py-3"
-                                            >
-                                                {segment.provider && (
-                                                    <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(segment.provider)}`}>
-                                                        {segment.provider}
-                                                    </span>
-                                                )}
-                                                <p className="min-w-0 text-[1rem] leading-7 text-slate-100">
-                                                    {segment.text}
-                                                </p>
-                                                <span className="shrink-0 text-[10px] text-slate-500">
-                                                    {new Date(segment.timestamp).toLocaleTimeString()}
-                                                </span>
-                                            </div>
-                                        ))}
+                                        {filteredTranscripts.map(segment => {
+                                            const isTurnLive = isTranscriptTurnLive(segment);
+                                            return (
+                                                <div
+                                                    key={segment.id}
+                                                    className="transcript-row transcript-turn grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 py-3"
+                                                >
+                                                    {segment.provider && (
+                                                        <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderPresentation(segment.provider).badge}`}>
+                                                            {formatProviderName(segment.provider)}
+                                                        </span>
+                                                    )}
+                                                    <div className="transcript-bilingual min-w-0">
+                                                        <p
+                                                            className={`transcript-source-line break-words text-[1rem] leading-7 text-slate-100 ${hasSourceLanguageLabel(segment.provider, segment.languageCode) ? 'transcript-source-line--labeled' : ''}`}
+                                                            lang={normalizeLanguageTag(segment.languageCode)}
+                                                            dir="auto"
+                                                        >
+                                                            {hasSourceLanguageLabel(segment.provider, segment.languageCode) && (
+                                                                <span className="source-language-label" title={formatLanguageLabel(segment.languageCode)} aria-hidden="true">
+                                                                    <span className="language-label__text">{formatLanguageLabel(segment.languageCode)}</span>
+                                                                </span>
+                                                            )}
+                                                            <span className="transcript-source-line__text">{segment.text}</span>
+                                                        </p>
+                                                        <TranslationBlock translation={segment.translation} />
+                                                    </div>
+                                                    <time
+                                                        className="transcript-turn__time shrink-0 text-[10px] text-slate-400"
+                                                        dateTime={new Date(segment.timestamp).toISOString()}
+                                                    >
+                                                        {isTurnLive && (
+                                                            <>
+                                                                <span className="sr-only">Live turn. </span>
+                                                                <span className="transcript-live-dot transcript-turn__live-dot" aria-hidden="true" />
+                                                            </>
+                                                        )}
+                                                        {new Date(segment.timestamp).toLocaleTimeString()}
+                                                    </time>
+                                                </div>
+                                            );
+                                        })}
 
                                         {/* Interim transcripts (per agent) */}
                                         {filteredInterims.map(interim => (
-                                                <div
-                                                    key={interim.key}
-                                                    className="my-2 grid grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-lg border border-violet-400/30 bg-violet-400/10 px-3 py-3"
-                                                >
-                                                    <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderColor(interim.provider)}`}>
-                                                        {interim.provider}<span className="ml-1 normal-case opacity-75">· {interim.speaker}</span>
+                                            <div
+                                                key={interim.key}
+                                                className="transcript-row transcript-row--interim transcript-turn transcript-turn--draft grid grid-cols-[auto_minmax(0,1fr)] gap-2 py-3 sm:gap-3"
+                                            >
+                                                <div className="flex flex-col items-start gap-1">
+                                                    <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderPresentation(interim.provider).badge}`}>
+                                                        {formatProviderName(interim.provider)}
                                                     </span>
-                                                    <p className="min-w-0 text-[1rem] italic leading-7 text-violet-100" aria-live="polite">
-                                                        {interim.text}
-                                                    </p>
+                                                    <span className="transcript-draft-indicator">
+                                                        <span className="transcript-live-dot" aria-hidden="true" />
+                                                        Draft
+                                                    </span>
                                                 </div>
+                                                <div className="transcript-bilingual col-span-2 min-w-0 sm:col-span-1">
+                                                    <p
+                                                        className={`transcript-source-line break-words text-[1rem] leading-7 text-slate-300 ${hasSourceLanguageLabel(interim.provider, interim.languageCode) ? 'transcript-source-line--labeled' : ''}`}
+                                                        lang={normalizeLanguageTag(interim.languageCode)}
+                                                        dir="auto"
+                                                    >
+                                                        <span className="sr-only">Live interim transcript from {interim.speaker}: </span>
+                                                        {hasSourceLanguageLabel(interim.provider, interim.languageCode) && (
+                                                            <span className="source-language-label" title={formatLanguageLabel(interim.languageCode)} aria-hidden="true">
+                                                                <span className="language-label__text">{formatLanguageLabel(interim.languageCode)}</span>
+                                                            </span>
+                                                        )}
+                                                        <span className="transcript-source-line__text">{interim.text}</span>
+                                                    </p>
+                                                    <TranslationBlock translation={interim.translation} />
+                                                </div>
+                                            </div>
                                         ))}
                                     </>
                                 )}
@@ -406,9 +487,7 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                                     type="button"
                                     className="control-button control-button--quiet absolute bottom-3 right-4 bg-slate-900/95 shadow-lg"
                                     onClick={() => {
-                                        if (transcriptScrollRef.current) {
-                                            transcriptScrollRef.current.scrollTop = transcriptScrollRef.current.scrollHeight;
-                                        }
+                                        scrollToLatest();
                                         setIsFollowingLatest(true);
                                     }}
                                 >
@@ -417,12 +496,6 @@ export default function ViewerPage({ onBack, backendUrl }: ViewerPageProps) {
                             )}
                         </section>
 
-                        {/* Error Display */}
-                        {viewer.error && (
-                            <div className="mt-4 rounded-lg border border-red-400/35 bg-red-950/35 p-3" role="alert">
-                                <p className="text-sm text-red-400">{viewer.error}</p>
-                            </div>
-                        )}
                     </div>
                 </div>
             </main>

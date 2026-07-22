@@ -10,8 +10,10 @@ func TestValidateAgentProvider(t *testing.T) {
 	cfg := &config.Config{
 		GoogleCloudProject:           "project",
 		GoogleApplicationCredentials: "credentials.json",
+		GeminiAPIKey:                 "gemini-key",
 		AzureSubscriptionKey:         "azure-key",
 		AzureRegion:                  "southeastasia",
+		OpenAIAPIKey:                 "openai-key",
 	}
 
 	tests := []struct {
@@ -22,6 +24,8 @@ func TestValidateAgentProvider(t *testing.T) {
 	}{
 		{name: "normalizes Google", provider: " Google ", want: "google"},
 		{name: "accepts Azure", provider: "azure", want: "azure"},
+		{name: "accepts Gemini", provider: " GEMINI ", want: "gemini"},
+		{name: "accepts OpenAI Whisper", provider: "gpt-realtime-whisper", want: "gpt-realtime-whisper"},
 		{name: "rejects empty", wantErr: true},
 		{name: "rejects unknown", provider: "other", wantErr: true},
 	}

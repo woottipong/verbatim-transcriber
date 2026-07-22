@@ -1,239 +1,68 @@
-# Azure Speech WebSocket API - Data Flow
+# Azure Speech upstream WebSocket flow
 
-## 📊 ภาพรวม Architecture
+## Scope
 
-```
-┌─────────────┐     WebSocket     ┌─────────────┐     WebSocket     ┌─────────────┐
-│   Browser   │  ◄──────────────► │  Go Backend │  ◄──────────────► │    Azure    │
-│  (Frontend) │    JSON + PCM     │   (Fiber)   │   Binary Proto    │ Speech STT  │
-└─────────────┘                   └─────────────┘                   └─────────────┘
-```
+Azure Speech uses a WebSocket internally from the Go provider to Azure. This is an upstream implementation detail, not a public browser/backend WebSocket API.
 
-## 🔄 Connection Flow
-
-```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                              CONNECTION SEQUENCE                                 │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Frontend                    Backend                         Azure               │
-│     │                           │                              │                 │
-│     │──── WS Connect ──────────►│                              │                 │
-│     │◄─── {"type":"connected"} ─│                              │                 │
-│     │                           │                              │                 │
-│     │──── {"type":"start"} ────►│                              │                 │
-│     │                           │──── WS Connect + Headers ───►│                 │
-│     │                           │◄─── Connection OK ───────────│                 │
-│     │                           │                              │                 │
-│     │                           │──── speech.config (JSON) ───►│                 │
-│     │                           │──── audio (RIFF header) ────►│                 │
-│     │                           │                              │                 │
-│     │◄─── {"type":"started"}  ──│                              │                 │
-│     │                           │                              │                 │
-└──────────────────────────────────────────────────────────────────────────────────┘
+```text
+Browser microphone or Chrome Tab
+  → LiveKit WebRTC Opus 48 kHz
+  → Go agent decodes and downsamples to 16 kHz PCM
+  → AzureProvider WebSocket
+  → speech.hypothesis / speech.phrase
+  → LiveKit transcript data
 ```
 
-## 🎤 Audio Streaming Flow
+## Connection
 
-```
-┌──────────────────────────────────────────────────────────────────────────────────┐
-│                              AUDIO STREAMING                                     │
-├──────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  Frontend                    Backend                         Azure               │
-│     │                           │                              │                 │
-│     │──── Binary (PCM 16kHz) ──►│                              │                 │
-│     │                           │──── Binary (Header+PCM) ────►│                 │
-│     │                           │                              │                 │
-│     │                           │◄─── speech.hypothesis ───────│   (interim)     │
-│     │◄─── {"isFinal":false}  ───│                              │                 │
-│     │                           │                              │                 │
-│     │──── Binary (PCM) ────────►│                              │                 │
-│     │                           │──── Binary (Header+PCM) ────►│                 │
-│     │                           │                              │                 │
-│     │                           │◄─── speech.phrase ───────────│   (final)       │
-│     │◄─── {"isFinal":true}  ────│                              │                 │
-│     │                           │                              │                 │
-└──────────────────────────────────────────────────────────────────────────────────┘
+The provider connects to:
+
+```text
+wss://<region>.stt.speech.microsoft.com/
+  speech/recognition/conversation/cognitiveservices/v1
+  ?language=th-TH&format=detailed
 ```
 
-## 📦 Message Formats
+Authentication uses `AZURE_SUBSCRIPTION_KEY`; the hostname uses `AZURE_REGION`.
 
-### 1. Frontend → Backend (Simple)
+## Audio format
 
-**Control Message (Text):**
-```json
-{"type": "start"}
-{"type": "stop"}
-```
+| Property | Value |
+| --- | --- |
+| Sample rate | 16,000 Hz |
+| Channels | Mono |
+| Sample format | Signed 16-bit little-endian PCM |
+| Container framing | WAV/RIFF header followed by binary audio frames |
+| Provider buffer threshold | Approximately 200 ms |
 
-**Audio Data (Binary):**
-```
-[PCM 16-bit signed, 16kHz, mono]
-```
+The LiveKit agent decodes at 48 kHz and uses interval-averaged 3:1 downsampling before sending audio to Azure. Averaging the source samples attenuates high-frequency aliasing compared with dropping every second or third sample.
 
----
+## Provider protocol
 
-### 2. Backend → Azure (Azure Protocol)
+1. Open WebSocket with subscription and connection headers.
+2. Send `speech.config` with agent metadata and segmentation settings.
+3. Send `audio` configuration with a WAV/RIFF header.
+4. Buffer and send binary PCM audio frames.
+5. Parse Azure text frames by their `Path` header.
+6. Emit interim text for `speech.hypothesis` and final text for `speech.phrase`.
 
-**Text Message (speech.config):**
-```
-Path: speech.config
-X-RequestId: abc123...
-X-Timestamp: 2024-01-15T10:30:00.000Z
-Content-Type: application/json
+Default endpointing values are:
 
-{"context":{"system":{"name":"thai-transcriber",...}}}
-```
+| Setting | Default |
+| --- | --- |
+| Segmentation silence timeout | 300 ms |
+| Maximum silence duration | 500 ms |
+| Initial silence timeout | 5,000 ms |
+| Interim results | Enabled |
 
-**Binary Message (audio):**
-```
-┌─────────────────┬─────────────────────────────┬───────────────────┐
-│ Header Length   │ Header Text                 │ Audio Data        │
-│ (2 bytes, BE)   │ (variable)                  │ (PCM or RIFF)     │
-├─────────────────┼─────────────────────────────┼───────────────────┤
-│ 00 5A           │ Path: audio\r\n             │ [PCM bytes...]    │
-│                 │ X-RequestId: abc...\r\n     │                   │
-│                 │ X-Timestamp: ...\r\n        │                   │
-│                 │ Content-Type: audio/x-wav   │                   │
-│                 │ \r\n                        │                   │
-└─────────────────┴─────────────────────────────┴───────────────────┘
-```
+These settings favor responsive Thai transcription and may need tuning for noisy or slow-speaking environments.
 
----
+## Lifecycle
 
-### 3. Azure → Backend (Response)
+`Stop` is idempotent, closes the provider connection, flushes buffered audio when possible, and closes the result channel exactly once. Normal shutdown errors should not be presented as unexpected provider failures.
 
-**speech.hypothesis (Interim):**
-```
-Path: speech.hypothesis
-X-RequestId: abc123...
-Content-Type: application/json
+## Implementation
 
-{"Text":"กำลังพูด","Offset":1000000,"Duration":500000}
-```
-
-**speech.phrase (Final):**
-```
-Path: speech.phrase
-X-RequestId: abc123...
-Content-Type: application/json
-
-{
-  "RecognitionStatus": "Success",
-  "DisplayText": "สวัสดีครับ",
-  "Offset": 1000000,
-  "Duration": 2000000,
-  "NBest": [
-    {"Confidence": 0.95, "Display": "สวัสดีครับ", "Lexical": "สวัสดีครับ"}
-  ]
-}
-```
-
----
-
-### 4. Backend → Frontend (Standardized)
-
-```json
-{
-  "type": "transcript",
-  "text": "สวัสดีครับ",
-  "isFinal": true,
-  "channel": {
-    "alternatives": [
-      {"transcript": "สวัสดีครับ", "confidence": 0.95}
-    ]
-  }
-}
-```
-
-## 🎯 Azure Events Timeline
-
-```
-┌────────────────────────────────────────────────────────────────┐
-│                     RECOGNITION TIMELINE                       │
-├────────────────────────────────────────────────────────────────┤
-│                                                                │
-│  Audio Start ──►  turn.start                                   │
-│         │                                                      │
-│         ▼                                                      │
-│  Speech Detected ──►  speech.startDetected                     │
-│         │                                                      │
-│         ▼                                                      │
-│  Speaking... ──►  speech.hypothesis (x N times)                │
-│         │            "สวัส..."                                  │
-│         │            "สวัสดี..."                                 │
-│         │            "สวัสดีครับ"                                 │
-│         ▼                                                      │
-│  Silence Detected ──►  speech.endDetected                      │
-│         │                                                      │
-│         ▼                                                      │
-│  Finalized ──►  speech.phrase                                  │
-│         │         "สวัสดีครับ" (final)                            │
-│         ▼                                                      │
-│  Turn Complete ──►  turn.end                                   │
-│                                                                │
-└────────────────────────────────────────────────────────────────┘
-```
-
-## 🔊 Audio Format Requirements
-
-| Parameter   | Value         | Notes                    |
-| ----------- | ------------- | ------------------------ |
-| Format      | PCM           | Linear PCM, uncompressed |
-| Sample Rate | 16,000 Hz     | 16kHz required           |
-| Bit Depth   | 16-bit        | Signed integer           |
-| Channels    | 1 (Mono)      | Single channel           |
-| Byte Order  | Little Endian | For PCM samples          |
-
-### RIFF Header (44 bytes)
-
-```
-Offset  Size  Description
-0       4     "RIFF"
-4       4     File size (0 for streaming)
-8       4     "WAVE"
-12      4     "fmt "
-16      4     Chunk size (16)
-20      2     Audio format (1 = PCM)
-22      2     Channels (1)
-24      4     Sample rate (16000)
-28      4     Byte rate (32000)
-32      2     Block align (2)
-34      2     Bits per sample (16)
-36      4     "data"
-40      4     Data size (0 for streaming)
-```
-
-## 🔑 Key Implementation Points
-
-### 1. Connection ID & Request ID
-```go
-connectionID := uuid.New().String()  // Per WebSocket connection
-requestID := uuid.New().String()     // Per recognition session
-```
-
-### 2. Binary Message Format
-```go
-// Header length (2 bytes, Big Endian) + Header + Audio
-message := make([]byte, 2 + headerLen + len(audioData))
-binary.BigEndian.PutUint16(message[0:2], uint16(headerLen))
-```
-
-### 3. Thread Safety
-```go
-session.mu.Lock()
-if session.azureConn != nil {
-    sendAudioChunk(session, audioData)
-}
-session.mu.Unlock()
-```
-
-## 📈 Performance Characteristics
-
-| Metric                 | Value                        |
-| ---------------------- | ---------------------------- |
-| Latency (hypothesis)   | ~200-300ms                   |
-| Latency (phrase)       | ~500-1000ms after speech end |
-| Recommended chunk size | 100-250ms of audio           |
-| Max streaming duration | No hard limit (unlike REST)  |
+- Provider: `backend-go/internal/infrastructure/asr/azure.go`
+- Tests: `backend-go/internal/infrastructure/asr/azure_test.go`
+- Agent resampling: `backend-go/internal/infrastructure/agent/agent.go`

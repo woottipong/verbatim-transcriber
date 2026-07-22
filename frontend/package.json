@@ -7,11 +7,7 @@
     "dev": "vite",
     "test": "node --experimental-strip-types --test lib/*.test.ts",
     "build": "vite build",
-    "preview": "vite preview",
-    "backend:install": "cd backend && pnpm install && cd ..",
-    "backend:start": "cd backend && pnpm start && cd ..",
-    "full-setup": "pnpm install && pnpm run backend:install",
-    "full-dev": "pnpm run dev & cd backend && pnpm start"
+    "preview": "vite preview"
   },
   "dependencies": {
     "livekit-client": "^2.17.0",

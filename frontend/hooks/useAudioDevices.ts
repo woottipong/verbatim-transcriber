@@ -3,7 +3,7 @@
  */
 
 import { useState, useEffect } from 'react';
-import { getErrorMessage, stopMediaStream } from '../lib/runtime';
+import { getErrorMessage } from '../lib/runtime';
 
 export interface AudioDevice {
     deviceId: string;
@@ -24,11 +24,8 @@ export const useAudioDevices = () => {
                 setIsLoading(true);
                 setError(null);
 
-                // Request permission first
-                const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                stopMediaStream(permissionStream);
-
-                // Enumerate devices
+                // Device enumeration is permission-free. Microphone permission
+                // belongs to the explicit publisher Connect action.
                 const allDevices = await navigator.mediaDevices.enumerateDevices();
                 const audioInputs = allDevices
                     .filter((device) => device.kind === 'audioinput')
