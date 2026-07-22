@@ -32,7 +32,6 @@ function ToastItem({ notice }: { notice: ToastNotice }) {
   onDismissRef.current = notice.onDismiss;
 
   useEffect(() => {
-    setVisible(true);
     const duration = notice.duration ?? (notice.tone === 'error' ? 8000 : 4200);
     if (duration <= 0) return undefined;
 
@@ -73,7 +72,7 @@ export default function ToastViewport({ notices }: ToastViewportProps) {
   if (visibleNotices.length === 0) return null;
 
   return (
-    <div className="app-toast-viewport" aria-label="Notifications">
+    <div className="app-toast-viewport" role="region" aria-label="Notifications">
       {visibleNotices.map(notice => (
         <div key={notice.id}>
           <ToastItem notice={notice} />

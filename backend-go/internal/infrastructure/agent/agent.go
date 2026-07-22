@@ -488,7 +488,7 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 	log.Printf("✅ [Agent] ASR provider started: %s", provider.Name())
 
 	// Handle transcription results
-	go a.handleTranscriptionResults(provider, participant)
+	go a.handleTranscriptionResults(provider, participant.Identity())
 
 	// Read audio samples and send to ASR
 	// Create Opus decoder using hraban/opus (CGO binding)
@@ -588,11 +588,11 @@ func startProvider(ctx context.Context, provider domain.ASRProvider) (func(), er
 	}, nil
 }
 
-func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, participant *lksdk.RemoteParticipant) {
+func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, speaker string) {
 	results := provider.Results()
 
 	for result := range results {
-		msg := newTranscriptMessage(result, provider.Name(), participant.Identity())
+		msg := newTranscriptMessage(result, provider.Name(), speaker)
 
 		// Convert to JSON
 		data, err := json.Marshal(msg)

@@ -71,7 +71,7 @@ func TestHandleTranscriptionResultsStopsRunningAgentWhenProviderFails(t *testing
 		cancel:      func() { close(cancelled) },
 	}
 
-	agent.handleTranscriptionResults(provider, nil)
+	agent.handleTranscriptionResults(provider, "speaker-1")
 
 	if agent.IsRunning() {
 		t.Fatal("agent remained running after provider results closed with an error")
@@ -97,7 +97,7 @@ func TestHandleTranscriptionResultsKeepsAgentInRoomAfterTrackProviderStopsNormal
 		cancel:      func() { cancelled = true },
 	}
 
-	agent.handleTranscriptionResults(provider, nil)
+	agent.handleTranscriptionResults(provider, "speaker-1")
 
 	if !agent.IsRunning() {
 		t.Fatal("agent left the room after a track-scoped provider stopped normally")
@@ -107,6 +107,59 @@ func TestHandleTranscriptionResultsKeepsAgentInRoomAfterTrackProviderStopsNormal
 	}
 	if agent.asrProvider != nil {
 		t.Fatal("finished track provider remained attached to the room agent")
+	}
+}
+
+func TestHandleTranscriptionResultsDoesNotReleaseReplacementProvider(t *testing.T) {
+	staleResults := make(chan domain.TranscriptResult)
+	close(staleResults)
+	staleProvider := &lifecycleProvider{results: staleResults}
+	replacementProvider := &lifecycleProvider{results: make(chan domain.TranscriptResult)}
+	cancelled := false
+	agent := &Agent{
+		isRunning:   true,
+		asrProvider: replacementProvider,
+		cancel:      func() { cancelled = true },
+	}
+
+	agent.handleTranscriptionResults(staleProvider, "speaker-1")
+
+	if !agent.IsRunning() {
+		t.Fatal("agent stopped after a replaced track provider closed")
+	}
+	if cancelled {
+		t.Fatal("agent context was cancelled after a replaced track provider closed")
+	}
+	if agent.asrProvider != replacementProvider {
+		t.Fatal("replacement provider was released when the stale provider closed")
+	}
+}
+
+func TestHandleTranscriptionResultsIgnoresFailureFromReplacedProvider(t *testing.T) {
+	staleResults := make(chan domain.TranscriptResult)
+	close(staleResults)
+	staleProvider := &lifecycleProvider{
+		err:     errors.New("stale provider failed"),
+		results: staleResults,
+	}
+	replacementProvider := &lifecycleProvider{results: make(chan domain.TranscriptResult)}
+	cancelled := false
+	agent := &Agent{
+		isRunning:   true,
+		asrProvider: replacementProvider,
+		cancel:      func() { cancelled = true },
+	}
+
+	agent.handleTranscriptionResults(staleProvider, "speaker-1")
+
+	if !agent.IsRunning() {
+		t.Fatal("agent stopped after a replaced provider reported an error")
+	}
+	if cancelled {
+		t.Fatal("agent context was cancelled after a replaced provider reported an error")
+	}
+	if agent.asrProvider != replacementProvider {
+		t.Fatal("replacement provider changed after stale provider failure")
 	}
 }
 

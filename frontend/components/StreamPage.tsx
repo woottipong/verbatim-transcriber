@@ -64,7 +64,7 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
                       const nextUrl = buildStreamUrl(window.location.origin + window.location.pathname, '');
                       window.location.hash = new URL(nextUrl).hash;
                     }}
-                    className="text-[10px] text-violet-400 hover:text-violet-300 underline font-medium cursor-pointer"
+                    className="inline-flex min-h-11 items-center px-1 text-xs font-medium text-violet-300 underline hover:text-violet-200"
                     aria-label="Change room"
                   >
                     Change
@@ -88,7 +88,7 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
 
           <div className="stream-navbar__controls flex items-center gap-1.5 sm:gap-2">
             {audioSource === 'microphone' && audioDevices.length > 1 && (
-              <div className="hidden items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-800/70 px-2.5 py-2 lg:flex">
+              <div className="hidden h-11 items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-800/70 px-2.5 lg:flex">
                 <Mic2 size={14} className="text-slate-400" />
                 <select
                   value={config.audioDeviceId || 'default'}
@@ -115,7 +115,7 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
                     disabled={!canChangeAudioSource}
                     aria-pressed={isSelected}
                     aria-label={AUDIO_SOURCE_LABELS[source]}
-                    className={`flex min-h-10 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-60 ${isSelected
+                    className={`flex min-h-11 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-60 ${isSelected
                       ? 'bg-violet-500 text-white'
                       : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                     }`}

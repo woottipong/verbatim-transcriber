@@ -44,8 +44,12 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
     const [filterProvider, setFilterProvider] = useState<string>('all');
     const [isFollowingLatest, setIsFollowingLatest] = useState(true);
     const transcriptScrollRef = useRef<HTMLDivElement>(null);
-    const transcriptEndRef = useRef<HTMLDivElement>(null);
     const autoConnectAttemptedRef = useRef<string | null>(null);
+
+    const scrollToLatest = useCallback(() => {
+        const scroller = transcriptScrollRef.current;
+        if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    }, []);
 
     // Convert backend URL to HTTP
     const httpBackendUrl = toHttpUrl(backendUrl);
@@ -92,9 +96,17 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
 
     // Fetch rooms on mount and periodically
     useEffect(() => {
-        fetchRooms();
-        const interval = setInterval(fetchRooms, 10000); // Refresh every 10s
-        return () => clearInterval(interval);
+        let disposed = false;
+        let nextPoll: number | undefined;
+        const poll = async () => {
+            await fetchRooms();
+            if (!disposed) nextPoll = window.setTimeout(poll, 10000);
+        };
+        void poll();
+        return () => {
+            disposed = true;
+            if (nextPoll !== undefined) window.clearTimeout(nextPoll);
+        };
     }, [fetchRooms]);
 
     // Get unique providers from agents
@@ -129,11 +141,9 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
     useEffect(() => {
         if (!isFollowingLatest) return;
 
-        const frame = window.requestAnimationFrame(() => {
-            transcriptEndRef.current?.scrollIntoView({ block: 'end' });
-        });
+        const frame = window.requestAnimationFrame(scrollToLatest);
         return () => window.cancelAnimationFrame(frame);
-    }, [filteredInterims, filteredTranscripts, isFollowingLatest]);
+    }, [filteredInterims, filteredTranscripts, isFollowingLatest, scrollToLatest]);
 
     return (
         <div className="app-shell">
@@ -149,7 +159,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                         {onBack && (
                             <button
                                 onClick={onBack}
-                                className="control-button control-button--quiet !min-h-10 !px-2.5"
+                                className="control-button control-button--quiet !min-h-11 !px-2.5"
                                 title="Close Viewer"
                             >
                                 <X size={20} />
@@ -175,7 +185,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                             {viewer.audioParticipants.length > 0 && (
                                 <button
                                     onClick={viewer.toggleAudioMute}
-                                    className={`p-2 rounded-lg transition ${viewer.isAudioMuted
+                                    className={`min-h-11 min-w-11 rounded-lg p-2 transition ${viewer.isAudioMuted
                                         ? 'text-red-400 hover:text-red-300 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30'
                                         : 'text-emerald-400 hover:text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30'
                                         }`}
@@ -205,7 +215,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                 <button
                                     onClick={fetchRooms}
                                     disabled={isLoadingRooms}
-                                    className="control-button control-button--quiet !min-h-8 !px-2 disabled:opacity-50"
+                                    className="control-button control-button--quiet !min-h-11 !px-2 disabled:opacity-50"
                                     title="Refresh rooms"
                                 >
                                     <RefreshCw size={14} className={isLoadingRooms ? 'animate-spin' : ''} />
@@ -298,7 +308,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                     </h2>
                                     <button
                                         onClick={viewer.toggleAudioMute}
-                                        className={`control-button !min-h-8 !px-2.5 ${viewer.isAudioMuted
+                                        className={`control-button !min-h-11 !px-2.5 ${viewer.isAudioMuted
                                             ? 'control-button--danger'
                                             : 'control-button--quiet text-emerald-200'
                                             }`}
@@ -469,7 +479,6 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                                 </div>
                                             </div>
                                         ))}
-                                        <div ref={transcriptEndRef} aria-hidden="true" />
                                     </>
                                 )}
                             </div>
@@ -478,7 +487,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                     type="button"
                                     className="control-button control-button--quiet absolute bottom-3 right-4 bg-slate-900/95 shadow-lg"
                                     onClick={() => {
-                                        transcriptEndRef.current?.scrollIntoView({ block: 'end' });
+                                        scrollToLatest();
                                         setIsFollowingLatest(true);
                                     }}
                                 >

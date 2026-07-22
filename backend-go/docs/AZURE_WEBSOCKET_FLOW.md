@@ -5,9 +5,9 @@
 Azure Speech uses a WebSocket internally from the Go provider to Azure. This is an upstream implementation detail, not a public browser/backend WebSocket API.
 
 ```text
-Browser microphone
+Browser microphone or Chrome Tab
   → LiveKit WebRTC Opus 48 kHz
-  → Go agent decodes and decimates to 16 kHz PCM
+  → Go agent decodes and downsamples to 16 kHz PCM
   → AzureProvider WebSocket
   → speech.hypothesis / speech.phrase
   → LiveKit transcript data
@@ -35,7 +35,7 @@ Authentication uses `AZURE_SUBSCRIPTION_KEY`; the hostname uses `AZURE_REGION`.
 | Container framing | WAV/RIFF header followed by binary audio frames |
 | Provider buffer threshold | Approximately 200 ms |
 
-The LiveKit agent decodes at 48 kHz and uses simple 3:1 decimation before sending audio to Azure.
+The LiveKit agent decodes at 48 kHz and uses interval-averaged 3:1 downsampling before sending audio to Azure. Averaging the source samples attenuates high-frequency aliasing compared with dropping every second or third sample.
 
 ## Provider protocol
 

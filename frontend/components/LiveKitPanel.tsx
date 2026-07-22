@@ -59,8 +59,10 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
   const [exportError, setExportError] = useState<string | null>(null);
 
   const scrollToLatest = useCallback(() => {
-    const anchors = scrollRef.current?.querySelectorAll<HTMLElement>('[data-transcript-end]');
-    anchors?.forEach(anchor => anchor.scrollIntoView({ block: 'end' }));
+    const scrollers = scrollRef.current?.querySelectorAll<HTMLElement>('[data-transcript-scroller]');
+    scrollers?.forEach(scroller => {
+      scroller.scrollTop = scroller.scrollHeight;
+    });
   }, []);
 
   const handleExportProvider = useCallback((provider: string, text: string) => {
@@ -359,7 +361,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                         disabled={!exportText}
                         onClick={() => handleExportProvider(provider, exportText)}
                         aria-label={`Export ${formatProviderName(provider)} transcript as text`}
-                        className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Download size={13} aria-hidden="true" />
                         Export .txt
@@ -369,6 +371,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                   
                   <div 
                     className="flex-1 overflow-y-auto px-4 py-3 transcript-scroller"
+                    data-transcript-scroller
                     onScroll={(event) => setIsFollowingLatest(shouldStickToLatest(event.currentTarget))}
                   >
                     {!hasProviderContent ? (

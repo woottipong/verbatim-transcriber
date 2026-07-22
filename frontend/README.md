@@ -1,6 +1,6 @@
 # React frontend
 
-React 19 + TypeScript + Vite UI for publishing microphone audio to LiveKit, viewing room transcripts, and administering rooms and transcription agents.
+React 19 + TypeScript + Vite UI for publishing microphone or Chrome Tab audio to LiveKit, viewing room transcripts, and administering rooms and transcription agents.
 
 ## Requirements
 
@@ -32,6 +32,7 @@ Open:
 | `VITE_CONTROL_API_KEY` | — | Backend control key for trusted internal deployments; never use in a public frontend build |
 
 These values are embedded by Vite at build time. Use HTTPS/WSS for remote deployments.
+The application does not expose a runtime Settings screen for backend connection values. Change the environment and rebuild or restart Vite instead. Only the selected microphone device remains a local browser preference.
 
 ## Structure
 
@@ -41,19 +42,22 @@ frontend/
 ├── components/
 │   ├── LiveKitPanel.tsx        # Session controls and transcript list
 │   ├── MicrophoneInputStrip.tsx # Input-level visualization
-│   ├── StreamPage.tsx           # Publisher-only route and microphone lifecycle
+│   ├── StreamPage.tsx           # Publisher-only route and audio-source controls
+│   ├── ToastViewport.tsx        # Shared top-right notifications
 │   ├── ViewerPage.tsx          # Subscribe-only viewer
 │   └── AdminPage.tsx           # Room and agent management
 ├── hooks/
-│   ├── useLiveKit.ts           # Publisher room and microphone lifecycle
+│   ├── useLiveKit.ts           # Publisher room and selected-audio lifecycle
 │   ├── useRoomViewer.ts        # Viewer room/audio lifecycle
 │   ├── useAudioVisualizer.ts   # Web Audio analyser state
 │   └── useAudioDevices.ts      # Input-device discovery
 ├── lib/
 │   ├── transcriptMessages.ts   # Packet validation and transcript state helpers
+│   ├── transcriptExport.ts     # Final source-only text export
 │   ├── transcriptUpdates.ts    # Interim update coalescing
 │   ├── transcriptViewport.ts   # Scroll-to-latest behavior
 │   ├── liveKitSession.ts       # Session status presentation
+│   ├── audioSources.ts         # Microphone/Chrome Tab capture helpers
 │   ├── audioSignal.ts          # Waveform calculations
 │   ├── runtime.ts              # Config and bounded-state helpers
 │   ├── appRoutes.ts            # Admin, Stream, and Viewer deep links
@@ -61,23 +65,26 @@ frontend/
 └── types.ts
 ```
 
-The frontend has no direct provider microphone hooks and does not stream audio to the Go HTTP server. All microphone audio is published with LiveKit.
+The frontend has no direct ASR-provider capture hooks and does not stream audio to the Go HTTP server. The selected microphone or Chrome Tab audio is always published with LiveKit.
 
 ## Transcript behavior
 
 - Every packet is validated with `parseTranscriptMessage`.
-- Google and Azure interim values are stored as replaceable drafts keyed by provider and speaker.
-- Final values become bounded committed rows.
-- Gemini input chunks are retained as ordinary rows even when `isFinal=false`; only exact consecutive duplicates are suppressed.
+- Non-final source values are replaceable Draft entries keyed by provider and speaker; Gemini also uses `turnId` to pair source and translation state.
+- Draft rendering is coalesced at 33 ms for general interim traffic and 100 ms for Gemini, with the first update and final result applied immediately.
+- Final values become bounded committed rows. At most 500 final rows and 64 active Draft entries are retained.
+- Lines view can show a Gemini translation beneath its source. Text view deliberately shows source text only and marks active Draft text inline.
+- Per-provider `.txt` export includes finalized source text only; it excludes Draft and translation text.
+- Adjacent final chunks from the same provider, speaker, and language are grouped for display/export when they arrive within 1.6 seconds and the previous chunk has no strong sentence-ending punctuation.
 - Thai spacing normalization belongs to the Go agent. Avoid extra frontend normalization that could collapse interim behavior.
 
 ## Session UX
 
-The publisher joins a named room and then enables the microphone. Readiness is derived from room connection, microphone state, and agent presence. Keep these states explicit in UI changes and do not rely on color alone.
+The publisher chooses Microphone or Chrome Tab while disconnected, joins a named room, and publishes that source. Readiness is derived from room connection, selected-audio state, and agent presence. Keep these states explicit in UI changes and do not rely on color alone.
 
-The root route is the Admin workspace. Admin creates a room first and starts its Agent separately. Stream links prefill the room but do not connect or request microphone permission automatically. Viewer links with `autoconnect=1` connect once without publishing microphone audio.
+The root route is the Admin workspace. Admin creates a room first and starts its Agent separately. Stream links prefill the room but do not connect or request capture permission automatically. Viewer links with `autoconnect=1` connect once without publishing audio. A normal publisher disconnect ends its audio track; the backend agent remains in the room and waits for the next track.
 
-The microphone strip uses the browser's Web Audio analyser only to communicate input level; it is not browser VAD and does not gate audio publication.
+The input strip uses the browser's Web Audio analyser only to communicate signal level; it is not browser VAD and does not gate audio publication. Transient operation feedback appears through the shared top-right Toast viewport; persistent connection/audio/transcriber state and inline form validation remain in context.
 
 ## Scripts
 
@@ -99,9 +106,10 @@ Tests cover transcript buffering/state, session presentation, viewport behavior,
 
 ## Browser requirements
 
-- Modern Chrome, Edge, Firefox, or Safari with WebRTC and `getUserMedia`.
-- `AudioContext` for microphone-level visualization.
-- Microphone permission for the publisher page.
+- Modern Chrome, Edge, Firefox, or Safari with WebRTC and `getUserMedia` for microphone publishing.
+- Chrome or a compatible Chromium browser with `getDisplayMedia` for Chrome Tab audio. Select a browser tab and enable **Share tab audio** in the picker.
+- `AudioContext` for input-level visualization.
+- Microphone or display-capture permission for the selected publisher source.
 - A secure context for remote deployments; localhost is allowed during development.
 
 See the root [README](../README.md) for full setup and [AGENTS.md](../AGENTS.md) for development rules.

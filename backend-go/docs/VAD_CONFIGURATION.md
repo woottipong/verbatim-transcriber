@@ -2,10 +2,10 @@
 
 ## Current behavior
 
-The browser does not run VAD and does not gate microphone publication. The microphone waveform is input-level feedback only. Audio is continuously published while the LiveKit microphone track is enabled, and each cloud provider decides when text is interim or final.
+The browser does not run VAD and does not gate publication. The input waveform is signal-level feedback only. Audio is continuously published while the selected Microphone or Chrome Tab track is enabled, and each cloud provider decides when text is interim or final.
 
 ```text
-Browser microphone on
+Selected browser audio on
   → continuous LiveKit audio
   → cloud provider speech activity / endpointing
   → interim and final transcript results
@@ -36,13 +36,19 @@ Gemini Live input transcription does not behave exactly like traditional ASR int
 
 Translated text is exposed; translated/model audio is still discarded.
 
+### GPT Realtime Whisper
+
+GPT Realtime Whisper receives the PCM stream continuously and uses the shared local segmenter to request a commit after 650 ms of low-energy audio. A 30-second hard duration also commits continuous speech so a turn cannot grow without bound. Delta events remain replaceable Draft text until the corresponding completed event is published as final source text.
+
 ## UI implications
 
-- **Waveform/input meter:** confirms that microphone samples reach the browser analyser.
-- **Microphone state:** confirms whether the LiveKit track is published.
+- **Waveform/input meter:** confirms that selected-source samples reach the browser analyser.
+- **Audio input state:** confirms whether the LiveKit track is published.
 - **Agent/transcription state:** confirms whether an ASR agent is in the room.
-- **Interim draft:** replaceable active text for Google/Azure.
-- **Committed row:** final Google/Azure text or one grouped Gemini source turn, optionally with a translation chip.
+- **Draft:** replaceable active source text for every provider; Gemini may also carry an in-progress paired translation.
+- **Committed row:** finalized source text; Gemini translation is visible only in Lines view.
+- **Text view:** source text only, with active Draft marked inline and no translation output.
+- **Export:** finalized source text only, without Draft or translation output.
 
 Do not infer speech detection from waveform movement alone. Do not label browser input level as VAD unless a real VAD controller is implemented.
 
@@ -62,3 +68,5 @@ Do not infer speech detection from waveform movement alone. Do not label browser
 - `backend-go/internal/infrastructure/asr/google.go`
 - `backend-go/internal/infrastructure/asr/azure.go`
 - `backend-go/internal/infrastructure/asr/gemini.go`
+- `backend-go/internal/infrastructure/asr/openai_transcription.go`
+- `backend-go/internal/infrastructure/asr/pcm_segmenter.go`

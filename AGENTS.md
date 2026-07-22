@@ -6,7 +6,7 @@ This file applies to the entire repository. More specific `AGENTS.md` files may 
 
 ## Project overview
 
-Thai Verbatim Transcriber is a real-time Thai transcription workspace built around LiveKit rooms. A browser publishes microphone audio through WebRTC, a Go agent subscribes to the track, sends decoded PCM to one ASR provider, and publishes transcript messages back through the LiveKit data channel.
+Thai Verbatim Transcriber is a real-time Thai transcription workspace built around LiveKit rooms. A browser publishes microphone or Chrome Tab audio through WebRTC, a Go agent subscribes to the track, sends decoded PCM to one ASR provider, and publishes transcript messages back through the LiveKit data channel.
 
 There is no browser-to-ASR or browser-to-backend audio WebSocket mode. Do not restore the removed `/google`, `/azure`, or `/gemini` client WebSocket endpoints or provider-comparison UI unless explicitly requested.
 
@@ -23,7 +23,7 @@ Publisher / Viewer / Admin (React)
                          │
                     Go room agent
                          │
-              Google / Gemini / Azure
+              Google / Gemini / Azure / GPT Realtime Whisper
 ```
 
 - `frontend/`: React 19, TypeScript, Vite, Tailwind CSS, LiveKit client.
@@ -50,9 +50,10 @@ Preserve these provider-specific semantics:
 
 - Google uses Speech-to-Text V2 streaming at 48 kHz, defaults to `chirp_2` in `asia-southeast1`, requests interim results, enables automatic punctuation, and reconnects before the five-minute stream limit.
 - Azure receives 16 kHz PCM after the agent resamples 48 kHz WebRTC audio. The provider uses Azure's upstream WebSocket protocol; this is not a public application WebSocket endpoint.
-- Gemini uses `gemini-3.5-live-translate-preview` at 16 kHz. The model requires an audio response modality, but model audio and translated output are discarded. Only source-audio input transcription is exposed.
-- Gemini input chunks may arrive with `isFinal=false` even when they should be retained. The frontend intentionally commits Gemini chunks as append-only transcript rows and suppresses only exact consecutive duplicates.
-- Google and Azure interim text remains replaceable draft state keyed by provider and speaker; final text becomes a committed row.
+- Gemini uses `gemini-3.5-live-translate-preview` at 16 kHz. The model requires an audio response modality, but model audio is discarded. Source and configured-target text are exposed and paired with application `turnId` values.
+- Gemini requests an application turn boundary after the shared 650 ms low-energy window or a 30-second hard duration, then allows a fixed 500 ms translation grace period. Alignment is best-effort.
+- GPT Realtime Whisper uses transcription intent at 24 kHz PCM16, publishes source-only Draft/final text, commits after the shared 650 ms silence window or 30-second hard duration, and performs bounded reconnect with up to one second of recent-audio replay.
+- Non-final source text remains replaceable Draft state keyed by provider and speaker. Gemini additionally keys source/translation state by `turnId`; final source text becomes a committed row.
 
 ## Backend conventions
 
@@ -61,6 +62,7 @@ Preserve these provider-specific semantics:
 - Pass `context.Context` through network and long-running operations.
 - Provider `Stop` methods must be idempotent. Close result channels exactly once and avoid sending after closure.
 - Guard shared agent/provider lifecycle state with the existing mutex patterns.
+- Normal audio-track/provider closure must release the track-scoped provider while keeping the room agent connected. Unexpected provider errors stop the agent. Keep stale providers from stopping or clearing a replacement provider.
 - Normalize Thai spacing at the agent output boundary with `domain.NormalizeThaiSpacing`; do not add browser-side spacing transformations that destroy interim behavior.
 - Never log credentials, tokens, API keys, service-account contents, or complete `.env` values.
 - The LiveKit agent uses `hraban/opus` and requires CGO plus a system Opus library.
@@ -71,8 +73,10 @@ Preserve these provider-specific semantics:
 - Use `parseTranscriptMessage` for data-channel payload validation.
 - Keep committed transcripts bounded; do not allow unbounded state growth.
 - Preserve independent interim entries by provider/speaker.
-- Avoid provider-specific microphone capture hooks. Microphone publishing belongs to `useLiveKit`.
-- Keep microphone and session state explicit: room joined, microphone on/off, and transcription agent connected.
+- Avoid provider-specific capture hooks. Microphone and Chrome Tab publishing belong to `useLiveKit`; Chrome Tab capture helpers belong to `frontend/lib/audioSources.ts`.
+- Keep selected-audio and session state explicit: room joined, audio source on/off/stopped, and transcription agent connected.
+- Lines view may show paired Gemini translation. Text view must remain source-only and may mark active source Draft inline; per-provider `.txt` export must contain finalized source text only.
+- Use the shared top-right Toast viewport for transient operation feedback; keep persistent session state and inline validation in context.
 - Do not hide operational state using color alone; retain text/icon status and keyboard accessibility.
 - Prefer existing components, Tailwind patterns, and dependencies. Do not add a visualization library unless the existing canvas implementation cannot satisfy the requirement.
 

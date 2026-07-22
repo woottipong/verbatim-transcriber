@@ -55,11 +55,19 @@ Provider-independent types and Thai spacing normalization live in `internal/doma
 | Provider | Input from agent | Important behavior |
 | --- | --- | --- |
 | Google | 48 kHz Linear16 PCM | Speech-to-Text V2 streaming, interim enabled, automatic punctuation, pre-limit reconnect and one-second replay buffer |
-| Gemini | 16 kHz PCM | Source input chunks plus Thai output transcription; required model audio response is discarded |
-| GPT Realtime Whisper | 24 kHz PCM16 | `/v1/realtime?intent=transcription`; source interim deltas and completed finals; bounded reconnect with one-second audio replay |
+| Gemini | 16 kHz PCM | Source plus configured-target transcription paired by application `turnId`; required model audio response is discarded |
+| GPT Realtime Whisper | 24 kHz PCM16 | `/v1/realtime?intent=transcription`; source interim deltas and completed finals; 650 ms silence/30-second hard boundary; bounded reconnect with one-second audio replay |
 | Azure | 16 kHz PCM/WAV stream | Azure upstream WebSocket conversation recognition with interim hypotheses and endpointing settings |
 
-Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `gemini-3.5-live-translate-preview`, detects the source language unless a hint is configured, and translates to Thai by default. GPT Realtime Whisper uses the dedicated Realtime transcription intent with `gpt-realtime-whisper` as the input transcription model, streams 24 kHz PCM16, commits turns after the local silence boundary, and publishes only source transcript text. Recoverable WebSocket failures use bounded exponential-backoff reconnects and replay up to one second of recent PCM; exhausting retries closes the result stream so the room agent becomes unhealthy instead of remaining falsely connected.
+Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `gemini-3.5-live-translate-preview`, detects the source language unless a hint is configured, and translates to Thai by default. Gemini requests an application boundary after 650 ms of low-energy PCM or 30 seconds of continuous audio, then waits a fixed 500 ms for delayed translation. GPT Realtime Whisper uses the dedicated Realtime transcription intent with `gpt-realtime-whisper` as the input transcription model, streams 24 kHz PCM16, commits after the shared 650 ms silence boundary or a 30-second hard duration, and publishes only source transcript text. Recoverable WebSocket failures use bounded exponential-backoff reconnects and replay up to one second of recent PCM; exhausting retries closes the result stream so the room agent becomes unhealthy instead of remaining falsely connected.
+
+## Agent and audio-track lifecycle
+
+- An agent is keyed by room and provider and remains subscribed after it joins the LiveKit room.
+- Each incoming audio track creates a track-scoped ASR provider. A normal sender disconnect, unpublish, or end-of-track releases that provider while the agent stays in the room and waits for another track.
+- A provider start failure or unexpected provider error stops the agent so `/livekit/agent/status` cannot report a falsely healthy transcriber.
+- Explicit Admin stop remains the operation that disconnects the agent participant from the room.
+- The current lifecycle is designed for one active Audio Sender per room/provider agent.
 
 ## Environment variables
 

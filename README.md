@@ -1,16 +1,16 @@
 # Thai Verbatim Transcriber
 
-LiveKit-based real-time Thai speech transcription for publishers, viewers, and operators. Browser audio travels through WebRTC to a Go room agent, which transcribes with Google Cloud STT, Gemini Live, or Azure Speech and publishes text back through the LiveKit data channel.
+LiveKit-based real-time Thai speech transcription for publishers, viewers, and operators. Microphone or Chrome Tab audio travels through WebRTC to a Go room agent, which transcribes with Google Cloud STT, Gemini Live, Azure Speech, or GPT Realtime Whisper and publishes text back through the LiveKit data channel.
 
 ## Key features
 
-- One LiveKit workflow for microphone publishing and transcription.
+- One LiveKit workflow for microphone or Chrome Tab audio publishing and transcription.
 - Selectable Google, Gemini, Azure, or GPT Realtime Whisper room agents.
-- Interim and committed transcript presentation optimized for Thai text.
+- Replaceable Draft text, grouped final rows, a source-only Text view, and per-provider final-only text export.
 - Read-only viewer with room audio playback and provider filtering.
 - Admin-first room workspace for rooms, participants, share links, and agent lifecycle.
 - Secure, read-only transcript WebSocket links for external integrations.
-- Microphone-level visualization and explicit session state.
+- Input-level visualization, explicit session state, and consistent top-right notifications.
 
 ## Contents
 
@@ -146,7 +146,7 @@ Open:
 ## Application pages
 
 - **Admin:** the root workspace creates/selects rooms, starts or stops a configured provider Agent, and generates Stream, Viewer, and external transcript links.
-- **Stream:** publishes microphone audio through LiveKit after the operator explicitly connects; a room query parameter pre-fills the room and never requests microphone permission by itself.
+- **Stream:** selects Microphone or Chrome Tab before connecting, then publishes the chosen audio through LiveKit. A room query parameter only pre-fills the room and never requests capture permission by itself. Chrome Tab capture requires selecting a browser tab and enabling **Share tab audio** in the browser picker.
 - **Viewer:** joins without publishing, subscribes to room audio, and filters transcript rows by provider. A Viewer link with `autoconnect=1` connects automatically.
 
 ## ASR providers
@@ -154,8 +154,8 @@ Open:
 | Provider | Agent input | Default | Transcript behavior |
 | --- | --- | --- | --- |
 | Google | 48 kHz Linear16 PCM | `chirp_2`, `th-TH`, `asia-southeast1`, punctuation on | Interim snapshots and final utterances; reconnects before the five-minute limit |
-| Gemini | 16 kHz PCM | `gemini-3.5-live-translate-preview`, optional source hint, target defaults to `th` | Source chunks are retained; translated text uses the configured target metadata and model audio is discarded |
-| GPT Realtime Whisper | 24 kHz PCM16 | Realtime transcription intent with model `gpt-realtime-whisper`, source language defaults to `th` | Source interim deltas and completed finals; bounded reconnect with recent-audio replay; no translation output |
+| Gemini | 16 kHz PCM | `gemini-3.5-live-translate-preview`, optional source hint, target defaults to `th` | Replaceable source/translation Draft state is paired by application turn; finalized bilingual rows are available in Lines view and model audio is discarded |
+| GPT Realtime Whisper | 24 kHz PCM16 | Realtime transcription intent with model `gpt-realtime-whisper`, source language defaults to `th` | Replaceable source Draft deltas and completed finals; 650 ms silence/30-second hard boundary; bounded reconnect with recent-audio replay; no translation output |
 | Azure | 16 kHz PCM/WAV stream | Thai conversation recognition, `southeastasia` | Interim hypotheses and finalized phrases |
 
 Latency and interim frequency depend on service, model, region, network, and speech pattern. A provider may finalize an utterance without emitting interim updates.
@@ -197,6 +197,8 @@ Gemini target examples include `th`, `en`, `de`, `es`, `ja`, `ko`, `vi`, `zh-Han
 | `VITE_BACKEND_URL` | `http://localhost:3000` | Backend HTTP base URL |
 | `VITE_LIVEKIT_URL` | `ws://localhost:7880` | Browser LiveKit URL |
 | `VITE_CONTROL_API_KEY` | — | Shared control API key for trusted internal deployments; do not embed in a public frontend build |
+
+Frontend connection values are embedded by Vite at build time. There is no runtime Settings screen for changing the backend URL; update the environment and rebuild or restart Vite.
 
 ## Backend API
 
@@ -270,7 +272,11 @@ Transcript events use a room-scoped sequence:
 }
 ```
 
-Thai spacing is normalized in the Go agent. Google/Azure interim values update draft state by provider/speaker. Gemini source chunks are accumulated into one row per Live Translate turn even when marked non-final, and translated output is attached to that same grouped row. GPT Realtime Whisper uses the dedicated Realtime transcription intent, streams 24 kHz PCM16 continuously (including silence), publishes source interim deltas and completed finals, and retries recoverable WebSocket failures with bounded backoff plus up to one second of recent-audio replay.
+Thai spacing is normalized in the Go agent. Non-final source text is replaceable Draft state keyed by provider and speaker; Gemini also keys source/translation pairs by its application `turnId`. Final values become bounded committed rows. The Lines view can show Gemini translation beneath its source. Text view shows source only and marks any active Draft inline; per-provider `.txt` export contains finalized source text only. For readability, adjacent finals from the same provider, speaker, and language are displayed together when they arrive within 1.6 seconds and the previous chunk has no strong sentence-ending punctuation.
+
+The Stream page coalesces Draft rendering without delaying the first update or a final result: 33 ms for general interim traffic and 100 ms for Gemini. GPT Realtime Whisper continuously streams 24 kHz PCM16, commits after 650 ms of low-energy audio or a 30-second hard duration, and retries recoverable upstream failures with bounded backoff plus up to one second of recent-audio replay. Gemini uses the same 650 ms silence boundary with a fixed 500 ms translation grace period.
+
+When an Audio Sender disconnects or unpublishes its track normally, the track-scoped provider is released but the room agent remains connected and waits for the next audio track. An unexpected provider error stops the agent so Admin status does not report a falsely healthy transcriber.
 
 ## Development and testing
 
@@ -298,7 +304,7 @@ go build ./...
 - **Port in use:** inspect with `lsof -nP -iTCP:3000 -sTCP:LISTEN` or port `5173`, then stop the stale process.
 - **No provider available:** call `/providers`, verify credentials, and restart the backend after changing `.env`.
 - **Google model permission/location error:** use a model available in the configured region; the Thai realtime default is `chirp_2` in `asia-southeast1`.
-- **No interim text:** inspect provider interim logs. Some utterances finalize without interim updates; Gemini chunks appear as retained rows rather than drafts.
+- **No Draft text:** some utterances finalize without interim updates. For Gemini or GPT Realtime Whisper, also verify that PCM audio reaches the provider and that the local silence boundary can complete the active turn.
 - **IPv6 STUN timeout:** if ICE reaches `connected`, an IPv6 timeout usually indicates an unavailable IPv6 path, not a failed session.
 - **Opus build failure:** install `libopus`/`libopus-dev`, verify `pkg-config --modversion opus`, and ensure `go env CGO_ENABLED` returns `1`.
 
