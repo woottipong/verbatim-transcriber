@@ -1,13 +1,16 @@
 import React from 'react';
-import { AudioLines, CircleAlert, Mic, MicOff } from 'lucide-react';
+import { AudioLines, CircleAlert, Mic, MicOff, MonitorUp, VolumeX } from 'lucide-react';
 import { useAudioVisualizer } from '../hooks/useAudioVisualizer';
-import { ConnectionState } from '../types';
+import { AudioSource, ConnectionState } from '../types';
+import { AUDIO_SOURCE_LABELS } from '../lib/audioSources';
 import Visualizer from './Visualizer';
 
 interface MicrophoneInputStripProps {
   mediaStream: MediaStream | null;
+  audioSource: AudioSource;
   sourceLabel: string | null;
-  isMicrophoneEnabled: boolean;
+  isAudioInputEnabled: boolean;
+  isAudioInputStopped: boolean;
   connectionState: ConnectionState;
   variant?: 'default' | 'navbar';
   showIdentity?: boolean;
@@ -15,49 +18,58 @@ interface MicrophoneInputStripProps {
 
 const MicrophoneInputStrip: React.FC<MicrophoneInputStripProps> = ({
   mediaStream,
+  audioSource,
   sourceLabel,
-  isMicrophoneEnabled,
+  isAudioInputEnabled,
+  isAudioInputStopped,
   connectionState,
   variant = 'default',
   showIdentity = true,
 }) => {
-  const isListening = mediaStream !== null && isMicrophoneEnabled;
+  const isListening = mediaStream !== null && isAudioInputEnabled && !isAudioInputStopped;
   const isConnecting = connectionState === ConnectionState.CONNECTING;
   const isConnected = connectionState === ConnectionState.CONNECTED;
   const { bars, signalState, error } = useAudioVisualizer(mediaStream, isListening);
+  const SourceIcon = audioSource === 'chrome-tab' ? MonitorUp : Mic;
+  const InactiveIcon = audioSource === 'chrome-tab' ? VolumeX : MicOff;
+  const displaySourceLabel = sourceLabel || AUDIO_SOURCE_LABELS[audioSource];
 
   const status = error
-    ? { label: 'Mic Error', tone: 'error', icon: CircleAlert }
+    ? { label: 'Audio Error', tone: 'error', icon: CircleAlert }
+    : isAudioInputStopped
+      ? { label: 'Tab Audio Stopped', tone: 'warning', icon: CircleAlert }
     : isConnecting
-      ? { label: 'Starting Mic...', tone: 'listening', icon: Mic }
+      ? { label: audioSource === 'chrome-tab' ? 'Choose a Tab...' : 'Starting Mic...', tone: 'listening', icon: SourceIcon }
     : !isListening
-      ? { label: isConnected ? 'Muted' : 'Ready', tone: 'off', icon: MicOff }
+      ? { label: isConnected ? 'Muted' : 'Ready', tone: 'off', icon: InactiveIcon }
       : signalState === 'active'
         ? { label: 'Audio Detected', tone: 'active', icon: AudioLines }
         : signalState === 'low'
           ? { label: 'Input too quiet', tone: 'warning', icon: CircleAlert }
-          : { label: 'Active', tone: 'listening', icon: Mic };
+          : { label: 'Active', tone: 'listening', icon: SourceIcon };
   const StatusIcon = status.icon;
 
   return (
-    <section className={`microphone-strip microphone-strip--${variant} ${showIdentity ? '' : 'microphone-strip--compact'}`} aria-labelledby={showIdentity ? 'microphone-input-heading' : undefined} aria-label={showIdentity ? undefined : 'Microphone waveform and status'}>
+    <section className={`microphone-strip microphone-strip--${variant} ${showIdentity ? '' : 'microphone-strip--compact'}`} aria-labelledby={showIdentity ? 'audio-input-heading' : undefined} aria-label={showIdentity ? undefined : 'Audio input waveform and status'}>
       {showIdentity && (
         <div className="microphone-strip__identity">
           <span className="microphone-strip__icon" aria-hidden="true">
-            <Mic size={18} />
+            <SourceIcon size={18} />
           </span>
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
-              <h2 id="microphone-input-heading" className="truncate text-sm font-semibold text-slate-100">
-                Microphone Status
+              <h2 id="audio-input-heading" className="truncate text-sm font-semibold text-slate-100">
+                Audio Input Status
               </h2>
-              {sourceLabel && <span className="microphone-strip__source">{sourceLabel}</span>}
+              <span className="microphone-strip__source">{displaySourceLabel}</span>
             </div>
             <p className="mt-0.5 text-xs text-slate-400">
               {isListening
                 ? 'Live Level'
                 : isConnecting
-                  ? 'Allow microphone access to start'
+                  ? audioSource === 'chrome-tab'
+                    ? 'Select a tab and enable Share tab audio'
+                    : 'Allow microphone access to start'
                   : 'Starts when you connect'}
             </p>
           </div>

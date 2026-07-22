@@ -134,9 +134,6 @@ func formatTranscriptLog(message TranscriptMessage) string {
 		transcriptLogValue(message.Speaker),
 		len(textRunes),
 	)
-	if !message.IsFinal {
-		return line
-	}
 
 	logText := message.Text
 	if len(textRunes) > maxLoggedTranscriptRunes {

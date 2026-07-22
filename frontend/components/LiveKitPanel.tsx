@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Radio, Users, Mic, MicOff, LogOut, Eraser } from 'lucide-react';
-import { TranscriptSegment, InterimTranscript, ConnectionState } from '../types';
+import { CircleAlert, Download, Radio, Users, Volume2, VolumeX, LogOut, Eraser } from 'lucide-react';
+import { TranscriptSegment, ConnectionState, AudioSource } from '../types';
 import { getLiveKitSessionPresentation } from '../lib/liveKitSession';
 import { shouldStickToLatest } from '../lib/transcriptViewport';
 import TranslationBlock from './TranslationBlock';
-import { formatLanguageLabel, isTranscriptTurnLive, normalizeLanguageTag } from '../lib/transcriptMessages';
+import { formatLanguageLabel, isTranscriptTurnLive, normalizeLanguageTag, type InterimTranscript } from '../lib/transcriptMessages';
 import { formatProviderName, hasSourceLanguageLabel, providerAccents, providerDraftClasses, providerFromAgentIdentity } from '../lib/providers';
+import { buildTranscriptFilename, downloadTranscriptText, formatTranscriptText } from '../lib/transcriptExport';
 
 interface LiveKitPanelProps {
   transcripts: TranscriptSegment[];
@@ -13,13 +14,15 @@ interface LiveKitPanelProps {
   connectionState: ConnectionState;
   isAgentConnected: boolean;
   agentIdentity: string | null;
-  isMicrophoneEnabled: boolean;
+  audioSource: AudioSource;
+  isAudioInputEnabled: boolean;
+  isAudioInputStopped: boolean;
   participantCount: number;
   error: string | null;
   roomName: string;
   onConnect: () => void;
   onDisconnect: () => void;
-  onToggleMicrophone: () => void;
+  onToggleAudioInput: () => void;
   onClear: () => void;
 }
 
@@ -44,24 +47,38 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
   connectionState,
   isAgentConnected,
   agentIdentity,
-  isMicrophoneEnabled,
+  audioSource,
+  isAudioInputEnabled,
+  isAudioInputStopped,
   participantCount,
   error,
   roomName,
   onConnect,
   onDisconnect,
-  onToggleMicrophone,
+  onToggleAudioInput,
   onClear,
 }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [isFollowingLatest, setIsFollowingLatest] = useState(true);
   const [viewMode, setViewMode] = useState<'timeline' | 'paragraph'>('timeline');
   const [selectedProvider, setSelectedProvider] = useState('');
+  const [exportError, setExportError] = useState<string | null>(null);
 
   const scrollToLatest = useCallback(() => {
     const anchors = scrollRef.current?.querySelectorAll<HTMLElement>('[data-transcript-end]');
     anchors?.forEach(anchor => anchor.scrollIntoView({ block: 'end' }));
   }, []);
+
+  const handleExportProvider = useCallback((provider: string, segments: TranscriptSegment[]) => {
+    try {
+      setExportError(null);
+      const text = formatTranscriptText(segments);
+      if (!text) return;
+      downloadTranscriptText(text, buildTranscriptFilename(roomName, provider));
+    } catch {
+      setExportError(`Unable to export ${formatProviderName(provider)} transcript.`);
+    }
+  }, [roomName]);
 
   useEffect(() => {
     if (!isFollowingLatest) return;
@@ -118,8 +135,10 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
 
   const session = getLiveKitSessionPresentation(
     connectionState,
-    isMicrophoneEnabled,
+    isAudioInputEnabled,
     isAgentConnected,
+    audioSource,
+    isAudioInputStopped,
   );
   const sessionToneDot = session.tone === 'ready'
     ? 'status-dot--live'
@@ -178,21 +197,26 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
           <div className="session-toolbar__actions">
             {!isConnected && !isConnecting && (
               <>
-                <button onClick={onConnect} disabled={!roomName.trim()} className="control-button control-button--primary" aria-label={roomName.trim() ? 'Connect microphone' : 'Room ID Required'}>
+                <button onClick={onConnect} disabled={!roomName.trim()} className="control-button control-button--primary" aria-label={roomName.trim() ? 'Connect audio' : 'Room ID Required'}>
                   {roomName.trim() ? 'Connect' : 'Room ID Required'}
                 </button>
               </>
             )}
             {isConnecting && (
-              <button disabled className="control-button control-button--primary" aria-label="Connecting microphone">
+              <button disabled className="control-button control-button--primary" aria-label="Connecting audio input">
                 <span className="status-dot status-dot--pending" aria-hidden="true" /> Connecting…
               </button>
             )}
             {isConnected && (
               <>
-                <button onClick={onToggleMicrophone} className="control-button control-button--quiet" aria-label={isMicrophoneEnabled ? 'Mute microphone' : 'Unmute microphone'}>
-                  {isMicrophoneEnabled ? <MicOff size={14} aria-hidden="true" /> : <Mic size={14} aria-hidden="true" />}
-                  {isMicrophoneEnabled ? 'Mute' : 'Unmute'}
+                <button
+                  onClick={onToggleAudioInput}
+                  disabled={isAudioInputStopped}
+                  className="control-button control-button--quiet disabled:cursor-not-allowed disabled:opacity-55"
+                  aria-label={isAudioInputStopped ? 'Tab audio stopped' : isAudioInputEnabled ? 'Mute audio input' : 'Resume audio input'}
+                >
+                  {isAudioInputEnabled ? <VolumeX size={14} aria-hidden="true" /> : <Volume2 size={14} aria-hidden="true" />}
+                  {isAudioInputStopped ? 'Stopped' : isAudioInputEnabled ? 'Mute' : 'Resume'}
                 </button>
                 <button onClick={onDisconnect} className="control-button control-button--danger" aria-label="Disconnect">
                   <LogOut size={14} aria-hidden="true" /> Disconnect
@@ -233,6 +257,13 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
         </div>
       )}
 
+      {exportError && (
+        <div className="flex items-center gap-2 border-b border-amber-300/25 bg-amber-300/5 px-4 py-2.5 text-sm text-amber-100" role="alert">
+          <CircleAlert size={15} aria-hidden="true" />
+          {exportError}
+        </div>
+      )}
+
       {isConnected && !isAgentConnected && (
         <div className="border-b border-amber-300/25 bg-amber-300/5 px-4 py-3 sm:px-5">
           <p className="text-sm text-amber-100">Connected. Waiting for transcriber to start...</p>
@@ -248,7 +279,9 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                 {connectionState === ConnectionState.DISCONNECTED
                   ? 'Disconnected'
                   : session.canSpeak
-                    ? 'Start speaking. Your transcript will show here.'
+                    ? audioSource === 'chrome-tab'
+                      ? 'Play audio in the shared tab. Your transcript will show here.'
+                      : 'Start speaking. Your transcript will show here.'
                     : session.headline}
               </p>
               <p className="mt-2 text-sm leading-6 text-slate-400">
@@ -285,6 +318,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
               const providerTranscripts = group.transcripts;
               const providerInterims = group.interims;
               const hasProviderContent = providerTranscripts.length > 0 || providerInterims.length > 0;
+              const exportText = formatTranscriptText(providerTranscripts);
               
               return (
                 <section
@@ -297,7 +331,19 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                       <span className={`w-1 h-3 rounded ${providerAccents[provider] ?? 'bg-slate-500'}`} aria-hidden="true" />
                       {formatProviderName(provider)}
                     </span>
-                    <span className="tabular-nums text-slate-400 font-medium">{providerTranscripts.length} lines</span>
+                    <span className="flex items-center gap-2">
+                      <span className="tabular-nums text-slate-400 font-medium">{providerTranscripts.length} lines</span>
+                      <button
+                        type="button"
+                        disabled={!exportText}
+                        onClick={() => handleExportProvider(provider, providerTranscripts)}
+                        aria-label={`Export ${formatProviderName(provider)} transcript as text`}
+                        className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Download size={13} aria-hidden="true" />
+                        Export .txt
+                      </button>
+                    </span>
                   </div>
                   
                   <div 
@@ -359,7 +405,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                         })}
                       </div>
                     ) : (
-                      <p className="max-w-[75ch] break-words text-[1.05rem] font-medium leading-8 text-slate-100">
+                      <p className="w-full break-words text-[1.05rem] font-medium leading-8 text-slate-100">
                         {providerTranscripts.map(segment => (
                           <React.Fragment key={segment.id}>
                             <span lang={normalizeLanguageTag(segment.languageCode)} dir="auto">

@@ -42,6 +42,8 @@ export enum ConnectionState {
   ERROR = 'ERROR',
 }
 
+export type AudioSource = 'microphone' | 'chrome-tab';
+
 // ============================================
 // Configuration Types
 // ============================================

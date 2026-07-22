@@ -190,12 +190,12 @@ func TestFormatTranscriptLog(t *testing.T) {
 		want    string
 	}{
 		{
-			name: "interim logs metadata without cumulative text",
+			name: "interim logs metadata and text",
 			message: TranscriptMessage{
 				Text: "growing interim text", Provider: "gemini", Speaker: "user-1",
 				Role: domain.TranscriptRoleSource, LanguageCode: "th", TurnID: "gemini-12",
 			},
-			want: "🟡 [Transcript] state=interim provider=gemini role=source turn=gemini-12 lang=th speaker=user-1 chars=20",
+			want: "🟡 [Transcript] state=interim provider=gemini role=source turn=gemini-12 lang=th speaker=user-1 chars=20 text=\"growing interim text\"",
 		},
 		{
 			name: "final logs paired translation metadata and text",

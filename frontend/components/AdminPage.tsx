@@ -481,7 +481,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                     <section className="admin-section" aria-labelledby="share-heading">
                                         <SectionHeading id="share-heading" icon={<Link2 size={16} />} title="Room Access Links" detail="Connect to send audio or view transcripts." />
                                         <div className="mt-4 space-y-2">
-                                            <ShareRow icon={<Radio size={16} />} label="Audio Sender" description="Send microphone audio" onOpen={() => openLink(streamUrl)} onCopy={() => void copyText(streamUrl, 'Audio Sender link')} />
+                                            <ShareRow icon={<Radio size={16} />} label="Audio Sender" description="Send microphone or Chrome Tab audio" onOpen={() => openLink(streamUrl)} onCopy={() => void copyText(streamUrl, 'Audio Sender link')} />
                                             <ShareRow icon={<Eye size={16} />} label="Viewer" description="Read-only live transcript" onOpen={() => openLink(viewerUrl)} onCopy={() => void copyText(viewerUrl, 'Viewer link')} />
                                         </div>
                                     </section>

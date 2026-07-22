@@ -7,8 +7,9 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Room, RoomEvent, DataPacket_Kind, LocalParticipant, RemoteParticipant, Track } from 'livekit-client';
-import { ConnectionState, TranscriptSegment } from '../types';
+import { Room, RoomEvent, DataPacket_Kind, LocalAudioTrack, LocalParticipant, RemoteParticipant, Track } from 'livekit-client';
+import { AudioSource, ConnectionState, TranscriptSegment } from '../types';
+import { AUDIO_SOURCE_LABELS, captureChromeTabAudio, getChromeTabCaptureError } from '../lib/audioSources';
 import { TranscriptUpdateBuffer } from '../lib/transcriptUpdates';
 import { appendBounded } from '../lib/runtime';
 import { getControlAuthHeaders } from '../lib/runtime';
@@ -43,6 +44,7 @@ export interface UseLiveKitOptions {
     tokenEndpoint: string;   // Backend token endpoint (http://localhost:3000/livekit/token)
     roomName: string;        // Room name for ASR session
     audioDeviceId?: string;  // Selected microphone device, or default
+    audioSource?: AudioSource;
     autoConnect?: boolean;   // Auto-connect on mount
 }
 
@@ -54,11 +56,14 @@ export interface UseLiveKitReturn {
     room: Room | null;
     localParticipant: LocalParticipant | null;
     mediaStream: MediaStream | null;
-    isMicrophoneEnabled: boolean;
+    audioSource: AudioSource;
+    audioSourceLabel: string;
+    isAudioInputEnabled: boolean;
+    isAudioInputStopped: boolean;
     participants: RemoteParticipant[];
     connect: () => Promise<void>;
     disconnect: () => void;
-    toggleMicrophone: () => Promise<void>;
+    toggleAudioInput: () => Promise<void>;
     clearTranscripts: () => void;
     isAgentConnected: boolean;
     agentIdentity: string | null;  // Agent identity/name
@@ -71,6 +76,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         tokenEndpoint,
         roomName,
         audioDeviceId,
+        audioSource = 'microphone',
         autoConnect = false,
     } = options;
 
@@ -82,7 +88,8 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const [room, setRoom] = useState<Room | null>(null);
     const [localParticipant, setLocalParticipant] = useState<LocalParticipant | null>(null);
     const [mediaStream, setMediaStream] = useState<MediaStream | null>(null);
-    const [isMicrophoneEnabled, setIsMicrophoneEnabled] = useState(false);
+    const [isAudioInputEnabled, setIsAudioInputEnabled] = useState(false);
+    const [isAudioInputStopped, setIsAudioInputStopped] = useState(false);
     const [participants, setParticipants] = useState<RemoteParticipant[]>([]);
     const [connectedAgents, setConnectedAgents] = useState<string[]>([]);
 
@@ -92,6 +99,21 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const segmentIdRef = useRef(0);
     const connectionAttemptRef = useRef(0);
     const translationsByTurnRef = useRef<Map<string, PendingTranslation>>(new Map());
+    const displayStreamRef = useRef<MediaStream | null>(null);
+    const tabAudioTrackRef = useRef<LocalAudioTrack | null>(null);
+
+    const cleanupTabCapture = useCallback(() => {
+        const localTrack = tabAudioTrackRef.current;
+        tabAudioTrackRef.current = null;
+        if (localTrack && roomRef.current) {
+            void roomRef.current.localParticipant.unpublishTrack(localTrack, false).catch(() => {
+                console.warn('[LiveKit] Failed to unpublish Chrome Tab audio during cleanup');
+            });
+        }
+        const displayStream = displayStreamRef.current;
+        displayStreamRef.current = null;
+        displayStream?.getTracks().forEach(track => track.stop());
+    }, []);
 
     const applyTranscriptUpdate = useCallback((message: BufferedTranscriptMessage) => {
         const provider = message.provider || 'unknown';
@@ -237,10 +259,21 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const connect = useCallback(async () => {
         const connectionAttempt = ++connectionAttemptRef.current;
         let newRoom: Room | null = null;
+        let capturedTab: Awaited<ReturnType<typeof captureChromeTabAudio>> | null = null;
 
         try {
             setConnectionState(ConnectionState.CONNECTING);
             setError(null);
+            setIsAudioInputStopped(false);
+
+            if (audioSource === 'chrome-tab') {
+                capturedTab = await captureChromeTabAudio();
+                if (connectionAttempt !== connectionAttemptRef.current) {
+                    capturedTab.stream.getTracks().forEach(track => track.stop());
+                    return;
+                }
+                displayStreamRef.current = capturedTab.stream;
+            }
 
             // Get token
             const token = await fetchToken();
@@ -281,11 +314,12 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 setRoom(null);
                 setLocalParticipant(null);
                 setMediaStream(null);
-                setIsMicrophoneEnabled(false);
+                setIsAudioInputEnabled(false);
+                setIsAudioInputStopped(false);
                 setParticipants([]);
+                setConnectedAgents([]);
                 setConnectionState(ConnectionState.DISCONNECTED);
-                setIsAgentConnected(false);
-                setAgentIdentity(null);
+                cleanupTabCapture();
             });
 
             newRoom.on(RoomEvent.Reconnecting, () => {
@@ -313,21 +347,47 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 return;
             }
 
-            // Enable microphone
-            const microphonePublication = await newRoom.localParticipant.setMicrophoneEnabled(true);
-            if (connectionAttempt !== connectionAttemptRef.current) {
-                newRoom.disconnect();
-                return;
-            }
-            console.log('[LiveKit] 🎤 Microphone enabled');
+            if (audioSource === 'chrome-tab') {
+                if (!capturedTab) throw new Error('Chrome Tab audio capture was not available.');
+                if (capturedTab.audioTrack.readyState === 'ended') {
+                    throw new Error('Tab audio stopped before the connection completed.');
+                }
 
-            const microphoneTrack = microphonePublication?.track?.mediaStreamTrack
-                ?? newRoom.localParticipant
-                    .getTrackPublication(Track.Source.Microphone)
-                    ?.track
-                    ?.mediaStreamTrack;
-            setMediaStream(microphoneTrack ? new MediaStream([microphoneTrack]) : null);
-            setIsMicrophoneEnabled(true);
+                const localTrack = new LocalAudioTrack(capturedTab.audioTrack, undefined, true);
+                tabAudioTrackRef.current = localTrack;
+                capturedTab.audioTrack.addEventListener('ended', () => {
+                    if (displayStreamRef.current !== capturedTab?.stream) return;
+                    setMediaStream(null);
+                    setIsAudioInputEnabled(false);
+                    setIsAudioInputStopped(true);
+                }, { once: true });
+                await newRoom.localParticipant.publishTrack(localTrack, {
+                    source: Track.Source.Microphone,
+                    name: 'chrome-tab-audio',
+                });
+                if (connectionAttempt !== connectionAttemptRef.current) {
+                    newRoom.disconnect();
+                    cleanupTabCapture();
+                    return;
+                }
+                console.log('[LiveKit] 🔊 Chrome Tab audio enabled');
+                setMediaStream(new MediaStream([capturedTab.audioTrack]));
+            } else {
+                const microphonePublication = await newRoom.localParticipant.setMicrophoneEnabled(true);
+                if (connectionAttempt !== connectionAttemptRef.current) {
+                    newRoom.disconnect();
+                    return;
+                }
+                console.log('[LiveKit] 🎤 Microphone enabled');
+
+                const microphoneTrack = microphonePublication?.track?.mediaStreamTrack
+                    ?? newRoom.localParticipant
+                        .getTrackPublication(Track.Source.Microphone)
+                        ?.track
+                        ?.mediaStreamTrack;
+                setMediaStream(microphoneTrack ? new MediaStream([microphoneTrack]) : null);
+            }
+            setIsAudioInputEnabled(true);
             setConnectionState(ConnectionState.CONNECTED);
 
             setRoom(newRoom);
@@ -345,6 +405,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             }
 
         } catch (err) {
+            cleanupTabCapture();
             if (newRoom) {
                 if (roomRef.current === newRoom) {
                     roomRef.current = null;
@@ -353,21 +414,35 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             }
             if (connectionAttempt !== connectionAttemptRef.current) return;
             console.error('[LiveKit] Connection failed:', err);
-            setError(err instanceof Error ? err.message : 'Connection failed');
+            setError(audioSource === 'chrome-tab'
+                ? getChromeTabCaptureError(err)
+                : err instanceof Error ? err.message : 'Connection failed');
             setLocalParticipant(null);
             setMediaStream(null);
-            setIsMicrophoneEnabled(false);
-            setConnectionState(ConnectionState.ERROR);
+            setIsAudioInputEnabled(false);
+            setConnectionState(audioSource === 'chrome-tab' && !newRoom
+                ? ConnectionState.DISCONNECTED
+                : ConnectionState.ERROR);
         }
-    }, [serverUrl, fetchToken, roomName, audioDeviceId, handleDataReceived, handleParticipantConnected, handleParticipantDisconnected]);
+    }, [serverUrl, fetchToken, roomName, audioDeviceId, audioSource, cleanupTabCapture, handleDataReceived, handleParticipantConnected, handleParticipantDisconnected]);
 
-    const toggleMicrophone = useCallback(async () => {
+    const toggleAudioInput = useCallback(async () => {
         const currentRoom = roomRef.current;
         if (!currentRoom || connectionState !== ConnectionState.CONNECTED) return;
 
-        const shouldEnable = !isMicrophoneEnabled;
+        const shouldEnable = !isAudioInputEnabled;
         try {
             setError(null);
+            if (audioSource === 'chrome-tab') {
+                const track = tabAudioTrackRef.current;
+                if (!track || isAudioInputStopped) return;
+                if (shouldEnable) await track.unmute();
+                else await track.mute();
+                if (roomRef.current !== currentRoom) return;
+                setIsAudioInputEnabled(shouldEnable);
+                return;
+            }
+
             const publication = await currentRoom.localParticipant.setMicrophoneEnabled(shouldEnable);
             if (roomRef.current !== currentRoom) return;
 
@@ -377,15 +452,15 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                     ?.track
                     ?.mediaStreamTrack;
 
-            setIsMicrophoneEnabled(shouldEnable);
+            setIsAudioInputEnabled(shouldEnable);
             if (shouldEnable && microphoneTrack) {
                 setMediaStream(new MediaStream([microphoneTrack]));
             }
-        } catch (microphoneError) {
-            console.error('[LiveKit] Failed to update microphone:', microphoneError);
-            setError(microphoneError instanceof Error ? microphoneError.message : 'Failed to update microphone');
+        } catch (audioInputError) {
+            console.error('[LiveKit] Failed to update audio input:', audioInputError);
+            setError(audioInputError instanceof Error ? audioInputError.message : 'Failed to update audio input');
         }
-    }, [connectionState, isMicrophoneEnabled]);
+    }, [audioSource, connectionState, isAudioInputEnabled, isAudioInputStopped]);
 
     // Disconnect from room
     const disconnect = useCallback(() => {
@@ -394,6 +469,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         translationsByTurnRef.current.clear();
         setInterimTranscripts(new Map());
         const currentRoom = roomRef.current;
+        cleanupTabCapture();
         roomRef.current = null;
         if (currentRoom) {
             console.log('[LiveKit] 🔌 Disconnecting...');
@@ -402,11 +478,12 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         setRoom(null);
         setLocalParticipant(null);
         setMediaStream(null);
-        setIsMicrophoneEnabled(false);
+        setIsAudioInputEnabled(false);
+        setIsAudioInputStopped(false);
         setParticipants([]);
         setConnectedAgents([]);
         setConnectionState(ConnectionState.DISCONNECTED);
-    }, []);
+    }, [cleanupTabCapture]);
 
     // Clear transcripts
     const clearTranscripts = useCallback(() => {
@@ -428,6 +505,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             connectionAttemptRef.current++;
             transcriptUpdatesRef.current?.clear();
             translationsByTurnRef.current.clear();
+            cleanupTabCapture();
             if (roomRef.current) {
                 roomRef.current.disconnect();
             }
@@ -442,11 +520,14 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         room,
         localParticipant,
         mediaStream,
-        isMicrophoneEnabled,
+        audioSource,
+        audioSourceLabel: AUDIO_SOURCE_LABELS[audioSource],
+        isAudioInputEnabled,
+        isAudioInputStopped,
         participants,
         connect,
         disconnect,
-        toggleMicrophone,
+        toggleAudioInput,
         clearTranscripts,
         isAgentConnected: connectedAgents.length > 0,
         agentIdentity: connectedAgents.length > 0 ? connectedAgents.join(',') : null,
