@@ -86,6 +86,30 @@ func TestHandleTranscriptionResultsStopsRunningAgentWhenProviderFails(t *testing
 	}
 }
 
+func TestHandleTranscriptionResultsKeepsAgentInRoomAfterTrackProviderStopsNormally(t *testing.T) {
+	results := make(chan domain.TranscriptResult)
+	close(results)
+	provider := &lifecycleProvider{results: results}
+	cancelled := false
+	agent := &Agent{
+		isRunning:   true,
+		asrProvider: provider,
+		cancel:      func() { cancelled = true },
+	}
+
+	agent.handleTranscriptionResults(provider, nil)
+
+	if !agent.IsRunning() {
+		t.Fatal("agent left the room after a track-scoped provider stopped normally")
+	}
+	if cancelled {
+		t.Fatal("agent context was cancelled after a track-scoped provider stopped normally")
+	}
+	if agent.asrProvider != nil {
+		t.Fatal("finished track provider remained attached to the room agent")
+	}
+}
+
 func TestNewTranscriptMessageNormalizesThaiSpacing(t *testing.T) {
 	message := newTranscriptMessage(
 		domain.TranscriptResult{Text: "ทด สอบ ถอด ความ 1 2 3 4", IsFinal: true},

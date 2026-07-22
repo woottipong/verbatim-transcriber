@@ -613,7 +613,24 @@ func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, particip
 		}
 	}
 
-	a.stopAfterProviderTermination(provider, provider.Err())
+	if providerErr := provider.Err(); providerErr != nil {
+		a.stopAfterProviderTermination(provider, providerErr)
+		return
+	}
+
+	if a.releaseTrackProvider(provider) {
+		log.Printf("ℹ️ [Agent] ASR provider %s stopped with its audio track; agent remains in room", provider.Name())
+	}
+}
+
+func (a *Agent) releaseTrackProvider(provider domain.ASRProvider) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.isRunning || a.stopRequested || a.asrProvider != provider {
+		return false
+	}
+	a.asrProvider = nil
+	return true
 }
 
 func (a *Agent) stopAfterProviderTermination(provider domain.ASRProvider, providerErr error) {
