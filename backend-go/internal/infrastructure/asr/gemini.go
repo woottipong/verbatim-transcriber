@@ -56,62 +56,6 @@ type geminiSession interface {
 
 type geminiConnectFunc func(context.Context, string) (geminiSession, error)
 
-type geminiReconnectBuffer struct {
-	data     []byte
-	capacity int
-	dropped  int64
-}
-
-func newGeminiReconnectBuffer(capacity int) *geminiReconnectBuffer {
-	return &geminiReconnectBuffer{
-		data:     make([]byte, 0, max(capacity, 0)),
-		capacity: max(capacity, 0),
-	}
-}
-
-func (b *geminiReconnectBuffer) Add(data []byte) {
-	if len(data) == 0 {
-		return
-	}
-	if b.capacity == 0 {
-		b.dropped += int64(len(data))
-		return
-	}
-	overflow := len(b.data) + len(data) - b.capacity
-	if overflow <= 0 {
-		b.data = append(b.data, data...)
-		return
-	}
-	b.dropped += int64(overflow)
-	if overflow >= len(b.data) {
-		skip := overflow - len(b.data)
-		b.data = append(b.data[:0], data[skip:]...)
-		return
-	}
-	b.data = append(b.data[overflow:], data...)
-}
-
-func (b *geminiReconnectBuffer) Reset() {
-	b.data = b.data[:0]
-	b.dropped = 0
-}
-
-func (b *geminiReconnectBuffer) Drain() ([]byte, int64) {
-	data := append([]byte(nil), b.data...)
-	dropped := b.dropped
-	b.Reset()
-	return data, dropped
-}
-
-func (b *geminiReconnectBuffer) RestoreFront(data []byte, dropped int64) {
-	tail := append([]byte(nil), b.data...)
-	tailDropped := b.dropped
-	b.Reset()
-	b.dropped = dropped + tailDropped
-	b.Add(data)
-	b.Add(tail)
-}
-
 type GeminiProvider struct {
 	session                geminiSession
 	results                chan domain.TranscriptResult
@@ -146,7 +90,7 @@ type GeminiProvider struct {
 	boundaryVersion        uint64
 	rotationTimer          *time.Timer
 	rotationAfter          time.Duration
-	audioBuf               *geminiReconnectBuffer
+	audioBuf               *reconnectAudioBuffer
 	connect                geminiConnectFunc
 	reconnectDelay         func(int) time.Duration
 	now                    func() time.Time
@@ -185,7 +129,7 @@ func NewGeminiProvider(ctx context.Context, cfg GeminiConfig) (*GeminiProvider, 
 		done:           make(chan struct{}),
 		segmenter:      newGeminiSegmenter(normalized.SampleRate),
 		rotationAfter:  geminiConnectionRotation,
-		audioBuf:       newGeminiReconnectBuffer(normalized.SampleRate * 2 * int(geminiReconnectAudio/time.Second)),
+		audioBuf:       newReconnectAudioBuffer(normalized.SampleRate * 2 * int(geminiReconnectAudio/time.Second)),
 		reconnectDelay: defaultGeminiReconnectDelay,
 		now:            time.Now,
 	}, nil

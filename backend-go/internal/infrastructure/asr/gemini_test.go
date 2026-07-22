@@ -518,8 +518,8 @@ func TestGeminiLiveConnectConfigEnablesDeveloperAPISessionManagement(t *testing.
 	}
 }
 
-func TestGeminiReconnectBufferReportsDroppedAudio(t *testing.T) {
-	buffer := newGeminiReconnectBuffer(4)
+func TestReconnectAudioBufferReportsDroppedAudio(t *testing.T) {
+	buffer := newReconnectAudioBuffer(4)
 	buffer.Add([]byte{1, 2, 3})
 	buffer.Add([]byte{4, 5, 6})
 
