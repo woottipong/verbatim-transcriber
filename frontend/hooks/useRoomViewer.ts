@@ -108,7 +108,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     }, []);
 
     // Fetch token from backend (as viewer, not publishing)
-    const fetchToken = useCallback(async (roomName: string): Promise<string> => {
+    const fetchToken = useCallback(async (roomName: string): Promise<{ token: string; wsUrl?: string }> => {
         const identity = `viewer-${Date.now()}`;
 
         const response = await fetch(tokenEndpoint, {
@@ -128,7 +128,10 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         }
 
         const data = await response.json();
-        return data.token;
+        return {
+            token: data.token,
+            wsUrl: data.wsUrl || data.ws_url,
+        };
     }, [tokenEndpoint]);
 
     // Handle audio track subscription
@@ -321,7 +324,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             setCurrentRoomName(roomName);
 
             // Get token
-            const token = await fetchToken(roomName);
+            const { token, wsUrl } = await fetchToken(roomName);
             if (connectionAttempt !== connectionAttemptRef.current) return;
             console.log('[Viewer] 🎫 Token received for room:', roomName);
 
@@ -372,7 +375,8 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             roomRef.current = newRoom;
 
             // Connect (viewer - no local tracks)
-            await newRoom.connect(import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880', token, {
+            const serverUrl = wsUrl || import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880';
+            await newRoom.connect(serverUrl, token, {
                 autoSubscribe: true,
             });
             if (connectionAttempt !== connectionAttemptRef.current) {

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { TranscriptUpdateBuffer } from './transcriptUpdates.ts';
+import {
+    GEMINI_TRANSCRIPT_UPDATE_INTERVAL_MS,
+    TranscriptUpdateBuffer,
+} from './transcriptUpdates.ts';
 import type { TranscriptMessage } from './transcriptMessages.ts';
 
 interface Update {
@@ -69,6 +72,69 @@ test('keeps independent interim updates for different speakers', () => {
     flushNext();
 
     assert.deepEqual(delivered.map(update => update.text), ['หนึ่ง', 'สอง', 'หนึ่งล่าสุด']);
+});
+
+test('coalesces Gemini source and translation keys at 100 ms', () => {
+    const scheduled = new Map<number, () => void>();
+    const delivered: Update[] = [];
+    let nextTimerId = 0;
+    const buffer = new TranscriptUpdateBuffer<Update>(
+        update => delivered.push(update),
+        GEMINI_TRANSCRIPT_UPDATE_INTERVAL_MS,
+        callback => {
+            const timerId = ++nextTimerId;
+            scheduled.set(timerId, callback);
+            return timerId;
+        },
+        timerId => scheduled.delete(timerId),
+        update => update.isFinal,
+        update => update.speaker,
+        'immediate',
+    );
+
+    buffer.push({ text: 'source-1', isFinal: false, speaker: 'source' });
+    buffer.push({ text: 'source-2', isFinal: false, speaker: 'source' });
+    buffer.push({ text: 'translation-1', isFinal: false, speaker: 'translation' });
+    buffer.push({ text: 'source-3', isFinal: false, speaker: 'source' });
+    buffer.push({ text: 'translation-2', isFinal: false, speaker: 'translation' });
+
+    const next = scheduled.entries().next().value as [number, () => void];
+    scheduled.delete(next[0]);
+    next[1]();
+    assert.deepEqual(delivered.map(update => update.text), [
+        'source-1',
+        'source-3',
+        'translation-2',
+    ]);
+});
+
+test('flushes the latest pending Gemini update and final immediately', () => {
+    const scheduled = new Map<number, () => void>();
+    const delivered: Update[] = [];
+    let nextTimerId = 0;
+    const buffer = new TranscriptUpdateBuffer<Update>(
+        update => delivered.push(update),
+        GEMINI_TRANSCRIPT_UPDATE_INTERVAL_MS,
+        callback => {
+            const timerId = ++nextTimerId;
+            scheduled.set(timerId, callback);
+            return timerId;
+        },
+        timerId => scheduled.delete(timerId),
+        update => update.isFinal,
+        update => update.speaker,
+        'immediate',
+    );
+
+    buffer.push({ text: 'source-1', isFinal: false, speaker: 'source' });
+    buffer.push({ text: 'source-2', isFinal: false, speaker: 'source' });
+    buffer.push({ text: 'source-final', isFinal: true, speaker: 'source' });
+
+    assert.deepEqual(delivered.map(update => update.text), [
+        'source-1',
+        'source-2',
+        'source-final',
+    ]);
 });
 
 test('validates transcript packets and derives a provider-speaker key', async () => {

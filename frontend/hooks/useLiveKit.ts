@@ -10,7 +10,11 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Room, RoomEvent, DataPacket_Kind, LocalAudioTrack, LocalParticipant, RemoteParticipant, Track } from 'livekit-client';
 import { AudioSource, ConnectionState, TranscriptSegment } from '../types';
 import { AUDIO_SOURCE_LABELS, captureChromeTabAudio, getChromeTabCaptureError } from '../lib/audioSources';
-import { TranscriptUpdateBuffer } from '../lib/transcriptUpdates';
+import {
+    GEMINI_TRANSCRIPT_UPDATE_INTERVAL_MS,
+    INTERIM_TRANSCRIPT_UPDATE_INTERVAL_MS,
+    TranscriptUpdateBuffer,
+} from '../lib/transcriptUpdates';
 import { appendBounded } from '../lib/runtime';
 import { getControlAuthHeaders } from '../lib/runtime';
 import {
@@ -36,8 +40,6 @@ interface BufferedTranscriptMessage extends TranscriptMessage {
     key: string;
     sourceIdentity: string;
 }
-
-const INTERIM_UPDATE_INTERVAL_MS = 33;
 
 export interface UseLiveKitOptions {
     serverUrl: string;       // LiveKit server URL (ws://localhost:7880)
@@ -154,11 +156,37 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     if (transcriptUpdatesRef.current === null) {
         transcriptUpdatesRef.current = new TranscriptUpdateBuffer<BufferedTranscriptMessage>(
             applyTranscriptUpdate,
-            INTERIM_UPDATE_INTERVAL_MS,
+            INTERIM_TRANSCRIPT_UPDATE_INTERVAL_MS,
             undefined,
             undefined,
             message => message.isFinal,
             message => message.key,
+        );
+    }
+
+    const applyGeminiUpdate = useCallback((message: BufferedTranscriptMessage) => {
+        if (message.role === 'translation') {
+            translationsByTurnRef.current = storePendingTranslation(
+                translationsByTurnRef.current,
+                message,
+                message.sourceIdentity,
+            );
+            setTranscripts(prev => attachTranslation(prev, message, message.sourceIdentity).transcripts);
+            return;
+        }
+        applyTranscriptUpdate(message);
+    }, [applyTranscriptUpdate]);
+
+    const geminiTranscriptUpdatesRef = useRef<TranscriptUpdateBuffer<BufferedTranscriptMessage> | null>(null);
+    if (geminiTranscriptUpdatesRef.current === null) {
+        geminiTranscriptUpdatesRef.current = new TranscriptUpdateBuffer<BufferedTranscriptMessage>(
+            applyGeminiUpdate,
+            GEMINI_TRANSCRIPT_UPDATE_INTERVAL_MS,
+            undefined,
+            undefined,
+            message => message.isFinal,
+            message => message.key,
+            'immediate',
         );
     }
 
@@ -201,6 +229,11 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 sourceIdentity,
             };
 
+            if (isAppendOnlyInterimProvider(message.provider || '')) {
+                geminiTranscriptUpdatesRef.current?.push(bufferedMessage);
+                return;
+            }
+
             if (message.role === 'translation') {
                 translationsByTurnRef.current = storePendingTranslation(
                     translationsByTurnRef.current,
@@ -211,18 +244,11 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 return;
             }
 
-            // Gemini Live emits committed input chunks as interim packets.
-            // Preserve every chunk so the transcript reads like ordinary STT.
-            if (isAppendOnlyInterimProvider(message.provider || '')) {
-                applyTranscriptUpdate(bufferedMessage);
-                return;
-            }
-
             transcriptUpdatesRef.current?.push(bufferedMessage);
         } catch (err) {
             console.error('[LiveKit] Failed to parse transcript data:', err);
         }
-    }, [applyTranscriptUpdate]);
+    }, []);
 
     // Handle participant connected (check for agent)
     const handleParticipantConnected = useCallback((participant: RemoteParticipant) => {
@@ -246,6 +272,9 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
 
         if (participant.identity.startsWith('agent-') || participant.identity === 'asr-agent') {
             setConnectedAgents(prev => prev.filter(id => id !== participant.identity));
+            if (participant.identity === 'agent-gemini') {
+                geminiTranscriptUpdatesRef.current?.clear();
+            }
             setInterimTranscripts(prev => clearInterimsBySource(prev, participant.identity));
             translationsByTurnRef.current = clearPendingTranslationsBySource(
                 translationsByTurnRef.current,
@@ -309,6 +338,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                 console.log('[LiveKit] ❌ Disconnected from room');
                 roomRef.current = null;
                 transcriptUpdatesRef.current?.clear();
+                geminiTranscriptUpdatesRef.current?.clear();
                 translationsByTurnRef.current.clear();
                 setInterimTranscripts(new Map());
                 setRoom(null);
@@ -405,6 +435,8 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             }
 
         } catch (err) {
+            transcriptUpdatesRef.current?.clear();
+            geminiTranscriptUpdatesRef.current?.clear();
             cleanupTabCapture();
             if (newRoom) {
                 if (roomRef.current === newRoom) {
@@ -466,6 +498,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     const disconnect = useCallback(() => {
         connectionAttemptRef.current++;
         transcriptUpdatesRef.current?.clear();
+        geminiTranscriptUpdatesRef.current?.clear();
         translationsByTurnRef.current.clear();
         setInterimTranscripts(new Map());
         const currentRoom = roomRef.current;
@@ -488,6 +521,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
     // Clear transcripts
     const clearTranscripts = useCallback(() => {
         transcriptUpdatesRef.current?.clear();
+        geminiTranscriptUpdatesRef.current?.clear();
         translationsByTurnRef.current.clear();
         setTranscripts([]);
         setInterimTranscripts(new Map());
@@ -504,6 +538,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
         return () => {
             connectionAttemptRef.current++;
             transcriptUpdatesRef.current?.clear();
+            geminiTranscriptUpdatesRef.current?.clear();
             translationsByTurnRef.current.clear();
             cleanupTabCapture();
             if (roomRef.current) {

@@ -56,25 +56,6 @@ func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config) error {
 		})
 	}
 
-	ctx, cancel := context.WithTimeout(c.UserContext(), 5*time.Second)
-	defer cancel()
-	roomClient := lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
-	rooms, err := roomClient.ListRooms(ctx, &livekit.ListRoomsRequest{})
-	if err != nil {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
-			"error": "Failed to verify room availability",
-		})
-	}
-	if !containsRoom(rooms.Rooms, req.RoomName) {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"code":  "room_not_found",
-			"error": "Room does not exist or is no longer available",
-		})
-	}
-
-	// Create access token
-	at := auth.NewAccessToken(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
-
 	// Set default permissions (all true if not specified)
 	canPublish := true
 	canSubscribe := true
@@ -90,6 +71,26 @@ func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config) error {
 		canPublishData = *req.CanPublishData
 	}
 
+	// Only verify existing room for subscribe-only requests (viewers).
+	// Publishers are allowed to join/create rooms on demand.
+	if !canPublish {
+		ctx, cancel := context.WithTimeout(c.UserContext(), 5*time.Second)
+		defer cancel()
+		roomClient := lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
+		rooms, err := roomClient.ListRooms(ctx, &livekit.ListRoomsRequest{})
+		if err != nil {
+			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
+				"error": "Failed to verify room availability",
+			})
+		}
+		if !containsRoom(rooms.Rooms, req.RoomName) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"code":  "room_not_found",
+				"error": "Room does not exist or is no longer available",
+			})
+		}
+	}
+
 	// Create video grant with permissions
 	grant := &auth.VideoGrant{
 		RoomJoin:       true,
@@ -98,6 +99,9 @@ func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config) error {
 		CanSubscribe:   &canSubscribe,
 		CanPublishData: &canPublishData,
 	}
+
+	// Create access token
+	at := auth.NewAccessToken(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
 
 	// Set token properties
 	at.SetVideoGrant(grant).

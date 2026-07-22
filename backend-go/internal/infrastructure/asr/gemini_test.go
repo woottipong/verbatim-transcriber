@@ -1,6 +1,7 @@
 package asr
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -8,6 +9,138 @@ import (
 
 	"google.golang.org/genai"
 )
+
+func interimInput(text string) *genai.LiveServerMessage {
+	return &genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InterimInputTranscription: &genai.Transcription{Text: text},
+	}}
+}
+
+func sourceTexts(results []domain.TranscriptResult) []string {
+	texts := make([]string, 0, len(results))
+	for _, result := range results {
+		if result.Role == domain.TranscriptRoleSource {
+			texts = append(texts, result.Text)
+		}
+	}
+	return texts
+}
+
+func TestGeminiForcedBoundaryDoesNotRepeatSource(t *testing.T) {
+	tests := []struct {
+		name       string
+		continuing string
+	}{
+		{name: "cumulative", continuing: "first sentence. second sentence"},
+		{name: "incremental", continuing: "second sentence"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Unix(300, 0)
+			provider := &GeminiProvider{
+				cfg:       normalizeGeminiConfig(GeminiConfig{}),
+				segmenter: newGeminiSegmenter(16000),
+				now:       func() time.Time { return now },
+			}
+			provider.transcriptResults(interimInput("first sentence."))
+			provider.transcriptMu.Lock()
+			provider.requestBoundaryLocked(now, geminiBoundaryPunctuation)
+			provider.transcriptMu.Unlock()
+			provider.transcriptResults(interimInput(tt.continuing))
+
+			now = now.Add(geminiTranslationGrace)
+			provider.transcriptMu.Lock()
+			results := provider.completePendingBoundaryLocked()
+			provider.transcriptMu.Unlock()
+
+			if got := sourceTexts(results); !slices.Equal(got, []string{"first sentence.", "second sentence"}) {
+				t.Fatalf("source results = %q", got)
+			}
+			if !results[0].IsFinal || results[0].TurnID != "gemini-1" {
+				t.Fatalf("old source = %#v, want final gemini-1", results[0])
+			}
+			if results[1].IsFinal || results[1].TurnID != "gemini-2" {
+				t.Fatalf("buffered source = %#v, want interim gemini-2", results[1])
+			}
+		})
+	}
+}
+
+func TestGeminiTranslationGraceKeepsTranslationWithOldTurn(t *testing.T) {
+	now := time.Unix(600, 0)
+	provider := &GeminiProvider{
+		cfg:       normalizeGeminiConfig(GeminiConfig{}),
+		segmenter: newGeminiSegmenter(16000),
+		now:       func() time.Time { return now },
+	}
+	provider.transcriptResults(&genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InterimInputTranscription: &genai.Transcription{Text: "first."},
+		OutputTranscription:       &genai.Transcription{Text: "แรก"},
+	}})
+	provider.transcriptMu.Lock()
+	provider.requestBoundaryLocked(now, geminiBoundaryPunctuation)
+	provider.transcriptMu.Unlock()
+	provider.transcriptResults(&genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		InterimInputTranscription: &genai.Transcription{Text: "first. second"},
+		OutputTranscription:       &genai.Transcription{Text: "แรก ต่อ"},
+	}})
+
+	now = now.Add(geminiTranslationGrace)
+	provider.transcriptMu.Lock()
+	results := provider.completePendingBoundaryLocked()
+	provider.transcriptMu.Unlock()
+
+	var oldTranslation domain.TranscriptResult
+	for _, result := range results {
+		if result.Role == domain.TranscriptRoleTranslation && result.TurnID == "gemini-1" {
+			oldTranslation = result
+		}
+	}
+	if !oldTranslation.IsFinal || oldTranslation.Text != "แรก ต่อ" {
+		t.Fatalf("old translation = %#v", oldTranslation)
+	}
+
+	next := provider.transcriptResults(&genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
+		OutputTranscription: &genai.Transcription{Text: "แรก ต่อ ใหม่"},
+	}})
+	if len(next) != 1 || next[0].TurnID != "gemini-2" || next[0].Text != "ใหม่" {
+		t.Fatalf("next translation = %#v, want new gemini-2 tail", next)
+	}
+}
+
+func TestGeminiTurnCompleteWhileBoundaryPendingFinalizesRemainingTailOnce(t *testing.T) {
+	now := time.Unix(900, 0)
+	provider := &GeminiProvider{
+		cfg:       normalizeGeminiConfig(GeminiConfig{}),
+		segmenter: newGeminiSegmenter(16000),
+		now:       func() time.Time { return now },
+	}
+	provider.transcriptResults(interimInput("first."))
+	provider.transcriptMu.Lock()
+	provider.requestBoundaryLocked(now, geminiBoundaryPunctuation)
+	provider.transcriptMu.Unlock()
+	provider.transcriptResults(interimInput("first. second"))
+
+	results := provider.transcriptResults(&genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{TurnComplete: true}})
+	finalsByTurn := map[string]int{}
+	for _, result := range results {
+		if result.Role == domain.TranscriptRoleSource && result.IsFinal {
+			finalsByTurn[result.TurnID]++
+		}
+		if result.TurnID == "gemini-3" {
+			t.Fatalf("unexpected empty turn result: %#v", result)
+		}
+	}
+	if finalsByTurn["gemini-1"] != 1 || finalsByTurn["gemini-2"] != 1 {
+		t.Fatalf("final source counts = %#v, want one per completed turn", finalsByTurn)
+	}
+
+	next := provider.transcriptResults(interimInput("fresh upstream turn"))
+	if len(next) != 1 || next[0].TurnID != "gemini-3" || next[0].Text != "fresh upstream turn" {
+		t.Fatalf("next results = %#v", next)
+	}
+}
 
 func TestGeminiProviderFinalizesPseudoTurnAfterSilenceAndGrace(t *testing.T) {
 	provider := &GeminiProvider{cfg: normalizeGeminiConfig(GeminiConfig{})}
@@ -20,11 +153,17 @@ func TestGeminiProviderFinalizesPseudoTurnAfterSilenceAndGrace(t *testing.T) {
 	}})
 	provider.observeAudioForSegmentation(pcm16Batch(4000, 100*time.Millisecond, 16000), startedAt)
 
-	currentTime = startedAt.Add(geminiTranslationGrace + geminiTurnSilence)
-	finals := provider.observeAudioForSegmentation(
+	currentTime = startedAt.Add(geminiTurnSilence)
+	if finals := provider.observeAudioForSegmentation(
 		pcm16Batch(0, 800*time.Millisecond, 16000),
 		currentTime,
-	)
+	); len(finals) != 0 {
+		t.Fatalf("silence finalized before translation grace: %#v", finals)
+	}
+	currentTime = currentTime.Add(geminiTranslationGrace)
+	provider.transcriptMu.Lock()
+	finals := provider.completePendingBoundaryLocked()
+	provider.transcriptMu.Unlock()
 	if len(finals) != 2 {
 		t.Fatalf("finals = %#v, want source and translation", finals)
 	}
@@ -59,6 +198,93 @@ func TestGeminiProviderCancelsPendingBoundaryOnStop(t *testing.T) {
 	provider.transcriptMu.Unlock()
 	if timer != nil {
 		t.Fatal("Stop() retained the pending boundary timer")
+	}
+}
+
+func TestGeminiSilenceRequestsFixedBoundary(t *testing.T) {
+	now := time.Unix(1200, 0)
+	provider := &GeminiProvider{
+		cfg:       normalizeGeminiConfig(GeminiConfig{}),
+		segmenter: newGeminiSegmenter(16000),
+		now:       func() time.Time { return now },
+	}
+	provider.transcriptResults(interimInput("continuous source"))
+	provider.observeAudioForSegmentation(pcm16Batch(4000, 100*time.Millisecond, 16000), now)
+	now = now.Add(geminiTurnSilence)
+	if results := provider.observeAudioForSegmentation(pcm16Batch(0, geminiTurnSilence, 16000), now); len(results) != 0 {
+		t.Fatalf("silence returned early finals: %#v", results)
+	}
+
+	provider.transcriptMu.Lock()
+	reason := provider.pendingBoundaryReason
+	delay, pending := provider.segmenter.boundaryDelay(now)
+	provider.transcriptMu.Unlock()
+	if reason != geminiBoundarySilence || !pending || delay != geminiTranslationGrace {
+		t.Fatalf("boundary = (reason=%v delay=%v pending=%t)", reason, delay, pending)
+	}
+}
+
+func TestGeminiBoundaryTimerIgnoresStaleVersion(t *testing.T) {
+	now := time.Unix(1500, 0)
+	provider := &GeminiProvider{
+		cfg:       normalizeGeminiConfig(GeminiConfig{}),
+		results:   make(chan domain.TranscriptResult, 8),
+		done:      make(chan struct{}),
+		segmenter: newGeminiSegmenter(16000),
+		now:       func() time.Time { return now },
+	}
+	provider.transcriptResults(interimInput("first."))
+	provider.transcriptMu.Lock()
+	provider.requestBoundaryLocked(now, geminiBoundaryPunctuation)
+	staleVersion := provider.boundaryVersion
+	provider.completePendingBoundaryLocked()
+	provider.transcriptMu.Unlock()
+	provider.transcriptResults(interimInput("second."))
+	provider.transcriptMu.Lock()
+	provider.requestBoundaryLocked(now, geminiBoundaryPunctuation)
+	wantSequence := provider.turnSequence
+	provider.transcriptMu.Unlock()
+
+	provider.completeBoundary(staleVersion)
+	provider.transcriptMu.Lock()
+	gotSequence := provider.turnSequence
+	provider.stopBoundaryTimerLocked()
+	provider.transcriptMu.Unlock()
+	if gotSequence != wantSequence {
+		t.Fatalf("stale timer advanced sequence to %d, want %d", gotSequence, wantSequence)
+	}
+}
+
+func TestGeminiStopRacesSafelyWithBoundaryTimer(t *testing.T) {
+	for iteration := 0; iteration < 100; iteration++ {
+		provider := &GeminiProvider{
+			cfg:       normalizeGeminiConfig(GeminiConfig{}),
+			results:   make(chan domain.TranscriptResult, 4),
+			done:      make(chan struct{}),
+			segmenter: newGeminiSegmenter(16000),
+			now:       time.Now,
+		}
+		provider.sourceAccumulator.observe("continuous source")
+		provider.transcriptMu.Lock()
+		provider.requestBoundaryLocked(time.Now(), geminiBoundaryDuration)
+		provider.stopBoundaryTimerLocked()
+		provider.scheduleBoundaryLocked(time.Millisecond)
+		provider.transcriptMu.Unlock()
+
+		stopped := make(chan struct{})
+		go func() {
+			if err := provider.Stop(); err != nil {
+				t.Errorf("Stop() error = %v", err)
+			}
+			close(stopped)
+		}()
+		select {
+		case <-stopped:
+		case <-time.After(time.Second):
+			t.Fatal("Stop timed out")
+		}
+		for range provider.Results() {
+		}
 	}
 }
 

@@ -3,6 +3,7 @@ package asr
 import (
 	"encoding/binary"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )
@@ -21,7 +22,6 @@ func TestPCM16RMSNormalizesSamples(t *testing.T) {
 func TestGeminiSegmenterMarksBoundaryAfterSilence(t *testing.T) {
 	segmenter := newGeminiSegmenter(16000)
 	now := time.Unix(100, 0)
-	segmenter.observeTranscript(now)
 
 	if segmenter.observeAudio(pcm16Batch(4000, 100*time.Millisecond, 16000), now) {
 		t.Fatal("speech marked a boundary")
@@ -34,8 +34,9 @@ func TestGeminiSegmenterMarksBoundaryAfterSilence(t *testing.T) {
 	if !segmenter.observeAudio(pcm16Batch(0, 100*time.Millisecond, 16000), now.Add(800*time.Millisecond)) {
 		t.Fatal("800 ms silence did not mark a boundary")
 	}
-	if delay, pending := segmenter.boundaryDelay(now.Add(800 * time.Millisecond)); !pending || delay != 0 {
-		t.Fatalf("boundaryDelay() = (%v, %v), want (0, true)", delay, pending)
+	segmenter.requestBoundary(now.Add(800 * time.Millisecond))
+	if delay, pending := segmenter.boundaryDelay(now.Add(800 * time.Millisecond)); !pending || delay != 500*time.Millisecond {
+		t.Fatalf("boundaryDelay() = (%v, %v), want (500ms, true)", delay, pending)
 	}
 }
 
@@ -44,7 +45,7 @@ func TestGeminiSegmenterWaitsForTranscriptGrace(t *testing.T) {
 	now := time.Unix(200, 0)
 	segmenter.observeAudio(pcm16Batch(4000, 100*time.Millisecond, 16000), now)
 	segmenter.observeAudio(pcm16Batch(0, 800*time.Millisecond, 16000), now.Add(800*time.Millisecond))
-	segmenter.observeTranscript(now.Add(800 * time.Millisecond))
+	segmenter.requestBoundary(now.Add(800 * time.Millisecond))
 
 	if delay, pending := segmenter.boundaryDelay(now.Add(800 * time.Millisecond)); !pending || delay != 500*time.Millisecond {
 		t.Fatalf("boundaryDelay() = (%v, %v), want (500ms, true)", delay, pending)
@@ -54,18 +55,58 @@ func TestGeminiSegmenterWaitsForTranscriptGrace(t *testing.T) {
 	}
 }
 
-func TestGeminiSegmenterCancelsBoundaryWhenSpeechResumes(t *testing.T) {
+func TestGeminiSegmenterKeepsFixedBoundaryWhenSpeechResumes(t *testing.T) {
 	segmenter := newGeminiSegmenter(16000)
 	now := time.Unix(300, 0)
 	segmenter.observeAudio(pcm16Batch(4000, 100*time.Millisecond, 16000), now)
 	segmenter.observeAudio(pcm16Batch(0, 800*time.Millisecond, 16000), now.Add(800*time.Millisecond))
-	segmenter.observeTranscript(now.Add(800 * time.Millisecond))
+	segmenter.requestBoundary(now.Add(800 * time.Millisecond))
 
 	if segmenter.observeAudio(pcm16Batch(4000, 100*time.Millisecond, 16000), now.Add(900*time.Millisecond)) {
-		t.Fatal("resumed speech retained a boundary")
+		t.Fatal("resumed speech requested another boundary")
 	}
-	if delay, pending := segmenter.boundaryDelay(now.Add(time.Second)); pending || delay != 0 {
-		t.Fatalf("boundaryDelay() = (%v, %v), want no boundary", delay, pending)
+	if delay, pending := segmenter.boundaryDelay(now.Add(time.Second)); !pending || delay != 300*time.Millisecond {
+		t.Fatalf("boundaryDelay() = (%v, %v), want (300ms, true)", delay, pending)
+	}
+}
+
+func TestGeminiSegmenterRequestsContinuousBoundaries(t *testing.T) {
+	start := time.Unix(400, 0)
+	tests := []struct {
+		name string
+		now  time.Time
+		text string
+		want geminiBoundaryReason
+	}{
+		{name: "before soft limit", now: start.Add(19 * time.Second), text: "still speaking.", want: geminiBoundaryNone},
+		{name: "soft punctuation", now: start.Add(20 * time.Second), text: "complete sentence?", want: geminiBoundaryPunctuation},
+		{name: "soft without punctuation", now: start.Add(20 * time.Second), text: "still speaking", want: geminiBoundaryNone},
+		{name: "hard duration", now: start.Add(30 * time.Second), text: "still speaking", want: geminiBoundaryDuration},
+		{name: "hard unicode length", now: start.Add(time.Second), text: strings.Repeat("ก", 600), want: geminiBoundaryLength},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			segmenter := newGeminiSegmenter(16000)
+			segmenter.observeSource(start, "เริ่ม")
+			if got := segmenter.observeSource(tt.now, tt.text); got != tt.want {
+				t.Fatalf("reason = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestGeminiBoundaryDeadlineDoesNotSlide(t *testing.T) {
+	segmenter := newGeminiSegmenter(16000)
+	requestedAt := time.Unix(500, 0)
+	if !segmenter.requestBoundary(requestedAt) {
+		t.Fatal("first request was rejected")
+	}
+	segmenter.observeSource(requestedAt.Add(400*time.Millisecond), "new activity")
+
+	delay, pending := segmenter.boundaryDelay(requestedAt.Add(450 * time.Millisecond))
+	if !pending || delay != 50*time.Millisecond {
+		t.Fatalf("boundaryDelay() = (%v, %v), want (50ms, true)", delay, pending)
 	}
 }
 

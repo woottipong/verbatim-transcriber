@@ -41,32 +41,34 @@ type GeminiConfig struct {
 }
 
 type GeminiProvider struct {
-	session          *genai.Session
-	results          chan domain.TranscriptResult
-	cfg              GeminiConfig
-	ctx              context.Context
-	cancel           context.CancelFunc
-	done             chan struct{}
-	mu               sync.Mutex
-	transcriptMu     sync.Mutex
-	resultsMu        sync.Mutex
-	closeOnce        sync.Once
-	doneOnce         sync.Once
-	lastErr          error
-	starting         bool
-	started          bool
-	stopped          bool
-	resultsClosed    bool
-	turnSequence     uint64
-	sourceText       string
-	sourceLanguage   string
-	sourceFinal      bool
-	translationText  string
-	translationFinal bool
-	segmenter        geminiSegmenter
-	boundaryTimer    *time.Timer
-	boundaryVersion  uint64
-	now              func() time.Time
+	session                *genai.Session
+	results                chan domain.TranscriptResult
+	cfg                    GeminiConfig
+	ctx                    context.Context
+	cancel                 context.CancelFunc
+	done                   chan struct{}
+	mu                     sync.Mutex
+	transcriptMu           sync.Mutex
+	resultsMu              sync.Mutex
+	closeOnce              sync.Once
+	doneOnce               sync.Once
+	lastErr                error
+	starting               bool
+	started                bool
+	stopped                bool
+	resultsClosed          bool
+	turnSequence           uint64
+	sourceAccumulator      geminiTranscriptAccumulator
+	translationAccumulator geminiTranscriptAccumulator
+	sourceLanguage         string
+	sourceFinal            bool
+	translationFinal       bool
+	pendingSourceCutoff    string
+	pendingBoundaryReason  geminiBoundaryReason
+	segmenter              geminiSegmenter
+	boundaryTimer          *time.Timer
+	boundaryVersion        uint64
+	now                    func() time.Time
 }
 
 func normalizeGeminiConfig(cfg GeminiConfig) GeminiConfig {
@@ -317,7 +319,8 @@ func (g *GeminiProvider) transcriptResultsLocked(message *genai.LiveServerMessag
 	}
 
 	content := message.ServerContent
-	turnID := fmt.Sprintf("gemini-%d", g.turnSequence+1)
+	now := g.currentTime()
+	turnID := g.currentTurnIDLocked()
 	results := make([]domain.TranscriptResult, 0, 2)
 	transcription := content.InterimInputTranscription
 	isFinal := false
@@ -335,38 +338,33 @@ func (g *GeminiProvider) transcriptResultsLocked(message *genai.LiveServerMessag
 		isFinal = transcription.Finished || content.TurnComplete
 	}
 	hasSource := transcription != nil && strings.TrimSpace(transcription.Text) != ""
-	hasTranslation := content.OutputTranscription != nil && strings.TrimSpace(content.OutputTranscription.Text) != ""
-	if hasSource || hasTranslation {
-		g.segmenter.observeTranscript(g.currentTime())
-	}
 	if hasSource {
-		merged, changed := mergeGeminiTranscript(g.sourceText, transcription.Text)
-		if changed {
-			g.sourceText = merged
-		}
+		tail, changed := g.sourceAccumulator.observe(transcription.Text)
 		languageCode := strings.TrimSpace(transcription.LanguageCode)
-		g.sourceLanguage = languageCode
-		g.sourceFinal = g.sourceFinal || isFinal
-		if changed || isFinal {
+		if languageCode != "" || g.sourceLanguage == "" {
+			g.sourceLanguage = languageCode
+		}
+		if g.pendingBoundaryReason == geminiBoundaryNone && (changed || isFinal) && tail != "" {
 			results = append(results, domain.TranscriptResult{
-				Text:         g.sourceText,
+				Text:         tail,
 				IsFinal:      isFinal,
 				Role:         domain.TranscriptRoleSource,
-				LanguageCode: languageCode,
+				LanguageCode: g.sourceLanguage,
 				TurnID:       turnID,
 			})
+			g.sourceFinal = g.sourceFinal || isFinal
+		}
+		if reason := g.segmenter.observeSource(now, tail); reason != geminiBoundaryNone {
+			g.requestBoundaryLocked(now, reason)
 		}
 	}
 
 	if output := content.OutputTranscription; output != nil && strings.TrimSpace(output.Text) != "" {
-		merged, changed := mergeGeminiTranscript(g.translationText, output.Text)
+		tail, changed := g.translationAccumulator.observe(output.Text)
 		outputFinal := output.Finished || content.GenerationComplete || content.TurnComplete
-		if changed {
-			g.translationText = merged
-		}
-		if changed || (outputFinal && !g.translationFinal) {
+		if tail != "" && (changed || (outputFinal && !g.translationFinal)) {
 			results = append(results, domain.TranscriptResult{
-				Text:         g.translationText,
+				Text:         tail,
 				IsFinal:      outputFinal,
 				Role:         domain.TranscriptRoleTranslation,
 				LanguageCode: g.cfg.TargetLanguageCode,
@@ -377,9 +375,11 @@ func (g *GeminiProvider) transcriptResultsLocked(message *genai.LiveServerMessag
 	}
 
 	if content.GenerationComplete || content.TurnComplete {
-		if g.translationText != "" && !g.translationFinal {
+		translationTail, prefixOK := g.translationAccumulator.tail()
+		g.logPrefixInvariantLocked("translation", prefixOK)
+		if translationTail != "" && !g.translationFinal {
 			results = append(results, domain.TranscriptResult{
-				Text:         g.translationText,
+				Text:         translationTail,
 				IsFinal:      true,
 				Role:         domain.TranscriptRoleTranslation,
 				LanguageCode: g.cfg.TargetLanguageCode,
@@ -389,9 +389,11 @@ func (g *GeminiProvider) transcriptResultsLocked(message *genai.LiveServerMessag
 		}
 	}
 	if content.TurnComplete {
-		results = append(results, g.finalizeCurrentTurnLocked(true)...)
-	} else if delay, pending := g.segmenter.boundaryDelay(g.currentTime()); pending {
-		g.scheduleBoundaryLocked(delay)
+		if g.pendingBoundaryReason != geminiBoundaryNone {
+			results = append(results, g.completePendingBoundaryLocked()...)
+		}
+		results = append(results, g.finalizeUpstreamTurnLocked()...)
+		g.resetUpstreamTurnLocked()
 	}
 
 	return results
@@ -411,48 +413,143 @@ func (g *GeminiProvider) observeAudioForSegmentation(audio []byte, now time.Time
 		g.segmenter = newGeminiSegmenter(normalizeGeminiConfig(g.cfg).SampleRate)
 	}
 
-	pending := g.segmenter.observeAudio(audio, now)
-	if !pending {
-		if !g.segmenter.boundaryPending {
-			g.stopBoundaryTimerLocked()
-		}
+	if !g.segmenter.observeAudio(audio, now) {
 		return nil
 	}
-	delay, _ := g.segmenter.boundaryDelay(now)
-	if delay > 0 {
-		g.scheduleBoundaryLocked(delay)
+	if !g.requestBoundaryLocked(now, geminiBoundarySilence) {
 		return nil
 	}
-	return g.finalizeCurrentTurnLocked(false)
+	if delay, pending := g.segmenter.boundaryDelay(now); pending && delay <= 0 {
+		return g.completePendingBoundaryLocked()
+	}
+	return nil
 }
 
-func (g *GeminiProvider) finalizeCurrentTurnLocked(forceAdvance bool) []domain.TranscriptResult {
-	turnID := fmt.Sprintf("gemini-%d", g.turnSequence+1)
+func (g *GeminiProvider) currentTurnIDLocked() string {
+	return fmt.Sprintf("gemini-%d", g.turnSequence+1)
+}
+
+func (g *GeminiProvider) requestBoundaryLocked(now time.Time, reason geminiBoundaryReason) bool {
+	if reason == geminiBoundaryNone || !g.segmenter.requestBoundary(now) {
+		return false
+	}
+	g.pendingSourceCutoff = g.sourceAccumulator.historyCutoff()
+	g.pendingBoundaryReason = reason
+	g.scheduleBoundaryLocked(geminiTranslationGrace)
+	return true
+}
+
+func (g *GeminiProvider) completePendingBoundaryLocked() []domain.TranscriptResult {
+	if g.pendingBoundaryReason == geminiBoundaryNone {
+		return nil
+	}
+
+	turnID := g.currentTurnIDLocked()
 	results := make([]domain.TranscriptResult, 0, 2)
-	hasContent := g.sourceText != "" || g.translationText != ""
-	if g.sourceText != "" && !g.sourceFinal {
+	sourceTail, sourcePrefixOK := g.sourceAccumulator.tailAt(g.pendingSourceCutoff)
+	g.logPrefixInvariantLocked("source", sourcePrefixOK)
+	translationCutoff := g.translationAccumulator.historyCutoff()
+	translationTail, translationPrefixOK := g.translationAccumulator.tailAt(translationCutoff)
+	g.logPrefixInvariantLocked("translation", translationPrefixOK)
+
+	if sourceTail != "" && !g.sourceFinal {
 		results = append(results, domain.TranscriptResult{
-			Text: g.sourceText, IsFinal: true, Role: domain.TranscriptRoleSource,
+			Text: sourceTail, IsFinal: true, Role: domain.TranscriptRoleSource,
 			LanguageCode: g.sourceLanguage, TurnID: turnID,
 		})
 	}
-	if g.translationText != "" && !g.translationFinal {
+	if translationTail != "" && !g.translationFinal {
 		results = append(results, domain.TranscriptResult{
-			Text: g.translationText, IsFinal: true, Role: domain.TranscriptRoleTranslation,
+			Text: translationTail, IsFinal: true, Role: domain.TranscriptRoleTranslation,
 			LanguageCode: g.cfg.TargetLanguageCode, TurnID: turnID,
 		})
 	}
-	if forceAdvance || hasContent {
+	if sourceTail != "" || translationTail != "" {
 		g.turnSequence++
 	}
-	g.sourceText = ""
-	g.sourceLanguage = ""
+
+	requestedAt := g.segmenter.boundaryRequestedAt
+	g.sourceAccumulator.commit(g.pendingSourceCutoff)
+	g.translationAccumulator.commit(translationCutoff)
 	g.sourceFinal = false
-	g.translationText = ""
 	g.translationFinal = false
+	g.pendingSourceCutoff = ""
+	g.pendingBoundaryReason = geminiBoundaryNone
 	g.segmenter.reset()
 	g.stopBoundaryTimerLocked()
+
+	nextTurnID := g.currentTurnIDLocked()
+	bufferedSource, sourcePrefixOK := g.sourceAccumulator.tail()
+	g.logPrefixInvariantLocked("source", sourcePrefixOK)
+	if bufferedSource != "" {
+		results = append(results, domain.TranscriptResult{
+			Text: bufferedSource, IsFinal: false, Role: domain.TranscriptRoleSource,
+			LanguageCode: g.sourceLanguage, TurnID: nextTurnID,
+		})
+		if reason := g.segmenter.observeSource(requestedAt, bufferedSource); reason != geminiBoundaryNone {
+			g.requestBoundaryLocked(requestedAt, reason)
+		}
+	}
+	bufferedTranslation, translationPrefixOK := g.translationAccumulator.tail()
+	g.logPrefixInvariantLocked("translation", translationPrefixOK)
+	if bufferedTranslation != "" {
+		results = append(results, domain.TranscriptResult{
+			Text: bufferedTranslation, IsFinal: false, Role: domain.TranscriptRoleTranslation,
+			LanguageCode: g.cfg.TargetLanguageCode, TurnID: nextTurnID,
+		})
+	}
 	return results
+}
+
+func (g *GeminiProvider) finalizeUpstreamTurnLocked() []domain.TranscriptResult {
+	turnID := g.currentTurnIDLocked()
+	results := make([]domain.TranscriptResult, 0, 2)
+	sourceTail, sourcePrefixOK := g.sourceAccumulator.tail()
+	g.logPrefixInvariantLocked("source", sourcePrefixOK)
+	translationTail, translationPrefixOK := g.translationAccumulator.tail()
+	g.logPrefixInvariantLocked("translation", translationPrefixOK)
+	if sourceTail != "" && !g.sourceFinal {
+		results = append(results, domain.TranscriptResult{
+			Text: sourceTail, IsFinal: true, Role: domain.TranscriptRoleSource,
+			LanguageCode: g.sourceLanguage, TurnID: turnID,
+		})
+	}
+	if translationTail != "" && !g.translationFinal {
+		results = append(results, domain.TranscriptResult{
+			Text: translationTail, IsFinal: true, Role: domain.TranscriptRoleTranslation,
+			LanguageCode: g.cfg.TargetLanguageCode, TurnID: turnID,
+		})
+	}
+	if sourceTail != "" || translationTail != "" {
+		g.turnSequence++
+	}
+	return results
+}
+
+func (g *GeminiProvider) resetUpstreamTurnLocked() {
+	g.sourceAccumulator.reset()
+	g.translationAccumulator.reset()
+	g.sourceLanguage = ""
+	g.sourceFinal = false
+	g.translationFinal = false
+	g.pendingSourceCutoff = ""
+	g.pendingBoundaryReason = geminiBoundaryNone
+	g.segmenter.reset()
+	g.stopBoundaryTimerLocked()
+}
+
+func (g *GeminiProvider) logPrefixInvariantLocked(role string, prefixOK bool) {
+	if prefixOK {
+		return
+	}
+	var accumulator *geminiTranscriptAccumulator
+	if role == "source" {
+		accumulator = &g.sourceAccumulator
+	} else {
+		accumulator = &g.translationAccumulator
+	}
+	log.Printf("⚠️ [Gemini] transcript prefix invariant failed (role=%s prefix_bytes=%d history_bytes=%d)",
+		role, len(accumulator.emittedPrefix), len(accumulator.history))
 }
 
 func (g *GeminiProvider) scheduleBoundaryLocked(delay time.Duration) {
@@ -466,16 +563,11 @@ func (g *GeminiProvider) scheduleBoundaryLocked(delay time.Duration) {
 
 func (g *GeminiProvider) completeBoundary(version uint64) {
 	g.transcriptMu.Lock()
-	if version != g.boundaryVersion || !g.segmenter.boundaryPending {
+	if version != g.boundaryVersion || g.pendingBoundaryReason == geminiBoundaryNone {
 		g.transcriptMu.Unlock()
 		return
 	}
-	if delay, pending := g.segmenter.boundaryDelay(g.currentTime()); pending && delay > 0 {
-		g.scheduleBoundaryLocked(delay)
-		g.transcriptMu.Unlock()
-		return
-	}
-	results := g.finalizeCurrentTurnLocked(false)
+	results := g.completePendingBoundaryLocked()
 	g.transcriptMu.Unlock()
 	g.publishResults(results, nil)
 }
