@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { TranscriptTranslation } from '../types';
 import {
   formatLanguageLabel,
@@ -8,7 +9,7 @@ interface TranslationBlockProps {
   translation?: TranscriptTranslation;
 }
 
-export default function TranslationBlock({ translation }: TranslationBlockProps) {
+function TranslationBlock({ translation }: TranslationBlockProps) {
   if (!translation) return null;
 
   const languageLabel = formatLanguageLabel(translation.languageCode);
@@ -30,3 +31,5 @@ export default function TranslationBlock({ translation }: TranslationBlockProps)
     </div>
   );
 }
+
+export default memo(TranslationBlock);

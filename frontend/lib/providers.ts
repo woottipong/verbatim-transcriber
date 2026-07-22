@@ -62,7 +62,3 @@ const providerPresentations: Record<AgentProvider, ProviderPresentation> = {
 export function getProviderPresentation(provider: string): ProviderPresentation {
     return providerPresentations[provider as AgentProvider] ?? fallbackProviderPresentation;
 }
-
-export const transcriptStatusClasses = {
-    draftBadge: 'border-slate-500/50 bg-slate-700/30 text-slate-200',
-} as const;

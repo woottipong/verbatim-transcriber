@@ -1,8 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Mic2, MonitorUp, Radio, Settings } from 'lucide-react';
+import { Mic2, MonitorUp, Radio } from 'lucide-react';
 import { useAudioDevices } from '../hooks/useAudioDevices';
 import { useLiveKit } from '../hooks/useLiveKit';
-import SettingsModal from './SettingsModal';
 import LiveKitPanel from './LiveKitPanel';
 import MicrophoneInputStrip from './MicrophoneInputStrip';
 import { AppConfig, AudioSource, ConnectionState } from '../types';
@@ -17,7 +16,6 @@ interface StreamPageProps {
 }
 
 export default function StreamPage({ config, initialRoomName, onConfigSave }: StreamPageProps) {
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [livekitRoomName, setLivekitRoomName] = useState(initialRoomName);
   const [audioSource, setAudioSource] = useState<AudioSource>('microphone');
   const { devices: audioDevices } = useAudioDevices();
@@ -89,7 +87,23 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
           />
 
           <div className="stream-navbar__controls flex items-center gap-1.5 sm:gap-2">
-            <div className="flex items-center rounded-lg border border-slate-700 bg-slate-950/45 p-0.5" role="group" aria-label="Audio source">
+            {audioSource === 'microphone' && audioDevices.length > 1 && (
+              <div className="hidden items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-800/70 px-2.5 py-2 lg:flex">
+                <Mic2 size={14} className="text-slate-400" />
+                <select
+                  value={config.audioDeviceId || 'default'}
+                  onChange={event => handleAudioDeviceChange(event.target.value)}
+                  disabled={!canChangeAudioSource}
+                  className="max-w-[120px] cursor-pointer truncate bg-transparent text-sm font-medium text-slate-200 focus:outline-none disabled:opacity-50"
+                  aria-label="Input Device"
+                >
+                  <option value="default" className="bg-slate-800">System Default</option>
+                  {audioDevices.map(device => <option key={device.deviceId} value={device.deviceId} className="bg-slate-800">{device.label}</option>)}
+                </select>
+              </div>
+            )}
+
+            <div className="flex shrink-0 items-center rounded-lg border border-slate-700 bg-slate-950/45 p-0.5" role="group" aria-label="Audio source">
               {(['microphone', 'chrome-tab'] as const).map(source => {
                 const SourceIcon = source === 'chrome-tab' ? MonitorUp : Mic2;
                 const isSelected = audioSource === source;
@@ -113,25 +127,6 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
               })}
             </div>
 
-            {audioSource === 'microphone' && audioDevices.length > 1 && (
-              <div className="hidden items-center gap-2 rounded-lg border border-slate-700/70 bg-slate-800/70 px-2.5 py-2 lg:flex">
-                <Mic2 size={14} className="text-slate-400" />
-                <select
-                  value={config.audioDeviceId || 'default'}
-                  onChange={event => handleAudioDeviceChange(event.target.value)}
-                  disabled={!canChangeAudioSource}
-                  className="max-w-[120px] cursor-pointer truncate bg-transparent text-sm font-medium text-slate-200 focus:outline-none disabled:opacity-50"
-                  aria-label="Input Device"
-                >
-                  <option value="default" className="bg-slate-800">System Default</option>
-                  {audioDevices.map(device => <option key={device.deviceId} value={device.deviceId} className="bg-slate-800">{device.label}</option>)}
-                </select>
-              </div>
-            )}
-
-            <button onClick={() => setIsSettingsOpen(true)} className="control-button control-button--quiet !min-h-10 !px-2.5" title="Settings" aria-label="Open settings">
-              <Settings size={20} />
-            </button>
           </div>
         </div>
       </header>
@@ -189,12 +184,6 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
         )}
       </main>
 
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-        config={config}
-        onSave={onConfigSave}
-      />
     </div>
   );
 }

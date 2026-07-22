@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { CircleAlert, Download, Radio, Users, Volume2, VolumeX, LogOut, Eraser } from 'lucide-react';
+import { Download, Radio, Users, Volume2, VolumeX, LogOut, Eraser } from 'lucide-react';
 import { TranscriptSegment, ConnectionState, AudioSource } from '../types';
 import { getLiveKitSessionPresentation } from '../lib/liveKitSession';
 import { shouldStickToLatest } from '../lib/transcriptViewport';
 import TranslationBlock from './TranslationBlock';
 import { formatLanguageLabel, groupFinalTranscriptRows, isTranscriptTurnLive, normalizeLanguageTag, type InterimTranscript } from '../lib/transcriptMessages';
-import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel, providerFromAgentIdentity, transcriptStatusClasses } from '../lib/providers';
+import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel, providerFromAgentIdentity } from '../lib/providers';
 import { buildTranscriptFilename, downloadTranscriptText, formatTranscriptText } from '../lib/transcriptExport';
+import ToastViewport from './ToastViewport';
 
 interface LiveKitPanelProps {
   transcripts: TranscriptSegment[];
@@ -62,10 +63,9 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
     anchors?.forEach(anchor => anchor.scrollIntoView({ block: 'end' }));
   }, []);
 
-  const handleExportProvider = useCallback((provider: string, segments: TranscriptSegment[]) => {
+  const handleExportProvider = useCallback((provider: string, text: string) => {
     try {
       setExportError(null);
-      const text = formatTranscriptText(segments);
       if (!text) return;
       downloadTranscriptText(text, buildTranscriptFilename(roomName, provider));
     } catch {
@@ -84,47 +84,75 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
   const isConnecting = connectionState === ConnectionState.CONNECTING;
   const hasContent = transcripts.length > 0 || interimTranscripts.size > 0;
 
-  const providerGroups = useMemo(() => {
-    const groups = new Map<string, {
-      transcripts: TranscriptSegment[];
-      interims: InterimTranscript[];
-    }>();
-    const ensureGroup = (provider: string) => {
-      let group = groups.get(provider);
-      if (!group) {
-        group = { transcripts: [], interims: [] };
-        groups.set(provider, group);
-      }
-      return group;
-    };
-
+  const finalizedByProvider = useMemo(() => {
+    const groups = new Map<string, TranscriptSegment[]>();
     transcripts.forEach(segment => {
-      if (segment.provider) ensureGroup(segment.provider).transcripts.push(segment);
+      if (!segment.provider) return;
+      const providerTranscripts = groups.get(segment.provider);
+      if (providerTranscripts) {
+        providerTranscripts.push(segment);
+      } else {
+        groups.set(segment.provider, [segment]);
+      }
     });
+
+    const finalized = new Map<string, {
+      transcripts: TranscriptSegment[];
+      exportText: string;
+    }>();
+    groups.forEach((providerTranscripts, provider) => {
+      const groupedTranscripts = groupFinalTranscriptRows(providerTranscripts);
+      finalized.set(provider, {
+        transcripts: groupedTranscripts,
+        exportText: formatTranscriptText(groupedTranscripts),
+      });
+    });
+    return finalized;
+  }, [transcripts]);
+
+  const interimsByProvider = useMemo(() => {
+    const groups = new Map<string, InterimTranscript[]>();
     interimTranscripts.forEach(interim => {
-      if (interim.provider) ensureGroup(interim.provider).interims.push(interim);
+      if (!interim.provider) return;
+      const providerInterims = groups.get(interim.provider);
+      if (providerInterims) {
+        providerInterims.push(interim);
+      } else {
+        groups.set(interim.provider, [interim]);
+      }
     });
+    return groups;
+  }, [interimTranscripts]);
+
+  const providerGroups = useMemo(() => {
+    const providers = new Set([
+      ...finalizedByProvider.keys(),
+      ...interimsByProvider.keys(),
+    ]);
     if (isAgentConnected && agentIdentity) {
       agentIdentity.split(',').forEach(identity => {
         const provider = providerFromAgentIdentity(identity.trim());
-        if (provider) ensureGroup(provider);
+        if (provider) providers.add(provider);
       });
     }
-    if (groups.size === 0) ensureGroup('google');
-
-    groups.forEach(group => {
-      group.transcripts = groupFinalTranscriptRows(group.transcripts);
-    });
+    if (providers.size === 0) providers.add('google');
 
     const order = ['google', 'gemini', 'azure', 'gpt-realtime-whisper'];
-    return Array.from(groups.entries()).sort(([left], [right]) => {
+    return Array.from(providers, provider => {
+      const finalized = finalizedByProvider.get(provider);
+      return [provider, {
+        transcripts: finalized?.transcripts ?? [],
+        interims: interimsByProvider.get(provider) ?? [],
+        exportText: finalized?.exportText ?? '',
+      }] as const;
+    }).sort(([left], [right]) => {
       const leftOrder = order.indexOf(left);
       const rightOrder = order.indexOf(right);
       if (leftOrder === -1) return rightOrder === -1 ? left.localeCompare(right) : 1;
       if (rightOrder === -1) return -1;
       return leftOrder - rightOrder;
     });
-  }, [agentIdentity, interimTranscripts, isAgentConnected, transcripts]);
+  }, [agentIdentity, finalizedByProvider, interimsByProvider, isAgentConnected]);
   const activeProviders = providerGroups.map(([provider]) => provider);
   const visibleMobileProvider = activeProviders.includes(selectedProvider)
     ? selectedProvider
@@ -149,6 +177,12 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
 
   return (
     <article className="livekit-panel app-panel flex min-h-[500px] h-[calc(100vh-12rem)] flex-col" aria-label="LiveKit transcription workspace">
+      {(error || exportError) && (
+        <ToastViewport notices={[
+          error && { id: `livekit-error-${error}`, tone: 'error', title: 'Connection error', message: error },
+          exportError && { id: `export-error-${exportError}`, tone: 'error', title: 'Export failed', message: exportError, onDismiss: () => setExportError(null) },
+        ]} />
+      )}
       <span className="sr-only" aria-live="polite" aria-atomic="true">{latestFinalText}</span>
       <header className="panel-header px-4 py-3 sm:px-5">
         <div className="session-toolbar">
@@ -251,19 +285,6 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
         </div>
       </header>
 
-      {error && (
-        <div className="border-b border-red-400/30 bg-red-950/35 px-4 py-2.5 text-sm text-red-200" role="alert">
-          {error}
-        </div>
-      )}
-
-      {exportError && (
-        <div className="flex items-center gap-2 border-b border-amber-300/25 bg-amber-300/5 px-4 py-2.5 text-sm text-amber-100" role="alert">
-          <CircleAlert size={15} aria-hidden="true" />
-          {exportError}
-        </div>
-      )}
-
       {isConnected && !isAgentConnected && (
         <div className="border-b border-amber-300/25 bg-amber-300/5 px-4 py-3 sm:px-5">
           <p className="text-sm text-amber-100">Connected. Waiting for transcriber to start...</p>
@@ -318,7 +339,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
               const providerTranscripts = group.transcripts;
               const providerInterims = group.interims;
               const hasProviderContent = providerTranscripts.length > 0 || providerInterims.length > 0;
-              const exportText = formatTranscriptText(providerTranscripts);
+              const exportText = group.exportText;
               
               return (
                 <section
@@ -336,7 +357,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                       <button
                         type="button"
                         disabled={!exportText}
-                        onClick={() => handleExportProvider(provider, providerTranscripts)}
+                        onClick={() => handleExportProvider(provider, exportText)}
                         aria-label={`Export ${formatProviderName(provider)} transcript as text`}
                         className="inline-flex min-h-9 items-center gap-1.5 rounded-md px-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
                       >
@@ -390,12 +411,13 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                         {providerInterims.map((interim, draftIndex) => (
                           <div
                             key={interim.key}
-                            className="transcript-turn transcript-turn--line group -mx-2 flex items-start rounded px-2 transition-colors duration-100 hover:bg-slate-900/25"
+                            className="transcript-turn transcript-turn--draft transcript-turn--line group -mx-2 flex items-start rounded px-2 hover:bg-slate-900/25"
                           >
                             <span className="transcript-turn__index shrink-0 select-none tabular-nums text-slate-400">
                               <span className="sr-only">Live draft </span>
                               <span aria-hidden="true">{String(providerTranscripts.length + draftIndex + 1).padStart(2, '0')}</span>
                               <span className="transcript-live-dot transcript-turn__live-dot" aria-hidden="true" />
+                              <span className="transcript-turn__draft-label" aria-hidden="true">Draft</span>
                             </span>
                             <div className="transcript-bilingual min-w-0 flex-1">
                               <p
@@ -412,7 +434,6 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                               </p>
                               <TranslationBlock translation={interim.translation} />
                             </div>
-                            <span className={`transcript-status-badge shrink-0 rounded border uppercase ${transcriptStatusClasses.draftBadge}`}>Draft</span>
                           </div>
                         ))}
                       </div>

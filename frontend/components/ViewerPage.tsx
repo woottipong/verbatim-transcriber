@@ -18,7 +18,8 @@ import { formatLanguageLabel, groupFinalTranscriptRows, isTranscriptTurnLive, no
 import { shouldAutoConnectViewer } from '../lib/viewerLaunch';
 import ConnectionBadge from './ConnectionBadge';
 import { buildViewerUrl } from '../lib/appRoutes';
-import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel, transcriptStatusClasses } from '../lib/providers';
+import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel } from '../lib/providers';
+import ToastViewport from './ToastViewport';
 
 interface RoomInfo {
     name: string;
@@ -136,6 +137,10 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
 
     return (
         <div className="app-shell">
+            <ToastViewport notices={[
+                roomsError && { id: `rooms-error-${roomsError}`, tone: 'error', title: 'Rooms unavailable', message: roomsError, onDismiss: () => setRoomsError(null) },
+                viewer.error && { id: `viewer-error-${viewer.error}`, tone: 'error', title: 'Connection error', message: viewer.error },
+            ]} />
             <span className="sr-only" aria-live="polite" aria-atomic="true">{viewer.transcripts.at(-1)?.text ?? ''}</span>
             {/* Header */}
             <header className="app-header">
@@ -206,10 +211,6 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                     <RefreshCw size={14} className={isLoadingRooms ? 'animate-spin' : ''} />
                                 </button>
                             </div>
-
-                            {roomsError && (
-                                <p className="text-xs text-red-400 mb-3">{roomsError}</p>
-                            )}
 
                             {rooms.length === 0 ? (
                                 <p className="text-center text-sm text-slate-400 py-4">
@@ -439,11 +440,17 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                         {filteredInterims.map(interim => (
                                             <div
                                                 key={interim.key}
-                                                className="transcript-row transcript-row--interim transcript-turn grid grid-cols-[auto_minmax(0,1fr)] gap-2 py-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:gap-3"
+                                                className="transcript-row transcript-row--interim transcript-turn transcript-turn--draft grid grid-cols-[auto_minmax(0,1fr)] gap-2 py-3 sm:gap-3"
                                             >
-                                                <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderPresentation(interim.provider).badge}`}>
-                                                    {formatProviderName(interim.provider)}
-                                                </span>
+                                                <div className="flex flex-col items-start gap-1">
+                                                    <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderPresentation(interim.provider).badge}`}>
+                                                        {formatProviderName(interim.provider)}
+                                                    </span>
+                                                    <span className="transcript-draft-indicator">
+                                                        <span className="transcript-live-dot" aria-hidden="true" />
+                                                        Draft
+                                                    </span>
+                                                </div>
                                                 <div className="transcript-bilingual col-span-2 min-w-0 sm:col-span-1">
                                                     <p
                                                         className={`transcript-source-line break-words text-[1rem] leading-7 text-slate-300 ${hasSourceLanguageLabel(interim.provider, interim.languageCode) ? 'transcript-source-line--labeled' : ''}`}
@@ -460,10 +467,6 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                                     </p>
                                                     <TranslationBlock translation={interim.translation} />
                                                 </div>
-                                                <span className={`transcript-status-badge col-start-2 row-start-1 inline-flex shrink-0 items-center justify-self-end rounded border uppercase sm:col-start-3 ${transcriptStatusClasses.draftBadge}`}>
-                                                    <span className="transcript-live-dot" aria-hidden="true" />
-                                                    Draft
-                                                </span>
                                             </div>
                                         ))}
                                         <div ref={transcriptEndRef} aria-hidden="true" />
@@ -484,12 +487,6 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                             )}
                         </section>
 
-                        {/* Error Display */}
-                        {viewer.error && (
-                            <div className="mt-4 rounded-lg border border-red-400/35 bg-red-950/35 p-3" role="alert">
-                                <p className="text-sm text-red-400">{viewer.error}</p>
-                            </div>
-                        )}
                     </div>
                 </div>
             </main>

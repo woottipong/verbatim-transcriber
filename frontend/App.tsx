@@ -17,7 +17,7 @@ const getInitialConfig = (): AppConfig => {
 
   return {
     ...config,
-    backendUrl: import.meta.env.VITE_BACKEND_URL || config.backendUrl,
+    backendUrl: DEFAULT_CONFIG.backendUrl,
   };
 };
 

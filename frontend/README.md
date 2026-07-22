@@ -43,8 +43,7 @@ frontend/
 │   ├── MicrophoneInputStrip.tsx # Input-level visualization
 │   ├── StreamPage.tsx           # Publisher-only route and microphone lifecycle
 │   ├── ViewerPage.tsx          # Subscribe-only viewer
-│   ├── AdminPage.tsx           # Room and agent management
-│   └── SettingsModal.tsx       # Backend URL configuration
+│   └── AdminPage.tsx           # Room and agent management
 ├── hooks/
 │   ├── useLiveKit.ts           # Publisher room and microphone lifecycle
 │   ├── useRoomViewer.ts        # Viewer room/audio lifecycle

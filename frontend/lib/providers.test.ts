@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel, providerFromAgentIdentity, transcriptStatusClasses } from './providers.ts';
+import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel, providerFromAgentIdentity } from './providers.ts';
 
 test('preserves the full hyphenated OpenAI provider identity', () => {
     assert.equal(providerFromAgentIdentity('agent-gpt-realtime-whisper'), 'gpt-realtime-whisper');
@@ -31,11 +31,4 @@ test('provides one shared visual presentation for every provider surface', () =>
         badge: 'text-slate-300 bg-slate-500/15 border-slate-400/30',
         draftText: 'text-slate-300',
     });
-});
-
-test('uses a provider-neutral visual token for draft status', () => {
-    assert.equal(
-        transcriptStatusClasses.draftBadge,
-        'border-slate-500/50 bg-slate-700/30 text-slate-200',
-    );
 });

@@ -3,7 +3,6 @@ import {
     AlertTriangle,
     ArrowLeft,
     Bot,
-    Check,
     Copy,
     ExternalLink,
     Eye,
@@ -19,6 +18,7 @@ import {
     Users,
     X,
 } from 'lucide-react';
+import ToastViewport from './ToastViewport';
 import {
     AgentStatus,
     createRoom,
@@ -77,7 +77,6 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     const [error, setError] = useState<string | null>(null);
     const [notice, setNotice] = useState<Notice | null>(null);
     const createRoomInputRef = useRef<HTMLInputElement>(null);
-    const noticeTimerRef = useRef<number | null>(null);
     const roomsRequestRef = useRef(0);
     const agentStatusRequestRef = useRef(0);
 
@@ -98,14 +97,6 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
 
     const showNotice = useCallback((nextNotice: Notice) => {
         setNotice(nextNotice);
-        if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
-        noticeTimerRef.current = window.setTimeout(() => setNotice(null), 3600);
-    }, []);
-
-    useEffect(() => {
-        return () => {
-            if (noticeTimerRef.current !== null) window.clearTimeout(noticeTimerRef.current);
-        };
     }, []);
 
     useEffect(() => {
@@ -308,6 +299,10 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
 
     return (
         <div className="app-shell admin-workspace">
+            <ToastViewport notices={[
+                notice && { id: `admin-notice-${notice.message}`, tone: notice.tone, message: notice.message, onDismiss: () => setNotice(null) },
+                error && { id: `admin-error-${error}`, tone: 'error', message: error, onDismiss: () => setError(null) },
+            ]} />
             <header className="app-header">
                 <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
                     <div className="flex min-w-0 items-center gap-3">
@@ -345,22 +340,6 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             </header>
 
             <main className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-7">
-                {notice && (
-                    <div className={`mb-4 flex items-center gap-2 rounded-lg border px-3 py-2.5 text-sm ${notice.tone === 'success' ? 'border-emerald-400/30 bg-emerald-950/30 text-emerald-200' : 'border-red-400/30 bg-red-950/30 text-red-200'}`} role="status" aria-live="polite">
-                        {notice.tone === 'success' ? <Check size={16} /> : <AlertTriangle size={16} />}
-                        <span>{notice.message}</span>
-                    </div>
-                )}
-                {error && (
-                    <div className="mb-4 flex items-center gap-3 rounded-lg border border-red-400/35 bg-red-950/35 p-3" role="alert">
-                        <AlertTriangle size={17} className="shrink-0 text-red-300" />
-                        <p className="flex-1 text-sm text-red-200">{error}</p>
-                        <button onClick={() => setError(null)} className="control-button control-button--quiet !min-h-8 !px-2" aria-label="Dismiss error">
-                            <X size={15} />
-                        </button>
-                    </div>
-                )}
-
                 <div className="grid gap-5 lg:grid-cols-[19rem_minmax(0,1fr)]">
                     <aside className="app-panel flex min-h-[32rem] flex-col">
                         <div className="border-b border-slate-700/70 p-4">
@@ -541,8 +520,6 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                     </section>
                 </div>
             </main>
-
-            <div className="sr-only" aria-live="polite">{notice?.message || ''}</div>
 
             {isCreateDialogOpen && (
                 <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={() => !isCreatingRoom && setIsCreateDialogOpen(false)}>
