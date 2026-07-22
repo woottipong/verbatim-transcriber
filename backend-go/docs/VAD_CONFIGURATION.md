@@ -32,7 +32,7 @@ Azure emits `speech.hypothesis` for interim text and `speech.phrase` for final t
 
 ### Gemini
 
-Gemini Live input transcription does not behave exactly like traditional ASR interim/final snapshots. It can emit useful source-input chunks with `isFinal=false`. The backend therefore creates application-level pseudo-turns: 800 ms of low-energy PCM marks a boundary candidate, and the provider waits until transcript traffic has also been quiet for 500 ms so delayed translated output can catch up. PCM is observed but forwarded unchanged. The frontend updates one grouped source row for that `turnId` and shows the translation chip on the same row. This is best-effort alignment, not a sentence-level guarantee from Gemini.
+Gemini Live input transcription does not behave exactly like traditional ASR interim/final snapshots. It can emit useful source-input chunks with `isFinal=false`. The backend therefore creates application-level pseudo-turns: 650 ms of low-energy PCM requests a boundary, followed by a fixed 500 ms grace period so delayed translated output can catch up. PCM is observed but forwarded unchanged. The frontend updates one grouped source row for that `turnId` and shows the translation chip on the same row. This is best-effort alignment, not a sentence-level guarantee from Gemini.
 
 Translated text is exposed; translated/model audio is still discarded.
 

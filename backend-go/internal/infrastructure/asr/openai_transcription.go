@@ -101,7 +101,7 @@ type openAITranscriptionProvider struct {
 	resultsClosed  bool
 
 	transcriptItems map[string]string
-	segmenter       pcmTurnSegmenter
+	segmenter       openAITranscriptionSegmenter
 	audioBuf        *ringBuffer
 	reconnectDelay  func(int) time.Duration
 	loggedAudio     bool
@@ -134,14 +134,10 @@ func NewOpenAITranscriptionProvider(ctx context.Context, cfg OpenAITranscription
 	}
 	normalized := normalizeOpenAITranscriptionConfig(cfg)
 	return &openAITranscriptionProvider{
-		cfg:     normalized,
-		dial:    defaultOpenAITranscriptionDial,
-		results: make(chan domain.TranscriptResult, 100),
-		segmenter: newPCMTurnSegmenter(PCMTurnSegmenterConfig{
-			SampleRate:    normalized.SampleRate,
-			RMSThreshold:  defaultPCMRMSThreshold,
-			SilenceWindow: defaultPCMSilenceWindow,
-		}),
+		cfg:             normalized,
+		dial:            defaultOpenAITranscriptionDial,
+		results:         make(chan domain.TranscriptResult, 100),
+		segmenter:       newOpenAITranscriptionSegmenter(normalized.SampleRate),
 		transcriptItems: make(map[string]string),
 		audioBuf:        newRingBuffer(normalized.SampleRate * 2 * int(openAITranscriptionReplay/time.Second)),
 		reconnectDelay:  defaultOpenAITranscriptionReconnectDelay,
@@ -380,7 +376,7 @@ func (o *openAITranscriptionProvider) writeTextTo(conn *websocket.Conn, payload 
 func (o *openAITranscriptionProvider) observeAudio(data []byte) error {
 	o.transcriptMu.Lock()
 	defer o.transcriptMu.Unlock()
-	if !o.segmenter.ObserveAudio(data) {
+	if !o.segmenter.observeAudio(data) {
 		return nil
 	}
 	payload, err := openAITranscriptionAudioCommitPayload()
@@ -393,7 +389,7 @@ func (o *openAITranscriptionProvider) observeAudio(data []byte) error {
 	// The API owns transcript finalization and may complete committed items out
 	// of order. Reset only the local audio boundary detector; final text is
 	// published when the matching completed event arrives.
-	o.segmenter.Reset()
+	o.segmenter.reset()
 	return nil
 }
 
@@ -546,6 +542,9 @@ func (o *openAITranscriptionProvider) reconnect(ctx context.Context, failedConn 
 		replay := o.audioBuf.Read()
 		conn := o.conn
 		o.mu.Unlock()
+		o.transcriptMu.Lock()
+		o.segmenter.reset()
+		o.transcriptMu.Unlock()
 		if len(replay) > 0 {
 			payload, err := openAITranscriptionAudioAppendPayload(replay)
 			if err == nil {

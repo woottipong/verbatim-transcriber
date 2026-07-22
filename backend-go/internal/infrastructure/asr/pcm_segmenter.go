@@ -7,8 +7,9 @@ import (
 )
 
 const (
-	defaultPCMRMSThreshold  = 0.015
-	defaultPCMSilenceWindow = 800 * time.Millisecond
+	defaultPCMRMSThreshold     = 0.015
+	defaultPCMSilenceWindow    = 650 * time.Millisecond
+	continuousHardTurnDuration = 30 * time.Second
 )
 
 // PCMTurnSegmenterConfig controls the local speech/silence boundary detector.

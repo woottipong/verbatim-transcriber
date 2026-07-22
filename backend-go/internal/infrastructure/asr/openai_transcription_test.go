@@ -143,6 +143,89 @@ func TestOpenAITranscriptionStartWaitsForSessionUpdated(t *testing.T) {
 	}
 }
 
+func TestOpenAITranscriptionCommitsContinuousSpeechAtHardLimit(t *testing.T) {
+	commitAfterAppends := make(chan int, 1)
+	allowCompleted := make(chan struct{})
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"session.updated"}`)); err != nil {
+			return
+		}
+
+		appendCount := 0
+		for {
+			_, payload, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var event struct {
+				Type string `json:"type"`
+			}
+			if json.Unmarshal(payload, &event) != nil {
+				continue
+			}
+			switch event.Type {
+			case "input_audio_buffer.append":
+				appendCount++
+			case "input_audio_buffer.commit":
+				commitAfterAppends <- appendCount
+				<-allowCompleted
+				_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"conversation.item.input_audio_transcription.completed","item_id":"item-hard-limit","content_index":0,"transcript":"ข้อความสุดท้าย"}`))
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	provider, err := NewOpenAITranscriptionProvider(context.Background(), OpenAITranscriptionConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+	websocketURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	provider.dial = func(ctx context.Context, _ string, headers http.Header) (*websocket.Conn, *http.Response, error) {
+		return (&websocket.Dialer{}).DialContext(ctx, websocketURL, headers)
+	}
+	if err := provider.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer provider.Stop()
+
+	batch := pcm16Batch(4000, 100*time.Millisecond, 24000)
+	for range 300 {
+		if err := provider.SendAudio(batch); err != nil {
+			t.Fatalf("SendAudio() error = %v", err)
+		}
+	}
+
+	select {
+	case appendCount := <-commitAfterAppends:
+		if appendCount != 300 {
+			t.Fatalf("commit followed %d appends, want 300", appendCount)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for 30-second audio commit")
+	}
+	select {
+	case result := <-provider.Results():
+		t.Fatalf("provider published a local result before completed event: %#v", result)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	close(allowCompleted)
+	result := receiveOpenAITranscriptionResult(t, provider.Results())
+	if !result.IsFinal || result.Text != "ข้อความสุดท้าย" || result.TurnID != "gpt-realtime-whisper:item-hard-limit:0" {
+		t.Fatalf("completed result = %#v", result)
+	}
+}
+
 func TestOpenAITranscriptionReconnectsAndReplaysRecentAudio(t *testing.T) {
 	var connectionCount atomic.Int32
 	secondAudio := make(chan []byte, 1)
@@ -372,7 +455,7 @@ func TestOpenAITranscriptionProviderWaitsForCompletedEventAfterSilence(t *testin
 	_ = receiveOpenAITranscriptionResult(t, provider.Results())
 
 	provider.observeAudio(pcm16Batch(4000, 100*time.Millisecond, 24000))
-	provider.observeAudio(pcm16Batch(0, 800*time.Millisecond, 24000))
+	provider.observeAudio(pcm16Batch(0, 650*time.Millisecond, 24000))
 
 	select {
 	case unexpected := <-provider.Results():

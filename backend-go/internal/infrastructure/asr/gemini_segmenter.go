@@ -11,7 +11,7 @@ const (
 	geminiTurnSilence        = defaultPCMSilenceWindow
 	geminiTranslationGrace   = 500 * time.Millisecond
 	geminiSoftTurnDuration   = 20 * time.Second
-	geminiHardTurnDuration   = 30 * time.Second
+	geminiHardTurnDuration   = continuousHardTurnDuration
 	geminiHardTurnRunes      = 600
 )
 

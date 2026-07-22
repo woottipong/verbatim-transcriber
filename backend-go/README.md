@@ -196,7 +196,7 @@ The agent publishes reliable packets with this shape:
 
 `role`, `languageCode`, and `turnId` are additive metadata used by Gemini source/translation pairs. GPT Realtime Whisper publishes `role: "source"` with the configured `OPENAI_LANGUAGE_CODE`; it does not emit translation packets. Thai spacing is normalized once at the agent output boundary.
 
-Gemini `turnId` values are application-level pseudo-turns rather than deterministic model turns. The provider observes the unchanged PCM stream and closes a turn after 800 ms of low-energy audio plus 500 ms without new transcript activity. This keeps delayed translated output with the preceding source in typical pauses, but alignment remains best-effort rather than sentence-perfect.
+Gemini `turnId` values are application-level pseudo-turns rather than deterministic model turns. The provider observes the unchanged PCM stream and requests a turn boundary after 650 ms of low-energy audio, then allows a fixed 500 ms translation grace period. This keeps delayed translated output with the preceding source in typical pauses, but alignment remains best-effort rather than sentence-perfect.
 
 ## Test and build
 

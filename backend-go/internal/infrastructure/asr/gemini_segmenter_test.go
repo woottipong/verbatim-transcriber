@@ -26,16 +26,16 @@ func TestGeminiSegmenterMarksBoundaryAfterSilence(t *testing.T) {
 	if segmenter.observeAudio(pcm16Batch(4000, 100*time.Millisecond, 16000), now) {
 		t.Fatal("speech marked a boundary")
 	}
-	for index := 1; index <= 7; index++ {
+	for index := 1; index <= 6; index++ {
 		if segmenter.observeAudio(pcm16Batch(0, 100*time.Millisecond, 16000), now.Add(time.Duration(index)*100*time.Millisecond)) {
-			t.Fatalf("silence marked a boundary after %d ms, want 800 ms", index*100)
+			t.Fatalf("silence marked a boundary after %d ms, want 650 ms", index*100)
 		}
 	}
-	if !segmenter.observeAudio(pcm16Batch(0, 100*time.Millisecond, 16000), now.Add(800*time.Millisecond)) {
-		t.Fatal("800 ms silence did not mark a boundary")
+	if !segmenter.observeAudio(pcm16Batch(0, 50*time.Millisecond, 16000), now.Add(650*time.Millisecond)) {
+		t.Fatal("650 ms silence did not mark a boundary")
 	}
-	segmenter.requestBoundary(now.Add(800 * time.Millisecond))
-	if delay, pending := segmenter.boundaryDelay(now.Add(800 * time.Millisecond)); !pending || delay != 500*time.Millisecond {
+	segmenter.requestBoundary(now.Add(650 * time.Millisecond))
+	if delay, pending := segmenter.boundaryDelay(now.Add(650 * time.Millisecond)); !pending || delay != 500*time.Millisecond {
 		t.Fatalf("boundaryDelay() = (%v, %v), want (500ms, true)", delay, pending)
 	}
 }
@@ -44,13 +44,13 @@ func TestGeminiSegmenterWaitsForTranscriptGrace(t *testing.T) {
 	segmenter := newGeminiSegmenter(16000)
 	now := time.Unix(200, 0)
 	segmenter.observeAudio(pcm16Batch(4000, 100*time.Millisecond, 16000), now)
-	segmenter.observeAudio(pcm16Batch(0, 800*time.Millisecond, 16000), now.Add(800*time.Millisecond))
-	segmenter.requestBoundary(now.Add(800 * time.Millisecond))
+	segmenter.observeAudio(pcm16Batch(0, 650*time.Millisecond, 16000), now.Add(650*time.Millisecond))
+	segmenter.requestBoundary(now.Add(650 * time.Millisecond))
 
-	if delay, pending := segmenter.boundaryDelay(now.Add(800 * time.Millisecond)); !pending || delay != 500*time.Millisecond {
+	if delay, pending := segmenter.boundaryDelay(now.Add(650 * time.Millisecond)); !pending || delay != 500*time.Millisecond {
 		t.Fatalf("boundaryDelay() = (%v, %v), want (500ms, true)", delay, pending)
 	}
-	if delay, pending := segmenter.boundaryDelay(now.Add(1300 * time.Millisecond)); !pending || delay != 0 {
+	if delay, pending := segmenter.boundaryDelay(now.Add(1150 * time.Millisecond)); !pending || delay != 0 {
 		t.Fatalf("boundaryDelay() after grace = (%v, %v), want (0, true)", delay, pending)
 	}
 }
@@ -59,13 +59,13 @@ func TestGeminiSegmenterKeepsFixedBoundaryWhenSpeechResumes(t *testing.T) {
 	segmenter := newGeminiSegmenter(16000)
 	now := time.Unix(300, 0)
 	segmenter.observeAudio(pcm16Batch(4000, 100*time.Millisecond, 16000), now)
-	segmenter.observeAudio(pcm16Batch(0, 800*time.Millisecond, 16000), now.Add(800*time.Millisecond))
-	segmenter.requestBoundary(now.Add(800 * time.Millisecond))
+	segmenter.observeAudio(pcm16Batch(0, 650*time.Millisecond, 16000), now.Add(650*time.Millisecond))
+	segmenter.requestBoundary(now.Add(650 * time.Millisecond))
 
-	if segmenter.observeAudio(pcm16Batch(4000, 100*time.Millisecond, 16000), now.Add(900*time.Millisecond)) {
+	if segmenter.observeAudio(pcm16Batch(4000, 100*time.Millisecond, 16000), now.Add(750*time.Millisecond)) {
 		t.Fatal("resumed speech requested another boundary")
 	}
-	if delay, pending := segmenter.boundaryDelay(now.Add(time.Second)); !pending || delay != 300*time.Millisecond {
+	if delay, pending := segmenter.boundaryDelay(now.Add(850 * time.Millisecond)); !pending || delay != 300*time.Millisecond {
 		t.Fatalf("boundaryDelay() = (%v, %v), want (300ms, true)", delay, pending)
 	}
 }

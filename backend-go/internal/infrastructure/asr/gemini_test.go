@@ -155,7 +155,7 @@ func TestGeminiProviderFinalizesPseudoTurnAfterSilenceAndGrace(t *testing.T) {
 
 	currentTime = startedAt.Add(geminiTurnSilence)
 	if finals := provider.observeAudioForSegmentation(
-		pcm16Batch(0, 800*time.Millisecond, 16000),
+		pcm16Batch(0, geminiTurnSilence, 16000),
 		currentTime,
 	); len(finals) != 0 {
 		t.Fatalf("silence finalized before translation grace: %#v", finals)

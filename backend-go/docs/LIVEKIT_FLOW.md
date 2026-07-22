@@ -76,7 +76,7 @@ Viewer
 }
 ```
 
-All transcript packets use reliable data-channel delivery. Google/Azure interim values remain replaceable drafts. Gemini source chunks do not map cleanly to traditional interim/final semantics, so the backend creates application-level pseudo-turns after 800 ms of low-energy PCM and 500 ms without transcript activity. GPT Realtime Whisper uses a transcription-only session, streams 24 kHz PCM, manually commits after the shared PCM silence boundary, publishes source interim deltas and completed finals, and performs bounded reconnects with one second of recent-audio replay.
+All transcript packets use reliable data-channel delivery. Google/Azure interim values remain replaceable drafts. Gemini source chunks do not map cleanly to traditional interim/final semantics, so the backend creates application-level pseudo-turns after 650 ms of low-energy PCM and a fixed 500 ms translation grace period. GPT Realtime Whisper uses a transcription-only session, streams 24 kHz PCM, manually commits after the shared 650 ms PCM silence boundary or a 30-second hard duration, publishes source interim deltas and completed finals, and performs bounded reconnects with one second of recent-audio replay.
 
 ## Key files
 
