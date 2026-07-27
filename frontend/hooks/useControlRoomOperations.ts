@@ -49,11 +49,12 @@ export function useControlRoomOperations({
     const [stoppingAgentKey, setStoppingAgentKey] = useState<string | null>(null);
     const [isRemovingParticipant, setIsRemovingParticipant] = useState(false);
     const [isDeletingRoom, setIsDeletingRoom] = useState(false);
-    const [generatingTranscriptProvider, setGeneratingTranscriptProvider] = useState<AgentProvider | null>(null);
+    const [generatingTranscriptProviders, setGeneratingTranscriptProviders] = useState<ReadonlySet<AgentProvider>>(new Set());
     const [transcriptLinks, setTranscriptLinks] = useState<Partial<Record<AgentProvider, TranscriptLinkState>>>({});
     const [transcriptFeedErrors, setTranscriptFeedErrors] = useState<Partial<Record<AgentProvider, TranscriptFeedErrorState>>>({});
     const roomsRequestRef = useRef(0);
     const agentStatusRequestRef = useRef(0);
+    const transcriptLinkRequestRef = useRef<Partial<Record<AgentProvider, number>>>({});
 
     const refreshRooms = useCallback(async () => {
         const requestId = ++roomsRequestRef.current;
@@ -116,6 +117,8 @@ export function useControlRoomOperations({
         setIsCreatingRoom(true);
         try {
             const room = await createRoomRequest(backendUrl, name);
+            roomsRequestRef.current++;
+            setIsLoadingRooms(false);
             const normalizedRoom = { ...room, participants: room.participants || [] };
             setRooms(current => [
                 ...current.filter(existing => existing.name !== room.name),
@@ -161,6 +164,8 @@ export function useControlRoomOperations({
         setIsDeletingRoom(true);
         try {
             await deleteRoomRequest(backendUrl, roomName);
+            roomsRequestRef.current++;
+            setIsLoadingRooms(false);
             setRooms(current => current.filter(room => room.name !== roomName));
             setTranscriptLinks(current => removeRoomEntries(current, roomName));
             setTranscriptFeedErrors(current => removeRoomEntries(current, roomName));
@@ -173,29 +178,41 @@ export function useControlRoomOperations({
         roomName: string,
         provider: AgentProvider,
     ): Promise<TranscriptTokenResponse> => {
-        setGeneratingTranscriptProvider(provider);
+        const requestId = (transcriptLinkRequestRef.current[provider] ?? 0) + 1;
+        transcriptLinkRequestRef.current[provider] = requestId;
+        setGeneratingTranscriptProviders(current => new Set(current).add(provider));
         setTranscriptFeedErrors(current => omitProvider(current, provider));
         try {
             const response = await createTranscriptToken(backendUrl, roomName, provider);
             if (!isTranscriptTokenResponse(response) || response.provider !== provider) {
                 throw new Error('Backend returned an invalid transcript link');
             }
-            setTranscriptLinks(current => ({
-                ...current,
-                [provider]: { roomName, provider, response },
-            }));
+            if (transcriptLinkRequestRef.current[provider] === requestId) {
+                setTranscriptLinks(current => ({
+                    ...current,
+                    [provider]: { roomName, provider, response },
+                }));
+            }
             return response;
         } catch (error) {
             const message = describeTranscriptFeedError(
                 error instanceof Error ? error.message : 'Failed to generate transcript link',
             );
-            setTranscriptFeedErrors(current => ({
-                ...current,
-                [provider]: { roomName, message },
-            }));
+            if (transcriptLinkRequestRef.current[provider] === requestId) {
+                setTranscriptFeedErrors(current => ({
+                    ...current,
+                    [provider]: { roomName, message },
+                }));
+            }
             throw new Error(message);
         } finally {
-            setGeneratingTranscriptProvider(current => current === provider ? null : current);
+            if (transcriptLinkRequestRef.current[provider] === requestId) {
+                setGeneratingTranscriptProviders(current => {
+                    const next = new Set(current);
+                    next.delete(provider);
+                    return next;
+                });
+            }
         }
     }, [backendUrl]);
 
@@ -222,7 +239,7 @@ export function useControlRoomOperations({
         stoppingAgentKey,
         isRemovingParticipant,
         isDeletingRoom,
-        generatingTranscriptProvider,
+        generatingTranscriptProviders,
         transcriptFeedErrors,
         refreshRooms,
         refreshAgentStatus,

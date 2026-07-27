@@ -99,7 +99,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         stoppingAgentKey,
         isRemovingParticipant,
         isDeletingRoom,
-        generatingTranscriptProvider,
+        generatingTranscriptProviders,
         transcriptFeedErrors,
         refreshRooms,
         refreshAgentStatus,
@@ -488,7 +488,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                             </div>
                                         ) : runningTranscriptProviders.map(provider => {
                                             const link = activeTranscriptLink(provider);
-                                            const isGenerating = generatingTranscriptProvider === provider;
+                                            const isGenerating = generatingTranscriptProviders.has(provider);
                                             const error = transcriptFeedErrors[provider]?.roomName === selectedRoomName
                                                 ? transcriptFeedErrors[provider]?.message
                                                 : null;

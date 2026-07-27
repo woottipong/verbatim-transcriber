@@ -101,3 +101,53 @@ test('reports remote disconnect once and ignores the stale room afterward', asyn
     assert.deepEqual(ended, ['remote']);
     assert.equal(lifecycle.room, null);
 });
+
+test('disposes preparation when disconnected before a room is created', async () => {
+    const lifecycle = new LiveKitRoomLifecycle();
+    const room = new FakeRoom();
+    const ended: RoomEndReason[] = [];
+    const disposed: string[] = [];
+    let releasePreparation: ((value: string) => void) | undefined;
+    const preparation = new Promise<string>(resolve => {
+        releasePreparation = resolve;
+    });
+
+    const connecting = lifecycle.connect({
+        ...connectionOptions(room, ended),
+        prepare: () => preparation,
+        getToken: async () => 'token',
+        disposePreparation: value => disposed.push(value),
+    });
+    lifecycle.disconnect();
+    releasePreparation?.('capture');
+
+    assert.equal(await connecting, null);
+    assert.deepEqual(disposed, ['capture']);
+    assert.equal(room.connectCalls.length, 0);
+    assert.equal(lifecycle.room, null);
+});
+
+test('tears down the room and preparation when post-connect setup fails', async () => {
+    const lifecycle = new LiveKitRoomLifecycle();
+    const room = new FakeRoom();
+    const ended: RoomEndReason[] = [];
+    const disposed: string[] = [];
+
+    await assert.rejects(
+        () => lifecycle.connect({
+            ...connectionOptions(room, ended),
+            prepare: async () => 'capture',
+            getToken: async () => 'token',
+            disposePreparation: value => disposed.push(value),
+            afterConnect: async () => {
+                throw new Error('publish failed');
+            },
+        }),
+        /publish failed/,
+    );
+
+    assert.equal(room.disconnectCalls, 1);
+    assert.deepEqual(ended, ['failed']);
+    assert.deepEqual(disposed, ['capture']);
+    assert.equal(lifecycle.room, null);
+});
