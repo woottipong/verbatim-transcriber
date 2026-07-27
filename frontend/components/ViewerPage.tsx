@@ -7,19 +7,19 @@
  * - Read-only (no microphone)
  */
 
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { RefreshCw, Users, Radio, Trash2, X, Bot, Volume2, VolumeX } from 'lucide-react';
 import { useRoomViewer } from '../hooks/useRoomViewer';
 import { ConnectionState } from '../types';
 import { toHttpUrl } from '../lib/runtime';
-import { shouldStickToLatest } from '../lib/transcriptViewport';
-import TranslationBlock from './TranslationBlock';
-import { formatLanguageLabel, groupFinalTranscriptRows, isTranscriptTurnLive, normalizeLanguageTag } from '../lib/transcriptMessages';
 import { shouldAutoConnectViewer } from '../lib/viewerLaunch';
 import ConnectionBadge from './ConnectionBadge';
 import { buildViewerUrl } from '../lib/appRoutes';
-import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel } from '../lib/providers';
+import { formatProviderName } from '../lib/providers';
 import ToastViewport from './ToastViewport';
+import { TranscriptRows } from './TranscriptPresentation';
+import { useTranscriptViewport } from '../hooks/useTranscriptViewport';
+import { collectTranscriptProviders, selectTranscriptPresentation } from '../lib/transcriptPresentation';
 
 interface RoomInfo {
     name: string;
@@ -42,14 +42,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
 
     // Provider filter - simple select: 'all' or specific provider name
     const [filterProvider, setFilterProvider] = useState<string>('all');
-    const [isFollowingLatest, setIsFollowingLatest] = useState(true);
-    const transcriptScrollRef = useRef<HTMLDivElement>(null);
     const autoConnectAttemptedRef = useRef<string | null>(null);
-
-    const scrollToLatest = useCallback(() => {
-        const scroller = transcriptScrollRef.current;
-        if (scroller) scroller.scrollTop = scroller.scrollHeight;
-    }, []);
 
     // Convert backend URL to HTTP
     const httpBackendUrl = toHttpUrl(backendUrl);
@@ -111,39 +104,30 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
 
     // Get unique providers from agents
     const availableProviders = useMemo(() => {
-        const providers = new Set<string>();
-        viewer.agents.forEach(agent => {
-            if (agent.provider) providers.add(agent.provider);
-        });
-        // Also check transcripts for providers
-        viewer.transcripts.forEach(t => {
-            if (t.provider) providers.add(t.provider);
-        });
-        viewer.interimTranscripts.forEach(interim => providers.add(interim.provider));
-        return Array.from(providers).sort();
+        return collectTranscriptProviders(
+            viewer.transcripts,
+            viewer.interimTranscripts,
+            viewer.agents.map(agent => agent.provider),
+        );
     }, [viewer.agents, viewer.interimTranscripts, viewer.transcripts]);
 
-    // Filter transcripts by selected provider
-    const filteredTranscripts = useMemo(() => {
-        const matching = filterProvider === 'all'
-            ? viewer.transcripts
-            : viewer.transcripts.filter(t => t.provider === filterProvider);
-        return groupFinalTranscriptRows(matching);
-    }, [viewer.transcripts, filterProvider]);
+    const { transcripts: filteredTranscripts, interims: filteredInterims } = useMemo(() => {
+        return selectTranscriptPresentation(
+            viewer.transcripts,
+            viewer.interimTranscripts,
+            filterProvider,
+        );
+    }, [filterProvider, viewer.interimTranscripts, viewer.transcripts]);
 
-    const filteredInterims = useMemo(() => {
-        const interims = Array.from(viewer.interimTranscripts.values());
-        return filterProvider === 'all'
-            ? interims
-            : interims.filter(interim => interim.provider === filterProvider);
-    }, [filterProvider, viewer.interimTranscripts]);
-
-    useEffect(() => {
-        if (!isFollowingLatest) return;
-
-        const frame = window.requestAnimationFrame(scrollToLatest);
-        return () => window.cancelAnimationFrame(frame);
-    }, [filteredInterims, filteredTranscripts, isFollowingLatest, scrollToLatest]);
+    const {
+        containerRef: transcriptScrollRef,
+        isFollowingLatest,
+        handleScroll,
+        jumpToLatest,
+    } = useTranscriptViewport({
+        committed: filteredTranscripts,
+        interim: filteredInterims,
+    });
 
     return (
         <div className="app-shell">
@@ -387,7 +371,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                             <div
                                 ref={transcriptScrollRef}
                                 className="transcript-scroller h-[clamp(24rem,65dvh,52rem)] overflow-y-auto px-4 py-2"
-                                onScroll={(event) => setIsFollowingLatest(shouldStickToLatest(event.currentTarget))}
+                                onScroll={(event) => handleScroll(event.currentTarget)}
                             >
                                 {viewer.connectionState !== ConnectionState.CONNECTED ? (
                                     <div className="flex h-full flex-col items-center justify-center text-slate-400">
@@ -403,95 +387,14 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                         )}
                                     </div>
                                 ) : (
-                                    <>
-                                        {/* Final transcripts */}
-                                        {filteredTranscripts.map(segment => {
-                                            const isTurnLive = isTranscriptTurnLive(segment);
-                                            return (
-                                                <div
-                                                    key={segment.id}
-                                                    className="transcript-row transcript-turn grid grid-cols-[auto_minmax(0,1fr)_auto] gap-3 py-3"
-                                                >
-                                                    {segment.provider && (
-                                                        <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderPresentation(segment.provider).badge}`}>
-                                                            {formatProviderName(segment.provider)}
-                                                        </span>
-                                                    )}
-                                                    <div className="transcript-bilingual min-w-0">
-                                                        <p
-                                                            className={`transcript-source-line break-words text-[1rem] leading-7 text-slate-100 ${hasSourceLanguageLabel(segment.provider, segment.languageCode) ? 'transcript-source-line--labeled' : ''}`}
-                                                            lang={normalizeLanguageTag(segment.languageCode)}
-                                                            dir="auto"
-                                                        >
-                                                            {hasSourceLanguageLabel(segment.provider, segment.languageCode) && (
-                                                                <span className="source-language-label" title={formatLanguageLabel(segment.languageCode)} aria-hidden="true">
-                                                                    <span className="language-label__text">{formatLanguageLabel(segment.languageCode)}</span>
-                                                                </span>
-                                                            )}
-                                                            <span className="transcript-source-line__text">{segment.text}</span>
-                                                        </p>
-                                                        <TranslationBlock translation={segment.translation} />
-                                                    </div>
-                                                    <time
-                                                        className="transcript-turn__time shrink-0 text-[10px] text-slate-400"
-                                                        dateTime={new Date(segment.timestamp).toISOString()}
-                                                    >
-                                                        {isTurnLive && (
-                                                            <>
-                                                                <span className="sr-only">Live turn. </span>
-                                                                <span className="transcript-live-dot transcript-turn__live-dot" aria-hidden="true" />
-                                                            </>
-                                                        )}
-                                                        {new Date(segment.timestamp).toLocaleTimeString()}
-                                                    </time>
-                                                </div>
-                                            );
-                                        })}
-
-                                        {/* Interim transcripts (per agent) */}
-                                        {filteredInterims.map(interim => (
-                                            <div
-                                                key={interim.key}
-                                                className="transcript-row transcript-row--interim transcript-turn transcript-turn--draft grid grid-cols-[auto_minmax(0,1fr)] gap-2 py-3 sm:gap-3"
-                                            >
-                                                <div className="flex flex-col items-start gap-1">
-                                                    <span className={`h-fit shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-bold uppercase ${getProviderPresentation(interim.provider).badge}`}>
-                                                        {formatProviderName(interim.provider)}
-                                                    </span>
-                                                    <span className="transcript-draft-indicator">
-                                                        <span className="transcript-live-dot" aria-hidden="true" />
-                                                        Draft
-                                                    </span>
-                                                </div>
-                                                <div className="transcript-bilingual col-span-2 min-w-0 sm:col-span-1">
-                                                    <p
-                                                        className={`transcript-source-line break-words text-[1rem] leading-7 text-slate-300 ${hasSourceLanguageLabel(interim.provider, interim.languageCode) ? 'transcript-source-line--labeled' : ''}`}
-                                                        lang={normalizeLanguageTag(interim.languageCode)}
-                                                        dir="auto"
-                                                    >
-                                                        <span className="sr-only">Live interim transcript from {interim.speaker}: </span>
-                                                        {hasSourceLanguageLabel(interim.provider, interim.languageCode) && (
-                                                            <span className="source-language-label" title={formatLanguageLabel(interim.languageCode)} aria-hidden="true">
-                                                                <span className="language-label__text">{formatLanguageLabel(interim.languageCode)}</span>
-                                                            </span>
-                                                        )}
-                                                        <span className="transcript-source-line__text">{interim.text}</span>
-                                                    </p>
-                                                    <TranslationBlock translation={interim.translation} />
-                                                </div>
-                                            </div>
-                                        ))}
-                                    </>
+                                    <TranscriptRows transcripts={filteredTranscripts} interims={filteredInterims} variant="detailed" />
                                 )}
                             </div>
                             {!isFollowingLatest && (filteredTranscripts.length > 0 || filteredInterims.length > 0) && (
                                 <button
                                     type="button"
                                     className="control-button control-button--quiet absolute bottom-3 right-4 bg-slate-900/95 shadow-lg"
-                                    onClick={() => {
-                                        scrollToLatest();
-                                        setIsFollowingLatest(true);
-                                    }}
+                                    onClick={jumpToLatest}
                                 >
                                     Jump to latest
                                 </button>

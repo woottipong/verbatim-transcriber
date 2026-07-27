@@ -1,13 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { Download, Radio, Users, Volume2, VolumeX, LogOut, Eraser } from 'lucide-react';
 import { TranscriptSegment, ConnectionState, AudioSource } from '../types';
 import { getLiveKitSessionPresentation } from '../lib/liveKitSession';
-import { shouldStickToLatest } from '../lib/transcriptViewport';
-import TranslationBlock from './TranslationBlock';
-import { formatLanguageLabel, groupFinalTranscriptRows, isTranscriptTurnLive, normalizeLanguageTag, type InterimTranscript } from '../lib/transcriptMessages';
-import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel, providerFromAgentIdentity } from '../lib/providers';
-import { buildTranscriptFilename, downloadTranscriptText, formatTranscriptText } from '../lib/transcriptExport';
+import type { InterimTranscript } from '../lib/transcriptMessages';
+import { formatProviderName, getProviderPresentation, providerFromAgentIdentity } from '../lib/providers';
+import { buildTranscriptFilename, downloadTranscriptText } from '../lib/transcriptExport';
 import ToastViewport from './ToastViewport';
+import { TranscriptParagraph, TranscriptRows } from './TranscriptPresentation';
+import { useTranscriptViewport } from '../hooks/useTranscriptViewport';
+import { buildProviderTranscriptPresentations } from '../lib/transcriptPresentation';
 
 interface LiveKitPanelProps {
   transcripts: TranscriptSegment[];
@@ -52,18 +53,9 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
   onToggleAudioInput,
   onClear,
 }) => {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [isFollowingLatest, setIsFollowingLatest] = useState(true);
   const [viewMode, setViewMode] = useState<'timeline' | 'paragraph'>('timeline');
   const [selectedProvider, setSelectedProvider] = useState('');
   const [exportError, setExportError] = useState<string | null>(null);
-
-  const scrollToLatest = useCallback(() => {
-    const scrollers = scrollRef.current?.querySelectorAll<HTMLElement>('[data-transcript-scroller]');
-    scrollers?.forEach(scroller => {
-      scroller.scrollTop = scroller.scrollHeight;
-    });
-  }, []);
 
   const handleExportProvider = useCallback((provider: string, text: string) => {
     try {
@@ -75,86 +67,38 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
     }
   }, [roomName]);
 
-  useEffect(() => {
-    if (!isFollowingLatest) return;
-
-    const frame = window.requestAnimationFrame(scrollToLatest);
-    return () => window.cancelAnimationFrame(frame);
-  }, [interimTranscripts, isFollowingLatest, scrollToLatest, transcripts]);
+  const {
+    containerRef: scrollRef,
+    isFollowingLatest,
+    handleScroll,
+    jumpToLatest,
+  } = useTranscriptViewport({
+    committed: transcripts,
+    interim: interimTranscripts,
+    descendantScrollers: true,
+  });
 
   const isConnected = connectionState === ConnectionState.CONNECTED;
   const isConnecting = connectionState === ConnectionState.CONNECTING;
   const hasContent = transcripts.length > 0 || interimTranscripts.size > 0;
 
-  const finalizedByProvider = useMemo(() => {
-    const groups = new Map<string, TranscriptSegment[]>();
-    transcripts.forEach(segment => {
-      if (!segment.provider) return;
-      const providerTranscripts = groups.get(segment.provider);
-      if (providerTranscripts) {
-        providerTranscripts.push(segment);
-      } else {
-        groups.set(segment.provider, [segment]);
-      }
-    });
-
-    const finalized = new Map<string, {
-      transcripts: TranscriptSegment[];
-      exportText: string;
-    }>();
-    groups.forEach((providerTranscripts, provider) => {
-      const groupedTranscripts = groupFinalTranscriptRows(providerTranscripts);
-      finalized.set(provider, {
-        transcripts: groupedTranscripts,
-        exportText: formatTranscriptText(groupedTranscripts),
-      });
-    });
-    return finalized;
-  }, [transcripts]);
-
-  const interimsByProvider = useMemo(() => {
-    const groups = new Map<string, InterimTranscript[]>();
-    interimTranscripts.forEach(interim => {
-      if (!interim.provider) return;
-      const providerInterims = groups.get(interim.provider);
-      if (providerInterims) {
-        providerInterims.push(interim);
-      } else {
-        groups.set(interim.provider, [interim]);
-      }
-    });
-    return groups;
-  }, [interimTranscripts]);
-
   const providerGroups = useMemo(() => {
-    const providers = new Set([
-      ...finalizedByProvider.keys(),
-      ...interimsByProvider.keys(),
-    ]);
+    const providers: string[] = [];
     if (isAgentConnected && agentIdentity) {
       agentIdentity.split(',').forEach(identity => {
         const provider = providerFromAgentIdentity(identity.trim());
-        if (provider) providers.add(provider);
+        if (provider) providers.push(provider);
       });
     }
-    if (providers.size === 0) providers.add('google');
-
-    const order = ['google', 'gemini', 'azure', 'gpt-realtime-whisper'];
-    return Array.from(providers, provider => {
-      const finalized = finalizedByProvider.get(provider);
-      return [provider, {
-        transcripts: finalized?.transcripts ?? [],
-        interims: interimsByProvider.get(provider) ?? [],
-        exportText: finalized?.exportText ?? '',
-      }] as const;
-    }).sort(([left], [right]) => {
-      const leftOrder = order.indexOf(left);
-      const rightOrder = order.indexOf(right);
-      if (leftOrder === -1) return rightOrder === -1 ? left.localeCompare(right) : 1;
-      if (rightOrder === -1) return -1;
-      return leftOrder - rightOrder;
-    });
-  }, [agentIdentity, finalizedByProvider, interimsByProvider, isAgentConnected]);
+    const presentations = buildProviderTranscriptPresentations(
+      transcripts,
+      interimTranscripts,
+      providers,
+    );
+    return presentations.length > 0
+      ? presentations
+      : buildProviderTranscriptPresentations(transcripts, interimTranscripts, ['google']);
+  }, [agentIdentity, interimTranscripts, isAgentConnected, transcripts]);
   const activeProviders = providerGroups.map(([provider]) => provider);
   const visibleMobileProvider = activeProviders.includes(selectedProvider)
     ? selectedProvider
@@ -372,7 +316,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                   <div 
                     className="flex-1 overflow-y-auto px-4 py-3 transcript-scroller"
                     data-transcript-scroller
-                    onScroll={(event) => setIsFollowingLatest(shouldStickToLatest(event.currentTarget))}
+                    onScroll={(event) => handleScroll(event.currentTarget)}
                   >
                     {!hasProviderContent ? (
                       <div className="h-full flex flex-col items-center justify-center text-center p-6 select-none opacity-40 py-20">
@@ -381,85 +325,10 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                       </div>
                     ) : viewMode === 'timeline' ? (
                       <div className="transcript-timeline">
-                        {providerTranscripts.map((segment, idx) => {
-                          const isTurnLive = isTranscriptTurnLive(segment);
-                          return (
-                            <div
-                              key={segment.id}
-                              className="transcript-turn transcript-turn--line group -mx-2 flex items-start rounded px-2 transition-colors duration-100 hover:bg-slate-900/25"
-                            >
-                              <span className="transcript-turn__index shrink-0 select-none tabular-nums text-slate-400">
-                                <span className="sr-only">{isTurnLive ? 'Live turn ' : 'Turn '}</span>
-                                <span aria-hidden="true">{String(idx + 1).padStart(2, '0')}</span>
-                                {isTurnLive && <span className="transcript-live-dot transcript-turn__live-dot" aria-hidden="true" />}
-                              </span>
-                              <div className="transcript-bilingual min-w-0 flex-1">
-                                <p
-                                  className={`transcript-source-line text-slate-100 ${hasSourceLanguageLabel(segment.provider, segment.languageCode) ? 'transcript-source-line--labeled' : ''}`}
-                                  lang={normalizeLanguageTag(segment.languageCode)}
-                                  dir="auto"
-                                >
-                                  {hasSourceLanguageLabel(segment.provider, segment.languageCode) && (
-                                    <span className="source-language-label" title={formatLanguageLabel(segment.languageCode)} aria-hidden="true">
-                                      <span className="language-label__text">{formatLanguageLabel(segment.languageCode)}</span>
-                                    </span>
-                                  )}
-                                  <span className="transcript-source-line__text">{segment.text}</span>
-                                </p>
-                                <TranslationBlock translation={segment.translation} />
-                              </div>
-                            </div>
-                          );
-                        })}
-                        {providerInterims.map((interim, draftIndex) => (
-                          <div
-                            key={interim.key}
-                            className="transcript-turn transcript-turn--draft transcript-turn--line group -mx-2 flex items-start rounded px-2 hover:bg-slate-900/25"
-                          >
-                            <span className="transcript-turn__index shrink-0 select-none tabular-nums text-slate-400">
-                              <span className="sr-only">Live draft </span>
-                              <span aria-hidden="true">{String(providerTranscripts.length + draftIndex + 1).padStart(2, '0')}</span>
-                              <span className="transcript-live-dot transcript-turn__live-dot" aria-hidden="true" />
-                              <span className="transcript-turn__draft-label" aria-hidden="true">Draft</span>
-                            </span>
-                            <div className="transcript-bilingual min-w-0 flex-1">
-                              <p
-                                className={`transcript-source-line min-w-0 text-slate-300 ${hasSourceLanguageLabel(interim.provider, interim.languageCode) ? 'transcript-source-line--labeled' : ''}`}
-                                lang={normalizeLanguageTag(interim.languageCode)}
-                                dir="auto"
-                              >
-                                {hasSourceLanguageLabel(interim.provider, interim.languageCode) && (
-                                  <span className="source-language-label" title={formatLanguageLabel(interim.languageCode)} aria-hidden="true">
-                                    <span className="language-label__text">{formatLanguageLabel(interim.languageCode)}</span>
-                                  </span>
-                                )}
-                                <span className="transcript-source-line__text">{interim.text}</span>
-                              </p>
-                              <TranslationBlock translation={interim.translation} />
-                            </div>
-                          </div>
-                        ))}
+                        <TranscriptRows transcripts={providerTranscripts} interims={providerInterims} variant="numbered" />
                       </div>
                     ) : (
-                      <p className="transcript-paragraph-source min-w-0 break-words text-slate-100">
-                        {providerTranscripts.map(segment => (
-                          <React.Fragment key={segment.id}>
-                            <span lang={normalizeLanguageTag(segment.languageCode)} dir="auto">{segment.text}</span>{' '}
-                          </React.Fragment>
-                        ))}
-                        {providerInterims.map(interim => {
-                          const presentation = getProviderPresentation(interim.provider);
-                          return (
-                            <React.Fragment key={interim.key}>
-                              <span className="transcript-inline-draft">
-                                <span className="transcript-inline-draft__dot" aria-hidden="true" />
-                                Draft
-                              </span>{' '}
-                              <span className={`italic ${presentation.draftText}`} lang={normalizeLanguageTag(interim.languageCode)} dir="auto">{interim.text}</span>{' '}
-                            </React.Fragment>
-                          );
-                        })}
-                      </p>
+                      <TranscriptParagraph transcripts={providerTranscripts} interims={providerInterims} />
                     )}
                     <div data-transcript-end aria-hidden="true" />
                   </div>
@@ -474,10 +343,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
         <button
           type="button"
           className="control-button control-button--quiet absolute bottom-3 right-4 bg-slate-900/95 shadow-lg z-10"
-          onClick={() => {
-            scrollToLatest();
-            setIsFollowingLatest(true);
-          }}
+          onClick={jumpToLatest}
         >
           Jump to Latest
         </button>

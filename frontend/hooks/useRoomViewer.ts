@@ -20,6 +20,7 @@ import { getControlAuthHeaders } from '../lib/runtime';
 import type { InterimTranscript } from '../lib/transcriptMessages';
 import { providerFromAgentIdentity } from '../lib/providers';
 import { TranscriptSession } from '../lib/transcriptSession';
+import { LiveKitRoomLifecycle } from '../lib/liveKitRoomLifecycle';
 
 // Agent info with provider
 export interface AgentInfo {
@@ -64,10 +65,13 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     const [audioParticipants, setAudioParticipants] = useState<string[]>([]);
 
     // Refs
-    const roomRef = useRef<Room | null>(null);
     const audioElementsRef = useRef<Map<string, HTMLAudioElement>>(new Map());
     const isAudioMutedRef = useRef(false);
-    const connectionAttemptRef = useRef(0);
+    const roomLifecycleRef = useRef<LiveKitRoomLifecycle | null>(null);
+    if (roomLifecycleRef.current === null) {
+        roomLifecycleRef.current = new LiveKitRoomLifecycle();
+    }
+    const roomLifecycle = roomLifecycleRef.current;
     const transcriptSessionRef = useRef<TranscriptSession | null>(null);
     if (transcriptSessionRef.current === null) {
         transcriptSessionRef.current = new TranscriptSession({ idPrefix: 'view' });
@@ -234,86 +238,56 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
 
     // Connect to LiveKit room as viewer
     const connect = useCallback(async (roomName: string) => {
-        const connectionAttempt = ++connectionAttemptRef.current;
-        let newRoom: Room | null = null;
-
         try {
-            // Disconnect if already connected
-            const previousRoom = roomRef.current;
-            roomRef.current = null;
-            previousRoom?.disconnect();
-            cleanupAudioElements();
-            setAudioParticipants([]);
-            transcriptSession.reset();
-
             setConnectionState(ConnectionState.CONNECTING);
             setError(null);
             setCurrentRoomName(roomName);
 
-            // Get token
-            const { token, wsUrl } = await fetchToken(roomName);
-            if (connectionAttempt !== connectionAttemptRef.current) return;
-            console.log('[Viewer] 🎫 Token received for room:', roomName);
-
-            // Create room (viewer mode - no audio capture)
-            newRoom = new Room({
-                adaptiveStream: true,
-                dynacast: true,
+            const connectedRoom = await roomLifecycle.connect({
+                prepare: async () => {
+                    const credentials = await fetchToken(roomName);
+                    console.log('[Viewer] 🎫 Token received for room:', roomName);
+                    return credentials;
+                },
+                getToken: async credentials => credentials.token,
+                serverUrl: credentials => (
+                    credentials.wsUrl || import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880'
+                ),
+                roomOptions: {
+                    adaptiveStream: true,
+                    dynacast: true,
+                },
+                createRoom: roomOptions => new Room(roomOptions),
+                registerAdapterEvents: lifecycleRoom => {
+                    lifecycleRoom.on(RoomEvent.DataReceived, handleDataReceived);
+                    lifecycleRoom.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
+                    lifecycleRoom.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
+                    lifecycleRoom.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
+                    lifecycleRoom.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
+                },
+                callbacks: {
+                    onConnected: () => {
+                        console.log('[Viewer] ✅ Connected to room:', roomName);
+                        setConnectionState(ConnectionState.CONNECTED);
+                    },
+                    onReconnecting: () => setConnectionState(ConnectionState.CONNECTING),
+                    onReconnected: () => setConnectionState(ConnectionState.CONNECTED),
+                    onEnded: (reason) => {
+                        setRoom(null);
+                        setAgents([]);
+                        transcriptSession.reset();
+                        cleanupAudioElements();
+                        setAudioParticipants([]);
+                        if (reason !== 'replaced') setConnectionState(ConnectionState.DISCONNECTED);
+                        if (reason === 'manual' || reason === 'disposed') setCurrentRoomName(null);
+                    },
+                },
             });
-
-            // Set up event listeners
-            newRoom.on(RoomEvent.Connected, () => {
-                if (roomRef.current !== newRoom) return;
-                console.log('[Viewer] ✅ Connected to room:', roomName);
-                setConnectionState(ConnectionState.CONNECTED);
-            });
-
-            newRoom.on(RoomEvent.Disconnected, () => {
-                if (roomRef.current !== newRoom) return;
-                console.log('[Viewer] ❌ Disconnected from room');
-                roomRef.current = null;
-                setRoom(null);
-                setConnectionState(ConnectionState.DISCONNECTED);
-                setAgents([]);
-                transcriptSession.reset();
-                cleanupAudioElements();
-                setAudioParticipants([]);
-            });
-
-            newRoom.on(RoomEvent.Reconnecting, () => {
-                console.log('[Viewer] 🔄 Reconnecting...');
-                setConnectionState(ConnectionState.CONNECTING);
-            });
-
-            newRoom.on(RoomEvent.Reconnected, () => {
-                console.log('[Viewer] ✅ Reconnected');
-                setConnectionState(ConnectionState.CONNECTED);
-            });
-
-            newRoom.on(RoomEvent.DataReceived, handleDataReceived);
-            newRoom.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
-            newRoom.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
-
-            // Audio track events for playback
-            newRoom.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
-            newRoom.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
-
-            roomRef.current = newRoom;
-
-            // Connect (viewer - no local tracks)
-            const serverUrl = wsUrl || import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880';
-            await newRoom.connect(serverUrl, token, {
-                autoSubscribe: true,
-            });
-            if (connectionAttempt !== connectionAttemptRef.current) {
-                newRoom.disconnect();
-                return;
-            }
-
-            setRoom(newRoom);
+            if (!connectedRoom || !roomLifecycle.isCurrent(connectedRoom)) return;
+            setRoom(connectedRoom);
 
             // Check for existing agents
-            const existingParticipants = Array.from(newRoom.remoteParticipants.values());
+            const existingParticipants = Array.from(connectedRoom.remoteParticipants.values());
             const existingAgents = existingParticipants
                 .filter(p => isAgent(p.identity))
                 .map(p => ({
@@ -328,36 +302,17 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             }
 
         } catch (err) {
-            if (newRoom) {
-                if (roomRef.current === newRoom) {
-                    roomRef.current = null;
-                }
-                newRoom.disconnect();
-            }
-            if (connectionAttempt !== connectionAttemptRef.current) return;
             console.error('[Viewer] Connection failed:', err);
             setError(err instanceof Error ? err.message : 'Connection failed');
             setConnectionState(ConnectionState.ERROR);
         }
-    }, [cleanupAudioElements, fetchToken, handleDataReceived, handleParticipantConnected, handleParticipantDisconnected, handleTrackSubscribed, handleTrackUnsubscribed, isAgent, getProviderFromIdentity, transcriptSession]);
+    }, [cleanupAudioElements, fetchToken, handleDataReceived, handleParticipantConnected, handleParticipantDisconnected, handleTrackSubscribed, handleTrackUnsubscribed, isAgent, getProviderFromIdentity, transcriptSession, roomLifecycle]);
 
     // Disconnect from room
     const disconnect = useCallback(() => {
-        connectionAttemptRef.current++;
-        const currentRoom = roomRef.current;
-        roomRef.current = null;
-        if (currentRoom) {
-            console.log('[Viewer] 🔌 Disconnecting...');
-            currentRoom.disconnect();
-        }
-        setRoom(null);
-        setAgents([]);
         transcriptSession.reset();
-        setCurrentRoomName(null);
-        setConnectionState(ConnectionState.DISCONNECTED);
-        cleanupAudioElements();
-        setAudioParticipants([]);
-    }, [cleanupAudioElements, transcriptSession]);
+        roomLifecycle.disconnect();
+    }, [roomLifecycle, transcriptSession]);
 
     // Clear transcripts
     const clearTranscripts = useCallback(() => {
@@ -367,14 +322,11 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     // Cleanup on unmount
     useEffect(() => {
         return () => {
-            connectionAttemptRef.current++;
-            if (roomRef.current) {
-                roomRef.current.disconnect();
-            }
             transcriptSession.reset();
+            roomLifecycle.dispose();
             cleanupAudioElements();
         };
-    }, [cleanupAudioElements, transcriptSession]);
+    }, [cleanupAudioElements, transcriptSession, roomLifecycle]);
 
     return {
         connectionState,
