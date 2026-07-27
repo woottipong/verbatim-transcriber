@@ -44,6 +44,11 @@ type ReadyEvent struct {
 	Timestamp     string `json:"timestamp"`
 }
 
+type ProviderEvent struct {
+	Text    string `json:"text"`
+	IsFinal bool   `json:"isFinal"`
+}
+
 type Subscription struct {
 	events chan []byte
 	done   chan struct{}
@@ -57,12 +62,18 @@ type roomState struct {
 	subscribers map[*Subscription]struct{}
 }
 
+type providerKey struct {
+	room     string
+	provider string
+}
+
 type Hub struct {
-	mu          sync.Mutex
-	rooms       map[string]*roomState
-	generations map[string]uint64
-	queueSize   int
-	now         func() time.Time
+	mu            sync.Mutex
+	rooms         map[string]*roomState
+	providerRooms map[providerKey]*roomState
+	generations   map[string]uint64
+	queueSize     int
+	now           func() time.Time
 }
 
 func NewHub() *Hub {
@@ -74,10 +85,11 @@ func NewHubWithQueueSize(queueSize int) *Hub {
 		queueSize = defaultSubscriberQueueSize
 	}
 	return &Hub{
-		rooms:       make(map[string]*roomState),
-		generations: make(map[string]uint64),
-		queueSize:   queueSize,
-		now:         time.Now,
+		rooms:         make(map[string]*roomState),
+		providerRooms: make(map[providerKey]*roomState),
+		generations:   make(map[string]uint64),
+		queueSize:     queueSize,
+		now:           time.Now,
 	}
 }
 
@@ -102,6 +114,15 @@ func (h *Hub) Invalidate(room string) {
 		}
 		delete(h.rooms, room)
 	}
+	for key, state := range h.providerRooms {
+		if key.room != room {
+			continue
+		}
+		for subscription := range state.subscribers {
+			h.removeProviderSubscriptionLocked(key, subscription)
+		}
+		delete(h.providerRooms, key)
+	}
 }
 
 func (h *Hub) Subscribe(room string) *Subscription {
@@ -121,6 +142,24 @@ func (h *Hub) Subscribe(room string) *Subscription {
 	return subscription
 }
 
+func (h *Hub) SubscribeProvider(room, provider string) *Subscription {
+	subscription := &Subscription{
+		events: make(chan []byte, h.queueSize),
+		done:   make(chan struct{}),
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	key := providerKey{room: room, provider: provider}
+	state := h.providerRooms[key]
+	if state == nil {
+		state = &roomState{subscribers: make(map[*Subscription]struct{})}
+		h.providerRooms[key] = state
+	}
+	state.subscribers[subscription] = struct{}{}
+	return subscription
+}
+
 func (h *Hub) Unsubscribe(room string, subscription *Subscription) {
 	if subscription == nil {
 		return
@@ -128,6 +167,15 @@ func (h *Hub) Unsubscribe(room string, subscription *Subscription) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.removeSubscriptionLocked(room, subscription)
+}
+
+func (h *Hub) UnsubscribeProvider(room, provider string, subscription *Subscription) {
+	if subscription == nil {
+		return
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.removeProviderSubscriptionLocked(providerKey{room: room, provider: provider}, subscription)
 }
 
 func (h *Hub) Publish(room string, message agent.TranscriptMessage) {
@@ -139,43 +187,54 @@ func (h *Hub) Publish(room string, message agent.TranscriptMessage) {
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	state := h.rooms[room]
-	if state == nil || len(state.subscribers) == 0 {
-		return
-	}
-	state.sequence++
-	event := Event{
-		SchemaVersion: schemaVersion,
-		Type:          "transcript.interim",
-		ID:            uuid.NewString(),
-		Sequence:      state.sequence,
-		Room:          room,
-		Timestamp:     h.now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
-		Transcript: TranscriptPayload{
-			Text:         message.Text,
-			IsFinal:      message.IsFinal,
-			Confidence:   message.Confidence,
-			Provider:     message.Provider,
-			Speaker:      message.Speaker,
-			Role:         message.Role,
-			LanguageCode: message.LanguageCode,
-			TurnID:       message.TurnID,
-		},
-	}
-	if message.IsFinal {
-		event.Type = "transcript.final"
-	}
-	payload, err := json.Marshal(event)
-	if err != nil {
-		return
+	if state := h.rooms[room]; state != nil && len(state.subscribers) > 0 {
+		state.sequence++
+		event := Event{
+			SchemaVersion: schemaVersion,
+			Type:          "transcript.interim",
+			ID:            uuid.NewString(),
+			Sequence:      state.sequence,
+			Room:          room,
+			Timestamp:     h.now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+			Transcript: TranscriptPayload{
+				Text:         message.Text,
+				IsFinal:      message.IsFinal,
+				Confidence:   message.Confidence,
+				Provider:     message.Provider,
+				Speaker:      message.Speaker,
+				Role:         message.Role,
+				LanguageCode: message.LanguageCode,
+				TurnID:       message.TurnID,
+			},
+		}
+		if message.IsFinal {
+			event.Type = "transcript.final"
+		}
+		payload, err := json.Marshal(event)
+		if err == nil {
+			for subscription := range state.subscribers {
+				select {
+				case subscription.events <- payload:
+				default:
+					// A slow integration must not stall the ASR pipeline.
+					h.removeSubscriptionLocked(room, subscription)
+				}
+			}
+		}
 	}
 
-	for subscription := range state.subscribers {
-		select {
-		case subscription.events <- payload:
-		default:
-			// A slow integration must not stall the ASR pipeline.
-			h.removeSubscriptionLocked(room, subscription)
+	key := providerKey{room: room, provider: message.Provider}
+	if state := h.providerRooms[key]; state != nil && len(state.subscribers) > 0 {
+		payload, err := json.Marshal(ProviderEvent{Text: message.Text, IsFinal: message.IsFinal})
+		if err != nil {
+			return
+		}
+		for subscription := range state.subscribers {
+			select {
+			case subscription.events <- payload:
+			default:
+				h.removeProviderSubscriptionLocked(key, subscription)
+			}
 		}
 	}
 }
@@ -204,5 +263,21 @@ func (h *Hub) removeSubscriptionLocked(room string, subscription *Subscription) 
 	close(subscription.events)
 	if len(state.subscribers) == 0 {
 		delete(h.rooms, room)
+	}
+}
+
+func (h *Hub) removeProviderSubscriptionLocked(key providerKey, subscription *Subscription) {
+	state := h.providerRooms[key]
+	if state == nil {
+		return
+	}
+	if _, ok := state.subscribers[subscription]; !ok {
+		return
+	}
+	delete(state.subscribers, subscription)
+	close(subscription.done)
+	close(subscription.events)
+	if len(state.subscribers) == 0 {
+		delete(h.providerRooms, key)
 	}
 }

@@ -59,6 +59,70 @@ func TestHubDoesNotPublishTranslationPacketsToLegacySubscribers(t *testing.T) {
 	}
 }
 
+func TestHubPublishesLeanEventsOnlyToMatchingProvider(t *testing.T) {
+	hub := NewHubWithQueueSize(4)
+	google := hub.SubscribeProvider("room-a", "google")
+	gemini := hub.SubscribeProvider("room-a", "gemini")
+	otherRoom := hub.SubscribeProvider("room-b", "google")
+	defer hub.UnsubscribeProvider("room-a", "google", google)
+	defer hub.UnsubscribeProvider("room-a", "gemini", gemini)
+	defer hub.UnsubscribeProvider("room-b", "google", otherRoom)
+
+	hub.Publish("room-a", agent.TranscriptMessage{
+		Text:     "ผู้ป่วยมีอาการ",
+		Provider: "google",
+	})
+
+	if got := string(<-google.Events()); got != `{"text":"ผู้ป่วยมีอาการ","isFinal":false}` {
+		t.Fatalf("payload = %s", got)
+	}
+	assertNoSubscriptionEvent(t, gemini)
+	assertNoSubscriptionEvent(t, otherRoom)
+}
+
+func TestHubPublishesLeanFinalProviderEvent(t *testing.T) {
+	hub := NewHub()
+	subscription := hub.SubscribeProvider("room-a", "gpt-realtime-whisper")
+	defer hub.UnsubscribeProvider("room-a", "gpt-realtime-whisper", subscription)
+
+	hub.Publish("room-a", agent.TranscriptMessage{
+		Text:     "ผู้ป่วยมีอาการเจ็บหน้าอก",
+		IsFinal:  true,
+		Provider: "gpt-realtime-whisper",
+	})
+
+	if got := string(<-subscription.Events()); got != `{"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":true}` {
+		t.Fatalf("payload = %s", got)
+	}
+}
+
+func TestHubDoesNotPublishTranslationPacketsToProviderSubscribers(t *testing.T) {
+	hub := NewHub()
+	subscription := hub.SubscribeProvider("room-a", "gemini")
+	defer hub.UnsubscribeProvider("room-a", "gemini", subscription)
+
+	hub.Publish("room-a", agent.TranscriptMessage{
+		Text:     "emergency room",
+		Provider: "gemini",
+		Role:     domain.TranscriptRoleTranslation,
+	})
+
+	assertNoSubscriptionEvent(t, subscription)
+}
+
+func TestHubRemovesSlowProviderSubscribersWithoutBlocking(t *testing.T) {
+	hub := NewHubWithQueueSize(1)
+	subscription := hub.SubscribeProvider("room-a", "google")
+	hub.Publish("room-a", agent.TranscriptMessage{Text: "first", Provider: "google"})
+	hub.Publish("room-a", agent.TranscriptMessage{Text: "second", Provider: "google"})
+
+	select {
+	case <-subscription.Done():
+	case <-time.After(time.Second):
+		t.Fatal("slow provider subscriber was not closed")
+	}
+}
+
 func TestHubKeepsRoomSequencesIndependent(t *testing.T) {
 	hub := NewHub()
 	roomA := hub.Subscribe("room-a")
@@ -109,6 +173,7 @@ func TestHubReadyEvent(t *testing.T) {
 func TestHubInvalidationClosesSubscribersAndAdvancesGeneration(t *testing.T) {
 	hub := NewHub()
 	subscription := hub.Subscribe("room-a")
+	providerSubscription := hub.SubscribeProvider("room-a", "google")
 	hub.Invalidate("room-a")
 
 	select {
@@ -118,6 +183,20 @@ func TestHubInvalidationClosesSubscribersAndAdvancesGeneration(t *testing.T) {
 	}
 	if got := hub.Generation("room-a"); got != 1 {
 		t.Fatalf("generation = %d, want 1", got)
+	}
+	select {
+	case <-providerSubscription.Done():
+	case <-time.After(time.Second):
+		t.Fatal("provider subscription was not closed during invalidation")
+	}
+}
+
+func assertNoSubscriptionEvent(t *testing.T, subscription *Subscription) {
+	t.Helper()
+	select {
+	case payload := <-subscription.Events():
+		t.Fatalf("unexpected subscription event: %s", payload)
+	default:
 	}
 }
 

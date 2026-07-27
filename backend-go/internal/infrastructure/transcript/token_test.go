@@ -122,3 +122,44 @@ func TestTokenServiceBindsTokenToLiveKitRoom(t *testing.T) {
 		t.Fatalf("VerifyForRoom() error = %v, want invalid token", err)
 	}
 }
+
+func TestTokenServiceBindsTokenToProvider(t *testing.T) {
+	service := NewTokenService("test-secret-at-least-32-bytes-long", time.Hour)
+	token, _, err := service.IssueForProviderRoom("room-a", "google", "RM_1", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := service.VerifyForProviderRoom(token, "room-a", "google", "RM_1", 2)
+	if err != nil {
+		t.Fatalf("matching provider: %v", err)
+	}
+	if claims.Provider != "google" {
+		t.Fatalf("claims.Provider = %q, want google", claims.Provider)
+	}
+	if _, err := service.VerifyForProviderRoom(token, "room-a", "gemini", "RM_1", 2); !errors.Is(err, ErrInvalidTranscriptToken) {
+		t.Fatalf("wrong provider error = %v", err)
+	}
+}
+
+func TestTokenServiceRejectsInvalidProvider(t *testing.T) {
+	service := NewTokenService("test-secret-at-least-32-bytes-long", time.Hour)
+	for _, provider := range []string{"", "openai", "unknown"} {
+		if _, _, err := service.IssueForProviderRoom("room-a", provider, "RM_1", 0); !errors.Is(err, ErrInvalidTranscriptProvider) {
+			t.Fatalf("IssueForProviderRoom(%q) error = %v", provider, err)
+		}
+	}
+}
+
+func TestProviderTokenCannotBeUsedForAnotherProviderRoute(t *testing.T) {
+	service := NewTokenService("test-secret-at-least-32-bytes-long", time.Hour)
+	token, _, err := service.IssueForProviderRoom("room-a", "gpt-realtime-whisper", "RM_1", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.VerifyForProviderRoom(token, "room-a", "google", "RM_1", 0); !errors.Is(err, ErrInvalidTranscriptToken) {
+		t.Fatalf("VerifyForProviderRoom() error = %v, want invalid token", err)
+	}
+	if _, err := service.VerifyForRoom(token, "room-a", "RM_1", 0); !errors.Is(err, ErrInvalidTranscriptToken) {
+		t.Fatalf("VerifyForRoom() error = %v, want invalid token", err)
+	}
+}

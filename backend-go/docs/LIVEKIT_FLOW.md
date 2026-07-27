@@ -58,11 +58,21 @@ Audio source changes are allowed only while disconnected. Selecting Chrome Tab o
 | `GET` | `/livekit/rooms/detailed` | Rooms and participants |
 | `POST` | `/livekit/rooms/:room/transcript-token` | Signed room-bound transcript URL |
 | `GET` | `/livekit/rooms/:room/transcripts/ws?token=...` | Read-only source transcript stream |
+| `POST` | `/livekit/rooms/:room/transcript-token/:provider` | Signed room/provider-bound transcript URL |
+| `GET` | `/ws/transcript/:provider/:room?token=...` | Lean provider source transcript stream |
 | `GET` / `DELETE` | `/livekit/rooms/:name` | Inspect/delete room |
 | `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove participant |
 | `POST` | `/livekit/agent/start` | Start provider agent |
 | `POST` | `/livekit/agent/stop` | Stop provider agent |
 | `GET` | `/livekit/agent/status` | Running agents |
+
+The provider-specific socket sends one full provider-derived source snapshot per text frame:
+
+```json
+{"text":"ผู้ป่วยมีอาการ","isFinal":false}
+```
+
+Clients replace the current Draft for interim frames and commit then clear it for final frames. Gemini translation stays on the LiveKit data channel. The provider socket has no ready event or replay; the legacy room-wide socket retains its versioned event contract.
 
 ## Transcript packet
 

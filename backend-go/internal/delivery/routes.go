@@ -55,7 +55,15 @@ func setupLiveKitRoutes(app *fiber.App, cfg *config.Config) {
 	rooms.Get("/", controlAuth, func(c *fiber.Ctx) error { return handler.HandleListRooms(c, cfg) })
 	rooms.Get("/detailed", controlAuth, func(c *fiber.Ctx) error { return handler.HandleGetRoomsDetailed(c, cfg) })
 	rooms.Post("/:room/transcript-token", controlAuth, func(c *fiber.Ctx) error { return handler.HandleCreateTranscriptToken(c, cfg) })
+	rooms.Post("/:room/transcript-token/:provider", controlAuth, func(c *fiber.Ctx) error {
+		return handler.HandleCreateProviderTranscriptToken(c, cfg)
+	})
 	rooms.Get("/:room/transcripts/ws", handler.TranscriptWebSocketMiddleware(cfg), websocket.New(handler.HandleTranscriptWebSocket(handler.TranscriptHub())))
+	app.Get(
+		"/ws/transcript/:provider/:room",
+		handler.ProviderTranscriptWebSocketMiddleware(cfg),
+		websocket.New(handler.HandleProviderTranscriptWebSocket(handler.TranscriptHub())),
+	)
 	rooms.Get("/:name", controlAuth, func(c *fiber.Ctx) error { return handler.HandleGetRoom(c, cfg) })
 	rooms.Delete("/:name", controlAuth, func(c *fiber.Ctx) error { return handler.HandleDeleteRoom(c, cfg) })
 	rooms.Delete("/:room/participants/:identity", controlAuth, func(c *fiber.Ctx) error { return handler.HandleRemoveParticipant(c, cfg) })

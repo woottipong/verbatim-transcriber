@@ -10,6 +10,7 @@ type TranscriptTokenResponse struct {
 	Token        string `json:"token"`
 	ExpiresAt    string `json:"expiresAt"`
 	WebSocketURL string `json:"websocketUrl"`
+	Provider     string `json:"provider,omitempty"`
 }
 
 // TokenRequest represents the request body for LiveKit token generation.

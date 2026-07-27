@@ -3,10 +3,10 @@ import {
     AlertTriangle,
     ArrowLeft,
     Bot,
+    Cable,
     Copy,
     ExternalLink,
     Eye,
-    Link2,
     LoaderCircle,
     Plus,
     Radio,
@@ -25,14 +25,20 @@ import {
     createTranscriptToken,
     fetchAgentStatus,
     fetchDetailedRooms,
+    ParticipantInfo,
     RoomDetails,
     RunningAgent,
     TranscriptTokenResponse,
 } from '../lib/api';
 import { buildStreamUrl, buildViewerUrl } from '../lib/appRoutes';
 import {
+    canRemoveParticipant,
+    describeTranscriptFeedError,
+    deriveAdminReadiness,
+    isTranscriptLinkUsable,
     isTranscriptTokenResponse,
     keepSelectedRoom,
+    maskTranscriptWebSocketUrl,
     selectRoomAfterDelete,
     validateRoomName,
 } from '../lib/adminRooms';
@@ -52,7 +58,42 @@ interface Notice {
 
 interface TranscriptLinkState {
     roomName: string;
+    provider: AgentProvider;
     response: TranscriptTokenResponse;
+}
+
+interface TranscriptFeedErrorState {
+    roomName: string;
+    message: string;
+}
+
+function isAgentProvider(value: string): value is AgentProvider {
+    return Object.prototype.hasOwnProperty.call(providerLabels, value);
+}
+
+const DIALOG_FOCUSABLE_SELECTOR = [
+    'button:not([disabled])',
+    'input:not([disabled])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[href]',
+    '[tabindex]:not([tabindex="-1"])',
+].join(',');
+
+function handleDialogKeyDown(event: React.KeyboardEvent<HTMLElement>) {
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE_SELECTOR))
+        .filter(element => element.getAttribute('aria-hidden') !== 'true');
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+    }
 }
 
 export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
@@ -62,6 +103,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     const [selectedRoomName, setSelectedRoomName] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
     const [agentStatus, setAgentStatus] = useState<AgentStatus>({ count: 0, agents: [] });
+    const [agentStatusError, setAgentStatusError] = useState<string | null>(null);
     const [agentProvider, setAgentProvider] = useState<AgentProvider>('google');
     const [isLoadingRooms, setIsLoadingRooms] = useState(false);
     const [isStartingAgent, setIsStartingAgent] = useState(false);
@@ -72,10 +114,14 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     const [createRoomError, setCreateRoomError] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
     const [isDeletingRoom, setIsDeletingRoom] = useState(false);
-    const [isGeneratingTranscriptLink, setIsGeneratingTranscriptLink] = useState(false);
-    const [transcriptLink, setTranscriptLink] = useState<TranscriptLinkState | null>(null);
+    const [participantRemoveConfirm, setParticipantRemoveConfirm] = useState<ParticipantInfo | null>(null);
+    const [isRemovingParticipant, setIsRemovingParticipant] = useState(false);
+    const [generatingTranscriptProvider, setGeneratingTranscriptProvider] = useState<AgentProvider | null>(null);
+    const [transcriptLinks, setTranscriptLinks] = useState<Partial<Record<AgentProvider, TranscriptLinkState>>>({});
+    const [transcriptFeedErrors, setTranscriptFeedErrors] = useState<Partial<Record<AgentProvider, TranscriptFeedErrorState>>>({});
     const [notice, setNotice] = useState<Notice | null>(null);
     const createRoomInputRef = useRef<HTMLInputElement>(null);
+    const dialogTriggerRef = useRef<HTMLElement | null>(null);
     const roomsRequestRef = useRef(0);
     const agentStatusRequestRef = useRef(0);
 
@@ -83,6 +129,14 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     const selectedAgents = useMemo(
         () => agentStatus.agents.filter(agent => agent.room === selectedRoomName),
         [agentStatus.agents, selectedRoomName],
+    );
+    const runningTranscriptProviders = useMemo(
+        () => Array.from(new Set(
+            selectedAgents
+                .map(agent => agent.provider)
+                .filter(isAgentProvider),
+        )),
+        [selectedAgents],
     );
     const runningAgentCounts = useMemo(() => {
         const counts = new Map<string, number>();
@@ -96,14 +150,45 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         if (!query) return rooms;
         return rooms.filter(room => room.name.toLowerCase().includes(query));
     }, [rooms, searchQuery]);
-    const activeTranscriptLink = transcriptLink?.roomName === selectedRoomName
-        && isTranscriptTokenResponse(transcriptLink.response)
-        ? transcriptLink.response
-        : null;
+    const activeTranscriptLink = (provider: AgentProvider): TranscriptTokenResponse | null => {
+        const link = transcriptLinks[provider];
+        return link?.roomName === selectedRoomName
+            && link.provider === provider
+            && isTranscriptTokenResponse(link.response)
+            && isTranscriptLinkUsable(link.response)
+            ? link.response
+            : null;
+    };
+    const readiness = deriveAdminReadiness(selectedRoom?.participants ?? [], selectedAgents.length);
 
     const showNotice = useCallback((nextNotice: Notice) => {
         setNotice(nextNotice);
     }, []);
+
+    const rememberDialogTrigger = (trigger: HTMLElement) => {
+        dialogTriggerRef.current = trigger;
+    };
+
+    const restoreDialogFocus = () => {
+        const trigger = dialogTriggerRef.current;
+        dialogTriggerRef.current = null;
+        window.setTimeout(() => trigger?.focus(), 0);
+    };
+
+    const closeCreateDialog = () => {
+        setIsCreateDialogOpen(false);
+        restoreDialogFocus();
+    };
+
+    const closeDeleteDialog = () => {
+        setDeleteConfirm(null);
+        restoreDialogFocus();
+    };
+
+    const closeParticipantDialog = () => {
+        setParticipantRemoveConfirm(null);
+        restoreDialogFocus();
+    };
 
     useEffect(() => {
         setSelectedRoomName(current => keepSelectedRoom(current, rooms));
@@ -112,7 +197,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
     useEffect(() => {
         if (!isCreateDialogOpen) return undefined;
         const handleKeyDown = (event: KeyboardEvent) => {
-            if (event.key === 'Escape' && !isCreatingRoom) setIsCreateDialogOpen(false);
+            if (event.key === 'Escape' && !isCreatingRoom) closeCreateDialog();
         };
         window.addEventListener('keydown', handleKeyDown);
         window.setTimeout(() => createRoomInputRef.current?.focus(), 0);
@@ -138,26 +223,41 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         const requestId = ++agentStatusRequestRef.current;
         try {
             const nextStatus = await fetchAgentStatus(backendUrl);
-            if (requestId === agentStatusRequestRef.current) setAgentStatus(nextStatus);
+            if (requestId === agentStatusRequestRef.current) {
+                setAgentStatus(nextStatus);
+                setAgentStatusError(null);
+            }
         } catch (err) {
             if (requestId !== agentStatusRequestRef.current) return;
             // Agent routes are intentionally absent when no ASR provider is configured.
             console.warn('[Admin] Agent status unavailable:', err);
-            setAgentStatus({ count: 0, agents: [] });
+            setAgentStatusError('Could not refresh provider status. Showing the last known state.');
         }
     }, [backendUrl]);
 
     useEffect(() => {
         let disposed = false;
         let nextPoll: number | undefined;
-        const poll = async () => {
-            await Promise.allSettled([refreshRooms(), refreshAgentStatus()]);
+        const scheduleNextPoll = () => {
             if (!disposed) nextPoll = window.setTimeout(poll, 5000);
         };
+        const poll = async () => {
+            if (!document.hidden) {
+                await Promise.allSettled([refreshRooms(), refreshAgentStatus()]);
+            }
+            scheduleNextPoll();
+        };
+        const handleVisibilityChange = () => {
+            if (document.hidden || disposed) return;
+            if (nextPoll !== undefined) window.clearTimeout(nextPoll);
+            void poll();
+        };
+        document.addEventListener('visibilitychange', handleVisibilityChange);
         void poll();
         return () => {
             disposed = true;
             if (nextPoll !== undefined) window.clearTimeout(nextPoll);
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
     }, [refreshAgentStatus, refreshRooms]);
 
@@ -181,6 +281,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             setSelectedRoomName(room.name);
             setNewRoomName('');
             setIsCreateDialogOpen(false);
+            restoreDialogFocus();
             showNotice({ tone: 'success', message: `Room “${room.name}” created. Start the agent when ready.` });
         } catch (err) {
             setCreateRoomError(err instanceof Error ? err.message : 'Failed to create room');
@@ -230,7 +331,11 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         }
     };
 
-    const removeParticipant = async (roomName: string, identity: string) => {
+    const removeParticipant = async () => {
+        if (!selectedRoom || !participantRemoveConfirm || !canRemoveParticipant(participantRemoveConfirm)) return;
+        const roomName = selectedRoom.name;
+        const identity = participantRemoveConfirm.identity;
+        setIsRemovingParticipant(true);
         try {
             const response = await fetch(
                 `${httpBackendUrl}/livekit/rooms/${encodeURIComponent(roomName)}/participants/${encodeURIComponent(identity)}`,
@@ -239,9 +344,13 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.error || 'Failed to remove participant');
             await refreshRooms();
+            setParticipantRemoveConfirm(null);
+            restoreDialogFocus();
             showNotice({ tone: 'success', message: `${identity} was removed from the room.` });
         } catch (err) {
             showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to remove participant' });
+        } finally {
+            setIsRemovingParticipant(false);
         }
     };
 
@@ -259,8 +368,22 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             const remainingRooms = rooms.filter(room => room.name !== roomToDelete);
             setRooms(remainingRooms);
             setSelectedRoomName(selectRoomAfterDelete(roomToDelete, rooms));
-            if (transcriptLink?.roomName === roomToDelete) setTranscriptLink(null);
+            setTranscriptLinks(current => {
+                const next = { ...current };
+                for (const provider of Object.keys(next) as AgentProvider[]) {
+                    if (next[provider]?.roomName === roomToDelete) delete next[provider];
+                }
+                return next;
+            });
+            setTranscriptFeedErrors(current => {
+                const next = { ...current };
+                for (const provider of Object.keys(next) as AgentProvider[]) {
+                    if (next[provider]?.roomName === roomToDelete) delete next[provider];
+                }
+                return next;
+            });
             setDeleteConfirm(null);
+            restoreDialogFocus();
             showNotice({ tone: 'success', message: `Room “${roomToDelete}” deleted.` });
         } catch (err) {
             showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to delete room' });
@@ -269,19 +392,37 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         }
     };
 
-    const getTranscriptLink = async (): Promise<TranscriptTokenResponse | null> => {
+    const getTranscriptLink = async (provider: AgentProvider): Promise<TranscriptTokenResponse | null> => {
         if (!selectedRoom) return null;
-        setIsGeneratingTranscriptLink(true);
+        const roomName = selectedRoom.name;
+        setGeneratingTranscriptProvider(provider);
+        setTranscriptFeedErrors(current => {
+            const next = { ...current };
+            delete next[provider];
+            return next;
+        });
         try {
-            const response = await createTranscriptToken(backendUrl, selectedRoom.name);
-            if (!isTranscriptTokenResponse(response)) throw new Error('Backend returned an invalid transcript link');
-            setTranscriptLink({ roomName: selectedRoom.name, response });
+            const response = await createTranscriptToken(backendUrl, roomName, provider);
+            if (!isTranscriptTokenResponse(response) || response.provider !== provider) {
+                throw new Error('Backend returned an invalid transcript link');
+            }
+            setTranscriptLinks(current => ({
+                ...current,
+                [provider]: { roomName, provider, response },
+            }));
             return response;
         } catch (err) {
-            showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to generate transcript link' });
+            const message = describeTranscriptFeedError(
+                err instanceof Error ? err.message : 'Failed to generate transcript link',
+            );
+            setTranscriptFeedErrors(current => ({
+                ...current,
+                [provider]: { roomName, message },
+            }));
+            showNotice({ tone: 'error', message: 'Could not generate the transcript feed link.' });
             return null;
         } finally {
-            setIsGeneratingTranscriptLink(false);
+            setGeneratingTranscriptProvider(current => current === provider ? null : current);
         }
     };
 
@@ -294,9 +435,13 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         }
     };
 
-    const copyTranscriptLink = async () => {
-        const response = activeTranscriptLink || await getTranscriptLink();
-        if (response) await copyText(response.websocketUrl, 'Transcript WebSocket link');
+    const copyTranscriptLink = async (provider: AgentProvider) => {
+        const response = activeTranscriptLink(provider);
+        if (!response) {
+            showNotice({ tone: 'error', message: `Generate the ${providerLabels[provider]} link before copying it.` });
+            return;
+        }
+        await copyText(response.websocketUrl, `${providerLabels[provider]} WebSocket link`);
     };
 
     const openLink = (url: string) => {
@@ -339,8 +484,8 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                             <RefreshCw size={15} className={isLoadingRooms ? 'animate-spin' : ''} />
                             <span className="hidden sm:inline">Refresh</span>
                         </button>
-                        <button onClick={() => { setCreateRoomError(null); setIsCreateDialogOpen(true); }} className="control-button control-button--primary">
-                            <Plus size={16} />
+                        <button onClick={event => { rememberDialogTrigger(event.currentTarget); setCreateRoomError(null); setIsCreateDialogOpen(true); }} className="control-button control-button--primary">
+                            <Plus size={16} aria-hidden="true" />
                             Create room
                         </button>
                     </div>
@@ -349,7 +494,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
 
             <main className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-7">
                 <div className="grid gap-5 lg:grid-cols-[19rem_minmax(0,1fr)]">
-                    <aside className="app-panel flex min-h-[32rem] flex-col">
+                    <aside className="app-panel flex min-h-[16rem] max-h-[20rem] flex-col lg:max-h-none lg:min-h-[32rem]">
                         <div className="border-b border-slate-700/70 p-4">
                             <div className="mb-3 flex items-center justify-between gap-3">
                                 <div>
@@ -387,7 +532,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                                 </div>
                                                 <div className="mt-1.5 flex items-center gap-3 text-xs text-slate-500">
                                                     <span className="inline-flex items-center gap-1"><Users size={12} /> {room.numParticipants}</span>
-                                                    <span>{runningCount > 0 ? (runningCount === 1 ? '1 agent active' : `${runningCount} agents active`) : 'Ready'}</span>
+                                                    <span>{runningCount > 0 ? (runningCount === 1 ? '1 agent active' : `${runningCount} agents active`) : 'Idle'}</span>
                                                 </div>
                                             </button>
                                         );
@@ -404,51 +549,81 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                     <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-violet-400/10 text-violet-200"><Plus size={22} /></span>
                                     <h3 className="mt-4 text-lg font-semibold text-white">Create your first room</h3>
                                     <p className="mt-2 text-sm leading-6 text-slate-400">A room is the shared channel for the Audio Sender, transcription agent, Viewer, and external transcript consumers.</p>
-                                    <button onClick={() => setIsCreateDialogOpen(true)} className="control-button control-button--primary mt-5"><Plus size={16} /> Create room</button>
+                                    <button onClick={event => { rememberDialogTrigger(event.currentTarget); setIsCreateDialogOpen(true); }} className="control-button control-button--primary mt-5"><Plus size={16} aria-hidden="true" /> Create room</button>
                                 </div>
                             </div>
                         ) : (
                             <div className="app-panel overflow-hidden">
-                                <div className="border-b border-slate-700/70 px-4 py-4 sm:px-5">
-                                    <div className="flex flex-wrap items-start justify-between gap-4">
+                                <div className="border-b border-slate-700/70 px-4 py-3 sm:px-5">
+                                    <div className="flex flex-wrap items-center justify-between gap-3">
                                         <div className="min-w-0">
-                                            <div className="flex items-center gap-2">
-                                                <span className="status-dot status-dot--live" aria-hidden="true" />
-                                                <span className="text-xs font-medium text-emerald-200">Room ready</span>
-                                            </div>
-                                            <h3 className="mt-2 truncate text-xl font-semibold text-white">{selectedRoom.name}</h3>
-                                            <p className="mt-1 text-xs text-slate-500">{selectedRoom.numParticipants} participant{selectedRoom.numParticipants === 1 ? '' : 's'} · Created {formatRoomTime(selectedRoom.creationTime)}</p>
+                                            <h3 className="truncate text-lg font-semibold text-white">{selectedRoom.name}</h3>
+                                            <p className="mt-0.5 text-xs text-slate-500">{selectedRoom.numParticipants} participant{selectedRoom.numParticipants === 1 ? '' : 's'} · Created {formatRoomTime(selectedRoom.creationTime)}</p>
                                         </div>
-                                        <button onClick={() => setDeleteConfirm(selectedRoom.name)} className="control-button control-button--quiet text-red-200 hover:!border-red-400/40 hover:!bg-red-950/30" aria-label={`Delete room ${selectedRoom.name}`}>
-                                            <Trash2 size={15} /> Delete room
-                                        </button>
+                                        <div className={`admin-status shrink-0 ${
+                                            readiness.state === 'active'
+                                                ? 'admin-status--success'
+                                                : 'admin-status--warning'
+                                        }`}>
+                                            <span className={`status-dot ${readiness.state === 'active' ? 'status-dot--live' : 'status-dot--pending'}`} aria-hidden="true" />
+                                            <span>{readiness.title}</span>
+                                        </div>
                                     </div>
                                 </div>
 
-                                <div className="grid gap-5 p-4 sm:p-5 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-                                    <section className="admin-section" aria-labelledby="agent-control-heading">
-                                        <SectionHeading id="agent-control-heading" icon={<Bot size={16} />} title="Transcription Agent" detail="Start this separately when the room is ready." />
-                                        <div className="mt-4 rounded-lg border border-slate-700/70 bg-slate-950/20 p-3">
+                                <div className="flex flex-col gap-5 p-4 sm:p-5 xl:grid xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:items-start">
+                                    <section className="admin-section" aria-labelledby="connections-heading">
+                                        <SectionHeading id="connections-heading" icon={<ExternalLink size={16} />} title="Connections" detail="Connect audio and share the live transcript." />
+                                        <div className="mt-4">
+                                            <ShareRow icon={<Radio size={16} />} label="Audio Sender" description="Microphone or Chrome Tab audio" onOpen={() => openLink(streamUrl)} onCopy={() => void copyText(streamUrl, 'Audio Sender link')} />
+                                        </div>
+                                        <div className="mt-2">
+                                            <ShareRow icon={<Eye size={16} />} label="Viewer" description="Open the read-only live transcript" onOpen={() => openLink(viewerUrl)} onCopy={() => void copyText(viewerUrl, 'Viewer link')} />
+                                        </div>
+                                    </section>
+
+                                    <section className="admin-section order-2" aria-labelledby="agent-control-heading">
+                                        <SectionHeading id="agent-control-heading" icon={<Bot size={16} />} title="Transcription" detail="Choose the providers that should listen to this room." />
+                                        {agentStatusError && (
+                                            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-400/25 bg-amber-950/20 px-3 py-2.5 text-sm text-amber-100" role="alert">
+                                                <span className="flex min-w-0 items-start gap-2">
+                                                    <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+                                                    <span>{agentStatusError}</span>
+                                                </span>
+                                                <button onClick={() => void refreshAgentStatus()} className="control-button control-button--quiet !min-h-9 !px-2.5">
+                                                    <RefreshCw size={14} aria-hidden="true" /> Retry
+                                                </button>
+                                            </div>
+                                        )}
+                                        <div className="admin-control-surface mt-4 min-h-[4.5rem] rounded-lg p-3">
                                             <div className="flex items-center justify-between gap-3">
                                                 <div>
                                                     <p className="text-xs font-medium text-slate-400">Current state</p>
                                                     <p className="mt-1 text-sm font-semibold text-white">{selectedAgents.length ? `${selectedAgents.length} provider${selectedAgents.length === 1 ? '' : 's'} active` : 'Not started'}</p>
                                                 </div>
                                                 {selectedAgents.length ? (
-                                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/10 px-2.5 py-1 text-xs font-medium text-emerald-200"><span className="status-dot status-dot--live" />Listening</span>
+                                                    <span className="admin-status admin-status--success"><span className="status-dot status-dot--live" />Listening</span>
                                                 ) : (
-                                                    <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-800 px-2.5 py-1 text-xs font-medium text-slate-400"><span className="status-dot" />Idle</span>
+                                                    <span className="admin-status admin-status--neutral"><span className="status-dot" />Idle</span>
                                                 )}
                                             </div>
                                             {selectedAgents.length > 0 && (
-                                                <div className="mt-3 space-y-2 border-t border-slate-700/60 pt-3">
+                                                <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-700/60 pt-3">
                                                     {selectedAgents.map(agent => (
-                                                        <div key={agent.key} className="flex items-center justify-between gap-3 text-sm">
-                                                            <span className="inline-flex min-w-0 items-center gap-2 text-slate-200"><span className="status-dot status-dot--live" />{providerLabels[agent.provider as AgentProvider] || agent.provider}</span>
-                                                            <button onClick={() => void stopAgent(agent)} disabled={stoppingAgentKey === agent.key} className="control-button control-button--quiet !min-h-11 !px-2 text-red-200" aria-label={`Stop ${agent.provider} agent`}>
-                                                                {stoppingAgentKey === agent.key ? <LoaderCircle size={14} className="animate-spin" /> : <UserMinus size={14} />} Stop
-                                                            </button>
-                                                        </div>
+                                                        <button
+                                                            key={agent.key}
+                                                            onClick={() => void stopAgent(agent)}
+                                                            disabled={stoppingAgentKey === agent.key}
+                                                            className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-full border border-slate-700 bg-slate-900/40 px-3 text-sm font-medium text-slate-200 transition-colors hover:border-red-400/35 hover:bg-slate-800 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
+                                                            aria-label={`Stop ${providerLabels[agent.provider as AgentProvider] || agent.provider}`}
+                                                            title={`Stop ${providerLabels[agent.provider as AgentProvider] || agent.provider}`}
+                                                        >
+                                                            <span className="status-dot status-dot--live" aria-hidden="true" />
+                                                            <span className="truncate">{providerLabels[agent.provider as AgentProvider] || agent.provider}</span>
+                                                            {stoppingAgentKey === agent.key
+                                                                ? <LoaderCircle size={14} className="shrink-0 animate-spin" aria-hidden="true" />
+                                                                : <X size={14} className="shrink-0 text-slate-500" aria-hidden="true" />}
+                                                        </button>
                                                     ))}
                                                 </div>
                                             )}
@@ -464,38 +639,85 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                         </div>
                                     </section>
 
-                                    <section className="admin-section" aria-labelledby="share-heading">
-                                        <SectionHeading id="share-heading" icon={<Link2 size={16} />} title="Room Access Links" detail="Connect to send audio or view transcripts." />
-                                        <div className="mt-4 space-y-2">
-                                            <ShareRow icon={<Radio size={16} />} label="Audio Sender" description="Send microphone or Chrome Tab audio" onOpen={() => openLink(streamUrl)} onCopy={() => void copyText(streamUrl, 'Audio Sender link')} />
-                                            <ShareRow icon={<Eye size={16} />} label="Viewer" description="Read-only live transcript" onOpen={() => openLink(viewerUrl)} onCopy={() => void copyText(viewerUrl, 'Viewer link')} />
-                                        </div>
-                                    </section>
-
-                                    <section className="admin-section xl:col-span-2" aria-labelledby="integration-heading">
-                                        <SectionHeading id="integration-heading" icon={<ExternalLink size={16} />} title="External transcript feed" detail="Read-only WebSocket · Interim + Final · No audio" />
-                                        <div className="mt-4 rounded-lg border border-slate-700/70 bg-slate-950/20 p-3 sm:p-4">
-                                            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                                                <div className="min-w-0">
-                                                    <p className="text-sm font-medium text-white">Transcript WebSocket</p>
-                                                    <p className="mt-1 text-xs leading-5 text-slate-500">Generate a signed room link for an external system. It expires after 24 hours and is kept only in this browser session.</p>
-                                                    {activeTranscriptLink && <p className="mt-2 text-xs text-emerald-200">Link ready · expires {formatExpiry(activeTranscriptLink.expiresAt)}</p>}
-                                                </div>
-                                                <div className="flex shrink-0 flex-wrap gap-2">
-                                                    <button onClick={() => void getTranscriptLink()} disabled={isGeneratingTranscriptLink} className="control-button control-button--quiet">
-                                                        {isGeneratingTranscriptLink ? <LoaderCircle size={15} className="animate-spin" /> : <RefreshCw size={15} />} {activeTranscriptLink ? 'Refresh link' : 'Generate link'}
-                                                    </button>
-                                                    <button onClick={() => void copyTranscriptLink()} disabled={isGeneratingTranscriptLink} className="control-button control-button--primary"><Copy size={15} /> Copy URL</button>
-                                                </div>
+                                    <section className="admin-section order-4 xl:col-span-2" aria-labelledby="external-systems-heading">
+                                        <SectionHeading id="external-systems-heading" icon={<Cable size={16} />} title="External systems" detail="Generate one signed feed for each active provider." />
+                                        <div className="mt-3 space-y-2">
+                                        {runningTranscriptProviders.length === 0 ? (
+                                            <div className="rounded-lg bg-slate-950/20 px-4 py-4">
+                                                <p className="text-sm font-medium text-slate-200">Start a provider to enable external feeds.</p>
                                             </div>
+                                        ) : runningTranscriptProviders.map(provider => {
+                                            const link = activeTranscriptLink(provider);
+                                            const isGenerating = generatingTranscriptProvider === provider;
+                                            const error = transcriptFeedErrors[provider]?.roomName === selectedRoomName
+                                                ? transcriptFeedErrors[provider]?.message
+                                                : null;
+                                            return (
+                                                <div key={provider} className="admin-control-surface rounded-lg p-3 sm:p-4">
+                                                    <div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+                                                        <p className="text-sm font-medium text-white">{providerLabels[provider]}</p>
+                                                        {link && (
+                                                            <div className="min-w-0 rounded-md border border-slate-700 bg-slate-950/45 px-3 py-2">
+                                                                <code className="block truncate text-xs text-slate-300" title={maskTranscriptWebSocketUrl(link.websocketUrl)}>
+                                                                    {maskTranscriptWebSocketUrl(link.websocketUrl)}
+                                                                </code>
+                                                            </div>
+                                                        )}
+                                                        <div className="flex shrink-0 flex-wrap gap-2 sm:col-start-3">
+                                                            <button
+                                                                onClick={() => void getTranscriptLink(provider)}
+                                                                disabled={isGenerating}
+                                                                className="control-button control-button--inline"
+                                                                aria-label={`${error ? 'Retry' : link ? 'Generate new' : 'Generate'} ${providerLabels[provider]} WebSocket link`}
+                                                            >
+                                                                {isGenerating ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
+                                                                {error ? 'Retry' : link ? 'Generate new' : 'Generate link'}
+                                                            </button>
+                                                            <button
+                                                                onClick={() => void copyTranscriptLink(provider)}
+                                                                disabled={isGenerating || Boolean(error) || !link}
+                                                                className="control-button control-button--inline control-button--inline-accent"
+                                                                aria-label={`Copy ${providerLabels[provider]} WebSocket URL`}
+                                                            >
+                                                                <Copy size={15} aria-hidden="true" /> Copy URL
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                    {link && (
+                                                        <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-5">
+                                                            <span className="text-emerald-200">Ready · expires {formatExpiry(link.expiresAt)}</span>
+                                                            <span className="text-slate-500">New links do not revoke existing links.</span>
+                                                        </div>
+                                                    )}
+                                                    {error && (
+                                                        <p className="mt-2 flex max-w-2xl items-start gap-2 text-sm leading-5 text-red-200" role="alert">
+                                                            <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
+                                                            <span>{error}</span>
+                                                        </p>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+                                        {runningTranscriptProviders.length > 0 && (
+                                            <div className="px-1">
+                                                <p className="text-xs leading-5 text-slate-500">Anyone with a signed URL can read that provider’s live transcript until it expires.</p>
+                                                <details className="mt-2 text-xs text-slate-400">
+                                                    <summary className="cursor-pointer select-none font-medium text-slate-300">Integration details</summary>
+                                                    <div className="mt-2 space-y-2 rounded-lg border border-slate-700/70 bg-slate-950/25 p-3 leading-5">
+                                                        <p>Connect with the copied URL. Each WebSocket message is a JSON object; replace interim text until <code>isFinal</code> is true.</p>
+                                                        <code className="block overflow-x-auto rounded bg-slate-950/60 px-2 py-1.5 text-slate-300">{'{"text":"ผู้ป่วยมีอาการ","isFinal":false}'}</code>
+                                                    </div>
+                                                </details>
+                                            </div>
+                                        )}
                                         </div>
                                     </section>
 
-                                    <section className="admin-section xl:col-span-2" aria-labelledby="participants-heading">
+                                    <section className="admin-section order-5 xl:col-span-2" aria-labelledby="participants-heading">
                                         <SectionHeading id="participants-heading" icon={<Users size={16} />} title="Participants" detail="Manage who is currently connected." />
                                         <div className="mt-4 overflow-hidden rounded-lg border border-slate-700/70">
                                             {selectedRoom.participants.length === 0 ? (
-                                                <p className="px-4 py-6 text-center text-sm text-slate-500">No participants connected yet. Share the Stream link to begin.</p>
+                                                <p className="px-4 py-6 text-center text-sm text-slate-500">No participants connected yet. Open the Audio Sender link to begin.</p>
                                             ) : (
                                                 <div className="divide-y divide-slate-700/60">
                                                     {selectedRoom.participants.map(participant => (
@@ -512,13 +734,44 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                                                 </div>
                                                             </div>
                                                             <div className="flex items-center gap-2">
-                                                                {participant.isAgent && <span className="rounded-full bg-violet-400/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-200">Agent</span>}
-                                                                <button onClick={() => void removeParticipant(selectedRoom.name, participant.identity)} className="control-button control-button--quiet !min-h-11 !px-2 text-red-200" aria-label={`Remove ${participant.identity}`}><UserMinus size={14} /> Remove</button>
+                                                                {participant.isAgent ? (
+                                                                    <span className="rounded-full bg-violet-400/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-200">Managed above</span>
+                                                                ) : (
+                                                                    <button
+                                                                        onClick={event => {
+                                                                            rememberDialogTrigger(event.currentTarget);
+                                                                            setParticipantRemoveConfirm(participant);
+                                                                        }}
+                                                                        className="control-button control-button--inline control-button--inline-danger !min-h-11"
+                                                                        aria-label={`Remove ${participant.identity}`}
+                                                                    >
+                                                                        <UserMinus size={14} aria-hidden="true" /> Remove
+                                                                    </button>
+                                                                )}
                                                             </div>
                                                         </div>
                                                     ))}
                                                 </div>
                                             )}
+                                        </div>
+                                    </section>
+
+                                    <section className="admin-section order-6 xl:col-span-2" aria-labelledby="danger-zone-heading">
+                                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                                            <div>
+                                                <h4 id="danger-zone-heading" className="text-sm font-semibold text-red-200">Danger zone</h4>
+                                                <p className="mt-1 text-xs leading-5 text-slate-500">Delete this room and disconnect everyone. This cannot be undone.</p>
+                                            </div>
+                                            <button
+                                                onClick={event => {
+                                                    rememberDialogTrigger(event.currentTarget);
+                                                    setDeleteConfirm(selectedRoom.name);
+                                                }}
+                                                className="control-button control-button--quiet shrink-0 text-red-200 hover:!border-red-400/40 hover:!bg-red-950/30"
+                                                aria-label={`Delete room ${selectedRoom.name}`}
+                                            >
+                                                <Trash2 size={15} aria-hidden="true" /> Delete room
+                                            </button>
                                         </div>
                                     </section>
                                 </div>
@@ -529,20 +782,20 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             </main>
 
             {isCreateDialogOpen && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={() => !isCreatingRoom && setIsCreateDialogOpen(false)}>
-                    <div className="app-panel w-full max-w-md p-5" role="dialog" aria-modal="true" aria-labelledby="create-room-title" onMouseDown={event => event.stopPropagation()}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={() => !isCreatingRoom && closeCreateDialog()}>
+                    <div className="app-panel w-full max-w-md p-5" role="dialog" aria-modal="true" aria-labelledby="create-room-title" onKeyDown={handleDialogKeyDown} onMouseDown={event => event.stopPropagation()}>
                         <div className="flex items-start justify-between gap-4">
                             <div><h3 id="create-room-title" className="text-lg font-semibold text-white">Create room</h3><p className="mt-1 text-sm leading-5 text-slate-400">Set up the room now. The agent will remain stopped until you start it.</p></div>
-                            <button onClick={() => setIsCreateDialogOpen(false)} disabled={isCreatingRoom} className="control-button control-button--quiet !min-h-11 !min-w-11 !px-2" aria-label="Close create room dialog"><X size={16} /></button>
+                            <button onClick={closeCreateDialog} disabled={isCreatingRoom} className="control-button control-button--quiet !min-h-11 !min-w-11 !px-2" aria-label="Close create room dialog"><X size={16} aria-hidden="true" /></button>
                         </div>
                         <form onSubmit={handleCreateRoom} className="mt-5">
                             <label htmlFor="new-room-name" className="mb-2 block text-sm font-medium text-slate-300">Room name</label>
-                            <input ref={createRoomInputRef} id="new-room-name" value={newRoomName} onChange={event => { setNewRoomName(event.target.value); setCreateRoomError(null); }} placeholder="e.g. daily-briefing" className="h-11 w-full rounded-lg border border-slate-700 bg-slate-950/40 px-3 text-sm text-white placeholder:text-slate-500" aria-describedby="room-name-help room-name-error" aria-invalid={Boolean(createRoomError)} />
+                            <input ref={createRoomInputRef} id="new-room-name" value={newRoomName} onChange={event => { setNewRoomName(event.target.value); setCreateRoomError(null); }} placeholder="e.g. daily-briefing" className="h-11 w-full rounded-lg border border-slate-700 bg-slate-950/40 px-3 text-sm text-white placeholder:text-slate-500" aria-describedby={createRoomError ? 'room-name-help room-name-error' : 'room-name-help'} aria-invalid={Boolean(createRoomError)} />
                             <p id="room-name-help" className="mt-2 text-xs text-slate-500">Letters, numbers, hyphens, and underscores only.</p>
-                            {createRoomError && <p id="room-name-error" className="mt-2 flex items-center gap-2 text-xs text-red-300" role="alert"><AlertTriangle size={14} /> {createRoomError}</p>}
+                            {createRoomError && <p id="room-name-error" className="mt-2 flex items-center gap-2 text-xs text-red-300" role="alert"><AlertTriangle size={14} aria-hidden="true" /> {createRoomError}</p>}
                             <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                                <button type="button" onClick={() => setIsCreateDialogOpen(false)} disabled={isCreatingRoom} className="control-button control-button--quiet">Cancel</button>
-                                <button type="submit" disabled={isCreatingRoom} className="control-button control-button--primary">{isCreatingRoom ? <LoaderCircle size={15} className="animate-spin" /> : <Plus size={15} />} Create room</button>
+                                <button type="button" onClick={closeCreateDialog} disabled={isCreatingRoom} className="control-button control-button--quiet">Cancel</button>
+                                <button type="submit" disabled={isCreatingRoom} className="control-button control-button--primary">{isCreatingRoom ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : <Plus size={15} aria-hidden="true" />} Create room</button>
                             </div>
                         </form>
                     </div>
@@ -550,14 +803,30 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             )}
 
             {deleteConfirm && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={() => !isDeletingRoom && setDeleteConfirm(null)}>
-                    <div className="app-panel w-full max-w-md p-5" role="dialog" aria-modal="true" aria-labelledby="delete-room-title" onMouseDown={event => event.stopPropagation()}>
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={() => !isDeletingRoom && closeDeleteDialog()}>
+                    <div className="app-panel w-full max-w-md p-5" role="dialog" aria-modal="true" aria-labelledby="delete-room-title" onKeyDown={event => { handleDialogKeyDown(event); if (event.key === 'Escape' && !isDeletingRoom) closeDeleteDialog(); }} onMouseDown={event => event.stopPropagation()}>
                         <h3 id="delete-room-title" className="text-lg font-semibold text-white">Delete room?</h3>
                         <p className="mt-2 text-sm leading-6 text-slate-400">This disconnects all participants and stops the room workflow. The action cannot be undone.</p>
                         <p className="mt-3 rounded-lg bg-red-950/30 px-3 py-2 text-sm font-medium text-red-200">{deleteConfirm}</p>
                         <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                            <button onClick={() => setDeleteConfirm(null)} disabled={isDeletingRoom} className="control-button control-button--quiet">Cancel</button>
-                            <button onClick={() => void deleteRoom()} disabled={isDeletingRoom} className="control-button control-button--danger">{isDeletingRoom ? <LoaderCircle size={15} className="animate-spin" /> : <Trash2 size={15} />} Delete room</button>
+                            <button onClick={closeDeleteDialog} disabled={isDeletingRoom} className="control-button control-button--quiet">Cancel</button>
+                            <button onClick={() => void deleteRoom()} disabled={isDeletingRoom} className="control-button control-button--danger">{isDeletingRoom ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : <Trash2 size={15} aria-hidden="true" />} Delete room</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {participantRemoveConfirm && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm" role="presentation" onMouseDown={() => !isRemovingParticipant && closeParticipantDialog()}>
+                    <div className="app-panel w-full max-w-md p-5" role="dialog" aria-modal="true" aria-labelledby="remove-participant-title" onKeyDown={event => { handleDialogKeyDown(event); if (event.key === 'Escape' && !isRemovingParticipant) closeParticipantDialog(); }} onMouseDown={event => event.stopPropagation()}>
+                        <h3 id="remove-participant-title" className="text-lg font-semibold text-white">Remove participant?</h3>
+                        <p className="mt-2 text-sm leading-6 text-slate-400">This immediately disconnects the participant from the room. They may reconnect if they still have access.</p>
+                        <p className="mt-3 break-all rounded-lg bg-red-950/30 px-3 py-2 text-sm font-medium text-red-200">{participantRemoveConfirm.identity}</p>
+                        <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+                            <button onClick={closeParticipantDialog} disabled={isRemovingParticipant} className="control-button control-button--quiet">Cancel</button>
+                            <button onClick={() => void removeParticipant()} disabled={isRemovingParticipant} className="control-button control-button--danger">
+                                {isRemovingParticipant ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : <UserMinus size={15} aria-hidden="true" />} Remove participant
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -577,18 +846,21 @@ function SectionHeading({ id, icon, title, detail }: { id: string; icon: React.R
 
 function ShareRow({ icon, label, description, onOpen, onCopy }: { icon: React.ReactNode; label: string; description: string; onOpen: () => void; onCopy: () => void }) {
     return (
-        <div className="flex flex-col gap-3 rounded-lg border border-slate-700/70 bg-slate-950/20 p-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="admin-control-surface flex flex-col gap-2 rounded-lg p-2.5 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 items-center gap-3"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-400/10 text-violet-200">{icon}</span><div className="min-w-0"><p className="text-sm font-medium text-white">{label}</p><p className="text-xs text-violet-100/65">{description}</p></div></div>
-            <div className="flex shrink-0 gap-2"><button onClick={onOpen} className="control-button control-button--quiet !min-h-11 !px-2.5"><ExternalLink size={14} /> Open</button><button onClick={onCopy} className="control-button control-button--quiet !min-h-11 !px-2.5"><Copy size={14} /> Copy</button></div>
+            <div className="flex shrink-0 gap-1">
+                <button onClick={onOpen} className="control-button control-button--inline !min-h-11"><ExternalLink size={14} aria-hidden="true" /> Open</button>
+                <button onClick={onCopy} className="control-button control-button--inline !min-h-11"><Copy size={14} aria-hidden="true" /> Copy</button>
+            </div>
         </div>
     );
 }
 
 function formatRoomTime(timestamp: number): string {
     if (!timestamp) return '—';
-    return new Date(timestamp * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    return new Intl.DateTimeFormat('th-TH-u-ca-gregory', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(timestamp * 1000));
 }
 
 function formatExpiry(value: string): string {
-    return new Date(value).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    return new Intl.DateTimeFormat('th-TH-u-ca-gregory', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value));
 }

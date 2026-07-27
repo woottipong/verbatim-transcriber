@@ -20,6 +20,13 @@
   --warning: oklch(80% 0.15 84);
   --danger: oklch(67% 0.21 25);
   --focus-ring: oklch(76% 0.16 284 / 0.65);
+  --status-neutral-bg: oklch(29% 0.035 270 / 0.82);
+  --status-neutral-text: oklch(72% 0.025 270);
+  --status-success-bg: oklch(30% 0.075 154 / 0.58);
+  --status-success-text: oklch(84% 0.11 154);
+  --status-warning-bg: oklch(33% 0.065 84 / 0.54);
+  --status-warning-text: oklch(86% 0.12 84);
+  --control-surface-bg: oklch(18% 0.025 274 / 0.28);
   --language-source-border: oklch(57% 0.045 274 / 0.65);
   --language-source-bg: oklch(29% 0.028 274 / 0.72);
   --language-source-text: var(--muted);
@@ -314,8 +321,32 @@ select:focus-visible {
 .control-button--primary:not(:disabled):hover { background: oklch(67% 0.22 291); }
 .control-button--quiet { color: var(--muted); background: transparent; border-color: var(--line); }
 .control-button--quiet:not(:disabled):hover { color: var(--ink); background: var(--surface-raised); }
+.control-button--inline { padding-inline: 0.5rem; color: var(--muted); background: transparent; border-color: transparent; }
+.control-button--inline:not(:disabled):hover { color: var(--ink); background: var(--surface-raised); }
+.control-button--inline-accent { color: oklch(82% 0.11 292); }
+.control-button--inline-danger { color: oklch(82% 0.1 25); }
+.control-button--inline-danger:not(:disabled):hover { color: oklch(88% 0.08 25); background: oklch(31% 0.07 25 / 0.36); }
 .control-button--danger { color: oklch(82% 0.1 25); background: oklch(31% 0.07 25 / 0.5); border-color: oklch(54% 0.13 25 / 0.45); }
 .control-button--danger:not(:disabled):hover { color: white; background: oklch(40% 0.12 25 / 0.65); }
+
+.admin-control-surface {
+  border: 1px solid var(--line);
+  background: var(--control-surface-bg);
+}
+
+.admin-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 999px;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.admin-status--neutral { color: var(--status-neutral-text); background: var(--status-neutral-bg); }
+.admin-status--success { color: var(--status-success-text); background: var(--status-success-bg); }
+.admin-status--warning { color: var(--status-warning-text); background: var(--status-warning-bg); }
 
 .status-dot { width: 0.5rem; height: 0.5rem; flex: 0 0 auto; border-radius: 999px; background: var(--subtle); }
 .status-dot--live { background: var(--success); box-shadow: 0 0 0 4px oklch(73% 0.16 154 / 0.1); }

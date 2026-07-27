@@ -15,14 +15,16 @@ const (
 )
 
 var (
-	ErrTokenServiceDisabled   = errors.New("transcript token service is disabled")
-	ErrInvalidTranscriptToken = errors.New("invalid transcript token")
-	ErrInvalidTranscriptRoom  = errors.New("invalid transcript room")
+	ErrTokenServiceDisabled      = errors.New("transcript token service is disabled")
+	ErrInvalidTranscriptToken    = errors.New("invalid transcript token")
+	ErrInvalidTranscriptRoom     = errors.New("invalid transcript room")
+	ErrInvalidTranscriptProvider = errors.New("invalid transcript provider")
 )
 
 // Claims are intentionally limited to a room-scoped, read-only subscription.
 type Claims struct {
 	Room       string `json:"room"`
+	Provider   string `json:"provider,omitempty"`
 	RoomSID    string `json:"roomSid,omitempty"`
 	Generation uint64 `json:"generation,omitempty"`
 	jwt.RegisteredClaims
@@ -51,6 +53,18 @@ func (s *TokenService) IssueForGeneration(room string, generation uint64) (strin
 }
 
 func (s *TokenService) IssueForRoom(room, roomSID string, generation uint64) (string, time.Time, error) {
+	return s.issue(room, "", roomSID, generation)
+}
+
+func (s *TokenService) IssueForProviderRoom(room, provider, roomSID string, generation uint64) (string, time.Time, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if !isSupportedProvider(provider) {
+		return "", time.Time{}, ErrInvalidTranscriptProvider
+	}
+	return s.issue(room, provider, roomSID, generation)
+}
+
+func (s *TokenService) issue(room, provider, roomSID string, generation uint64) (string, time.Time, error) {
 	if s == nil || len(s.secret) < MinimumSecretLength {
 		return "", time.Time{}, ErrTokenServiceDisabled
 	}
@@ -66,6 +80,7 @@ func (s *TokenService) IssueForRoom(room, roomSID string, generation uint64) (st
 	expiresAt := now.Add(s.ttl)
 	claims := Claims{
 		Room:       room,
+		Provider:   provider,
 		RoomSID:    roomSID,
 		Generation: generation,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -92,6 +107,25 @@ func (s *TokenService) VerifyForGeneration(rawToken, expectedRoom string, expect
 }
 
 func (s *TokenService) VerifyForRoom(rawToken, expectedRoom, expectedRoomSID string, expectedGeneration uint64) (*Claims, error) {
+	claims, err := s.verify(rawToken, expectedRoom, "", expectedRoomSID, expectedGeneration)
+	if err != nil {
+		return nil, err
+	}
+	if claims.Provider != "" {
+		return nil, ErrInvalidTranscriptToken
+	}
+	return claims, nil
+}
+
+func (s *TokenService) VerifyForProviderRoom(rawToken, expectedRoom, expectedProvider, expectedRoomSID string, expectedGeneration uint64) (*Claims, error) {
+	expectedProvider = strings.ToLower(strings.TrimSpace(expectedProvider))
+	if !isSupportedProvider(expectedProvider) {
+		return nil, ErrInvalidTranscriptToken
+	}
+	return s.verify(rawToken, expectedRoom, expectedProvider, expectedRoomSID, expectedGeneration)
+}
+
+func (s *TokenService) verify(rawToken, expectedRoom, expectedProvider, expectedRoomSID string, expectedGeneration uint64) (*Claims, error) {
 	if s == nil || len(s.secret) < MinimumSecretLength {
 		return nil, ErrTokenServiceDisabled
 	}
@@ -115,9 +149,19 @@ func (s *TokenService) VerifyForRoom(rawToken, expectedRoom, expectedRoomSID str
 		return s.secret, nil
 	}, parserOptions...)
 	if err != nil || !parsed.Valid || claims.Room == "" || claims.Room != strings.TrimSpace(expectedRoom) ||
+		(expectedProvider != "" && claims.Provider != expectedProvider) ||
 		(expectedRoomSID != "" && claims.RoomSID != expectedRoomSID) ||
 		(expectedGeneration > 0 && claims.Generation != expectedGeneration) {
 		return nil, ErrInvalidTranscriptToken
 	}
 	return claims, nil
+}
+
+func isSupportedProvider(provider string) bool {
+	switch provider {
+	case "google", "gemini", "azure", "gpt-realtime-whisper":
+		return true
+	default:
+		return false
+	}
 }

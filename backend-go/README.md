@@ -146,6 +146,8 @@ public frontend build.
 | `GET` | `/livekit/rooms/detailed` | Rooms with participant details |
 | `POST` | `/livekit/rooms/:room/transcript-token` | Issue a 24-hour room-bound transcript token and WebSocket URL |
 | `GET` | `/livekit/rooms/:room/transcripts/ws?token=...` | Read-only transcript WebSocket |
+| `POST` | `/livekit/rooms/:room/transcript-token/:provider` | Issue a 24-hour room/provider-bound WebSocket URL |
+| `GET` | `/ws/transcript/:provider/:room?token=...` | Read-only lean provider transcript WebSocket |
 | `GET` | `/livekit/rooms/:name` | Room participants |
 | `DELETE` | `/livekit/rooms/:name` | Delete room |
 | `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove participant |
@@ -163,7 +165,17 @@ curl -X POST http://localhost:3000/livekit/agent/start \
 
 There are no public `/google`, `/azure`, or `/gemini` audio WebSocket routes.
 
-The transcript WebSocket is text-only and separate from the upstream Azure provider WebSocket. It authenticates with a signed HS256 JWT containing the room, current LiveKit room SID, issuer and subject `transcript:subscribe`, and an expiry 24 hours from issuance. Deleting a room invalidates active subscribers and prevents the old link from attaching to a recreated room with the same name. It sends source transcripts as `transcript.interim` and `transcript.final` events; Gemini translation packets remain on the LiveKit data channel for bilingual UI rows. It has no history/replay and does not accept audio or commands.
+Provider transcript WebSockets are text-frame feeds and are separate from the upstream Azure provider WebSocket. They authenticate with a signed HS256 JWT containing the room, provider, current LiveKit room SID, generation, issuer and subject `transcript:subscribe`, and an expiry 24 hours from issuance. Deleting a room invalidates active subscribers and prevents an old link from attaching to a recreated room with the same name. Provider feeds have no history/replay, ready event, audio input, or commands.
+
+```json
+{"text":"ผู้ป่วยมีอาการ","isFinal":false}
+{"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":false}
+{"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":true}
+```
+
+An interim frame replaces the client's current Draft. A final frame is appended to committed output and clears that Draft. Frames are full snapshots accumulated from provider output, not text invented by the application. Gemini translation packets remain on the LiveKit data channel.
+
+The legacy room-wide WebSocket remains available and starts with:
 
 ```json
 {"schemaVersion":"1.0","type":"session.ready","room":"test","timestamp":"2026-07-16T10:00:00.000Z"}
@@ -181,7 +193,7 @@ The transcript WebSocket is text-only and separate from the upstream Azure provi
 }
 ```
 
-Sequences are monotonic per room while subscribers are connected. A slow subscriber is disconnected so it cannot block the realtime ASR pipeline.
+Legacy sequences are monotonic per room while subscribers are connected. A slow subscriber on either feed is disconnected so it cannot block the realtime ASR pipeline.
 
 ## Transcript data channel
 

@@ -3,6 +3,7 @@
  */
 
 import { getControlAuthHeaders, toHttpUrl } from './runtime.ts';
+import type { AgentProvider } from './providers.ts';
 
 export interface ParticipantInfo {
     identity: string;
@@ -36,6 +37,7 @@ export interface TranscriptTokenResponse {
     token: string;
     expiresAt: string;
     websocketUrl: string;
+    provider: AgentProvider;
 }
 
 export interface ProvidersResponse {
@@ -100,9 +102,10 @@ export async function createRoom(backendUrl: string, name: string): Promise<Room
 export async function createTranscriptToken(
     backendUrl: string,
     roomName: string,
+    provider: AgentProvider,
 ): Promise<TranscriptTokenResponse> {
     const response = await fetch(
-        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/transcript-token`,
+        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/transcript-token/${encodeURIComponent(provider)}`,
         { method: 'POST', headers: getControlAuthHeaders() },
     );
     return parseApiResponse<TranscriptTokenResponse>(response, 'Failed to generate transcript link');

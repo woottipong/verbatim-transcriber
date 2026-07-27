@@ -212,6 +212,8 @@ Frontend connection values are embedded by Vite at build time. There is no runti
 | `GET` | `/livekit/rooms/detailed` | List rooms with participants |
 | `POST` | `/livekit/rooms/:room/transcript-token` | Issue a 24-hour room-scoped transcript WebSocket URL |
 | `GET` | `/livekit/rooms/:room/transcripts/ws?token=...` | Read-only interim/final transcript stream |
+| `POST` | `/livekit/rooms/:room/transcript-token/:provider` | Issue a 24-hour room/provider-scoped WebSocket URL |
+| `GET` | `/ws/transcript/:provider/:room?token=...` | Read-only lean provider transcript stream |
 | `GET` / `DELETE` | `/livekit/rooms/:name` | Inspect or delete a room |
 | `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove a participant |
 | `POST` | `/livekit/agent/start` | Start a room agent |
@@ -228,15 +230,19 @@ Valid providers are `google`, `gemini`, `azure`, and `gpt-realtime-whisper` when
 
 ### External transcript WebSocket
 
-The Admin workspace generates a signed URL for a room after `TRANSCRIPT_WS_SECRET` is configured. The token is bound to the current LiveKit room identity, so deleting and recreating a room with the same name does not reuse the old link. The socket carries source transcripts only; Gemini translation packets remain on the LiveKit data channel for bilingual UI rows. It cannot publish audio or control the room. There is no history/replay, and events are delivered only after the client connects.
+The Admin workspace generates a separate signed URL for each running provider after `TRANSCRIPT_WS_SECRET` is configured. Provider URLs use `/ws/transcript/:provider/:room?token=...`; the token is bound to the provider and current LiveKit room identity. Deleting and recreating a room with the same name invalidates old links. The socket carries source transcripts only, cannot publish audio or control the room, and has no ready event or history/replay.
 
-The first event is:
+Each WebSocket text frame is one complete provider-derived snapshot:
 
 ```json
-{"schemaVersion":"1.0","type":"session.ready","room":"test","timestamp":"2026-07-16T10:00:00.000Z"}
+{"text":"ผู้ป่วยมีอาการ","isFinal":false}
+{"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":false}
+{"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":true}
 ```
 
-Transcript events use a room-scoped sequence:
+Clients replace their active Draft when `isFinal` is false. When it is true, clients append the text to committed output and clear the Draft. The text originates from each ASR provider; the gateway only accumulates provider deltas into snapshots and applies the shared transcript spacing normalization. Gemini translation packets remain on the LiveKit data channel for bilingual UI rows.
+
+The legacy room-wide endpoint remains available at `/livekit/rooms/:room/transcripts/ws?token=...`. Its first event is `session.ready`, followed by versioned events with a room-scoped sequence:
 
 ```json
 {
