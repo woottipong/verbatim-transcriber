@@ -1,6 +1,16 @@
-# React frontend
+# CaptionLive frontend
 
-React 19 + TypeScript + Vite UI for publishing microphone or Chrome Tab audio to LiveKit, viewing room transcripts, and administering rooms and transcription agents.
+React 19 + TypeScript + Vite application for operating CaptionLive rooms, publishing microphone or Chrome Tab audio, and viewing real-time transcripts delivered through LiveKit.
+
+## Workspaces
+
+| Workspace | Route | Purpose |
+| --- | --- | --- |
+| Control Room | `/#admin` or `/` | Create rooms, manage providers and participants, and generate external transcript feeds |
+| Audio Source | `/#stream?room=<room>` | Publish microphone or Chrome Tab audio to a room |
+| Transcript | `/#viewer?room=<room>&autoconnect=1` | View the read-only live transcript |
+
+The frontend never sends audio directly to an ASR provider or to the Go backend. Audio and transcript data use LiveKit; the backend HTTP API is used for tokens, room administration, agent control, and signed external-feed links.
 
 ## Requirements
 
@@ -17,11 +27,7 @@ pnpm install
 pnpm dev
 ```
 
-Open:
-
-- Admin: `http://localhost:5173`
-- Stream publisher: `http://localhost:5173/#stream?room=test`
-- Viewer: `http://localhost:5173/#viewer?room=test&autoconnect=1`
+Open `http://localhost:5173` for the Control Room. Create a room there, then use its generated Audio Source and Transcript links.
 
 ## Environment
 
@@ -34,48 +40,67 @@ Open:
 These values are embedded by Vite at build time. Use HTTPS/WSS for remote deployments.
 The application does not expose a runtime Settings screen for backend connection values. Change the environment and rebuild or restart Vite instead. Only the selected microphone device remains a local browser preference.
 
+## Data flow
+
+```text
+Control Room ── HTTP ──> Go backend
+     │                    ├── room and token APIs
+     │                    ├── provider lifecycle
+     │                    └── signed external-feed links
+     │
+Audio Source ── WebRTC audio ──> LiveKit ──> Go room agent ──> ASR provider
+                                      │
+                                      └── data channel transcript ──> Audio Source / Transcript
+```
+
 ## Structure
 
 ```text
 frontend/
-├── App.tsx                     # Admin-first hash routing and Stream workspace
+├── App.tsx                       # Lazy-loaded hash routing and page titles
 ├── components/
-│   ├── LiveKitPanel.tsx        # Session controls and transcript list
-│   ├── MicrophoneInputStrip.tsx # Input-level visualization
-│   ├── StreamPage.tsx           # Publisher-only route and audio-source controls
-│   ├── ToastViewport.tsx        # Shared top-right notifications
-│   ├── ViewerPage.tsx          # Subscribe-only viewer
-│   └── AdminPage.tsx           # Room and agent management
+│   ├── AdminPage.tsx             # Control Room workspace
+│   ├── StreamPage.tsx            # Audio Source workspace
+│   ├── ViewerPage.tsx            # Read-only Transcript workspace
+│   ├── LiveKitPanel.tsx          # Publisher session and transcript controls
+│   ├── TranscriptPresentation.tsx # Shared final and Draft rendering
+│   ├── MicrophoneInputStrip.tsx  # Input-level visualization
+│   └── ToastViewport.tsx         # Shared top-right notifications
 ├── hooks/
-│   ├── useLiveKit.ts           # Publisher room and selected-audio lifecycle
-│   ├── useRoomViewer.ts        # Viewer room/audio lifecycle
-│   ├── useAudioVisualizer.ts   # Web Audio analyser state
-│   └── useAudioDevices.ts      # Input-device discovery
+│   ├── useControlRoomOperations.ts # Room, provider, participant, and feed operations
+│   ├── useLiveKit.ts             # Publisher adapter and selected-audio state
+│   ├── useRoomViewer.ts          # Viewer adapter and agent discovery
+│   ├── useTranscriptViewport.ts  # Stick-to-latest scroll behavior
+│   ├── useAudioVisualizer.ts     # Web Audio analyser state
+│   └── useAudioDevices.ts        # Input-device discovery
 ├── lib/
-│   ├── transcriptMessages.ts   # Packet validation and transcript state helpers
-│   ├── transcriptExport.ts     # Final source-only text export
-│   ├── transcriptUpdates.ts    # Interim update coalescing
-│   ├── transcriptViewport.ts   # Scroll-to-latest behavior
-│   ├── liveKitSession.ts       # Session status presentation
-│   ├── audioSources.ts         # Microphone/Chrome Tab capture helpers
-│   ├── audioSignal.ts          # Waveform calculations
-│   ├── runtime.ts              # Config and bounded-state helpers
-│   ├── appRoutes.ts            # Admin, Stream, and Viewer deep links
-│   └── adminRooms.ts           # Room validation and selection helpers
+│   ├── liveKitRoomLifecycle.ts   # Shared cancellable room lifecycle
+│   ├── transcriptSession.ts      # Transcript ingestion and bounded state
+│   ├── transcriptMessages.ts     # Packet validation and state transforms
+│   ├── transcriptPresentation.ts # Provider filtering and export projections
+│   ├── transcriptExport.ts       # Final source-only text export
+│   ├── transcriptUpdates.ts      # Interim update coalescing
+│   ├── liveKitSession.ts         # Publisher readiness presentation
+│   ├── api.ts                    # Typed backend HTTP adapter
+│   ├── audioSources.ts           # Microphone/Chrome Tab capture helpers
+│   ├── appRoutes.ts              # Workspace route parsing and link builders
+│   └── adminRooms.ts             # Control Room validation and feed helpers
+├── public/                        # CaptionLive logo and favicon assets
 └── types.ts
 ```
 
-The frontend has no direct ASR-provider capture hooks and does not stream audio to the Go HTTP server. The selected microphone or Chrome Tab audio is always published with LiveKit.
+Keep provider-independent room and transcript behavior in the shared lifecycle/session modules. The React hooks adapt those modules to each workspace and own browser or LiveKit side effects.
 
 ## Transcript behavior
 
 - Every packet is validated with `parseTranscriptMessage`.
+- `TranscriptSession` owns decoding, provider resolution, interim buffering, Gemini source/translation pairing, committed rows, and source cleanup.
 - Non-final source values are replaceable Draft entries keyed by provider and speaker; Gemini also uses `turnId` to pair source and translation state.
 - Draft rendering is coalesced at 33 ms for general interim traffic and 50 ms for Gemini, with the first update and final result applied immediately.
 - Final values become bounded committed rows. At most 500 final rows and 64 active Draft entries are retained.
 - Lines view can show a Gemini translation beneath its source. Text view deliberately shows source text only and marks active Draft text inline.
 - Per-provider `.txt` export includes finalized source text only; it excludes Draft and translation text.
-- Adjacent final chunks from the same provider, speaker, and language are grouped for display/export when they arrive within 1.6 seconds and the previous chunk has no strong sentence-ending punctuation.
+- Final chunks remain separate turns so provider boundaries are preserved in display and export.
 - Thai spacing normalization belongs to the Go agent. Avoid extra frontend normalization that could collapse interim behavior.
 
 ## Session UX
@@ -83,6 +108,10 @@ The frontend has no direct ASR-provider capture hooks and does not stream audio 
 The publisher chooses Microphone or Chrome Tab while disconnected, joins a named room, and publishes that source. Readiness is derived from room connection, selected-audio state, and agent presence. Keep these states explicit in UI changes and do not rely on color alone.
 
 The root route is the Admin workspace. Admin creates a room first and starts its Agent separately. Stream links prefill the room but do not connect or request capture permission automatically. Viewer links with `autoconnect=1` connect once without publishing audio. A normal publisher disconnect ends its audio track; the backend agent remains in the room and waits for the next track.
+
+`LiveKitRoomLifecycle` is shared by publisher and viewer hooks. It invalidates stale connection attempts, tears down failed preparation, distinguishes manual and remote disconnects, and prevents an old room from clearing a replacement room.
+
+`useControlRoomOperations` owns polling and mutations for rooms, provider agents, participants, and signed transcript links. Polling pauses while the document is hidden; request IDs prevent stale responses from overwriting newer state. External-feed generation state and errors remain independent per provider.
 
 The input strip uses the browser's Web Audio analyser only to communicate signal level; it is not browser VAD and does not gate audio publication. Transient operation feedback appears through the shared top-right Toast viewport; persistent connection/audio/transcriber state and inline form validation remain in context.
 
@@ -92,17 +121,19 @@ The input strip uses the browser's Web Audio analyser only to communicate signal
 | --- | --- |
 | `pnpm dev` | Start Vite on port 5173 |
 | `pnpm test` | Run `lib/*.test.ts` with Node's test runner |
+| `pnpm typecheck` | Run TypeScript validation without emitting files |
 | `pnpm build` | Create a production Vite build |
 | `pnpm preview` | Preview the production build |
 
 ## Verification
 
 ```bash
+pnpm typecheck
 pnpm test
 pnpm build
 ```
 
-Tests cover transcript buffering/state, session presentation, viewport behavior, and audio signal calculations. The production build is the TypeScript/Vite integration check.
+Tests cover the LiveKit lifecycle, transcript ingestion and presentation, Control Room helpers, session presentation, viewport behavior, routing, API boundaries, and audio calculations.
 
 ## Browser requirements
 
