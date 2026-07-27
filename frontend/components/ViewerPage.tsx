@@ -15,7 +15,7 @@ import { toHttpUrl } from '../lib/runtime';
 import { shouldAutoConnectViewer } from '../lib/viewerLaunch';
 import ConnectionBadge from './ConnectionBadge';
 import { buildViewerUrl } from '../lib/appRoutes';
-import { formatProviderName } from '../lib/providers';
+import { formatProviderName, getProviderPresentation } from '../lib/providers';
 import ToastViewport from './ToastViewport';
 import { TranscriptRows } from './TranscriptPresentation';
 import { useTranscriptViewport } from '../hooks/useTranscriptViewport';

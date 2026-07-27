@@ -106,12 +106,19 @@ export function appendTranscriptIfNew(
     next: TranscriptSegment,
 ): TranscriptSegment[] {
     if (next.turnId && isAppendOnlyInterimProvider(next.provider || '')) {
-        const turnIndex = current.findLastIndex(segment => (
-            segment.provider === next.provider &&
-            segment.speaker === next.speaker &&
-            segment.role === next.role &&
-            segment.turnId === next.turnId
-        ));
+        let turnIndex = -1;
+        for (let index = current.length - 1; index >= 0; index--) {
+            const segment = current[index];
+            if (
+                segment.provider === next.provider &&
+                segment.speaker === next.speaker &&
+                segment.role === next.role &&
+                segment.turnId === next.turnId
+            ) {
+                turnIndex = index;
+                break;
+            }
+        }
         if (turnIndex >= 0) {
             const existing = current[turnIndex];
             if (existing.text === next.text && existing.isFinal === next.isFinal) return current;

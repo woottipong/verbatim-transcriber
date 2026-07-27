@@ -256,7 +256,9 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             setRoom(connectedRoom);
 
             // Check for existing participants (agent might already be there)
-            const existingParticipants = Array.from(connectedRoom.remoteParticipants.values());
+            const existingParticipants = Array.from(
+                connectedRoom.remoteParticipants.values(),
+            ) as RemoteParticipant[];
             setParticipants(existingParticipants);
 
             const agents = existingParticipants.filter(

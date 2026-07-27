@@ -57,8 +57,10 @@ const DIALOG_FOCUSABLE_SELECTOR = [
 
 function handleDialogKeyDown(event: React.KeyboardEvent<HTMLElement>) {
     if (event.key !== 'Tab') return;
-    const focusable = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE_SELECTOR))
-        .filter(element => element.getAttribute('aria-hidden') !== 'true');
+    const focusable: HTMLElement[] = [];
+    event.currentTarget.querySelectorAll<HTMLElement>(DIALOG_FOCUSABLE_SELECTOR).forEach(element => {
+        if (element.getAttribute('aria-hidden') !== 'true') focusable.push(element);
+    });
     if (focusable.length === 0) return;
     const first = focusable[0];
     const last = focusable[focusable.length - 1];

@@ -287,7 +287,9 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             setRoom(connectedRoom);
 
             // Check for existing agents
-            const existingParticipants = Array.from(connectedRoom.remoteParticipants.values());
+            const existingParticipants = Array.from(
+                connectedRoom.remoteParticipants.values(),
+            ) as RemoteParticipant[];
             const existingAgents = existingParticipants
                 .filter(p => isAgent(p.identity))
                 .map(p => ({
