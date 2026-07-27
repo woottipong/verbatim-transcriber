@@ -42,36 +42,40 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
 
   return (
     <div className="app-shell">
-      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:rounded-md focus:bg-violet-600 focus:px-4 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-white focus:outline-none">
+      <a href="#main-content" className="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 focus:z-50 focus:rounded-md focus:bg-teal-700 focus:px-4 focus:py-2.5 focus:text-sm focus:font-semibold focus:text-white focus:outline-none">
         Skip to content
       </a>
       <header className="app-header">
-        <div className="stream-navbar mx-auto max-w-7xl px-4 py-3 sm:px-6">
+        <div className="app-header__content stream-navbar mx-auto max-w-7xl px-4 py-3 sm:px-6">
           <div className="stream-navbar__brand flex min-w-0 items-center gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-violet-400/45 bg-violet-500/20 text-violet-200">
-              <Radio size={19} aria-hidden="true" />
-            </span>
+            <img src="/captionlive-mark.svg" alt="" className="h-10 w-10 shrink-0 rounded-lg" aria-hidden="true" />
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h1 className="truncate text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">Audio Sender</h1>
-                <span className="inline-flex items-center rounded bg-slate-800 border border-slate-700/60 px-1.5 py-0.5 text-[11px] font-semibold text-slate-400" aria-label={livekitRoomName ? `Room ${livekitRoomName}` : 'Room ID is missing'}>
-                  Room: <span className="text-slate-200 font-bold ml-1">{livekitRoomName || 'Required'}</span>
+              <h1 className="flex min-w-0 items-center gap-2 truncate text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
+                <span className="shrink-0 text-teal-200">CaptionLive</span>
+                <span className="h-4 w-px shrink-0 bg-slate-700" aria-hidden="true" />
+                <span className="truncate">Audio Source</span>
+              </h1>
+              <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-slate-400">
+                <span className="truncate" aria-label={livekitRoomName ? `Room ${livekitRoomName}` : 'Room ID is missing'}>
+                  Room <strong className="font-semibold text-slate-200">{livekitRoomName || 'Required'}</strong>
                 </span>
                 {livekitRoomName && livekitHook.connectionState === ConnectionState.DISCONNECTED && (
-                  <button
-                    onClick={() => {
-                      setLivekitRoomName('');
-                      const nextUrl = buildStreamUrl(window.location.origin + window.location.pathname, '');
-                      window.location.hash = new URL(nextUrl).hash;
-                    }}
-                    className="inline-flex min-h-11 items-center px-1 text-xs font-medium text-violet-300 underline hover:text-violet-200"
-                    aria-label="Change room"
-                  >
-                    Change
-                  </button>
+                  <>
+                    <span className="text-slate-700" aria-hidden="true">·</span>
+                    <button
+                      onClick={() => {
+                        setLivekitRoomName('');
+                        const nextUrl = buildStreamUrl(window.location.origin + window.location.pathname, '');
+                        window.location.hash = new URL(nextUrl).hash;
+                      }}
+                      className="stream-navbar__inline-action inline-flex items-center px-1 text-xs font-medium text-teal-300 underline hover:text-teal-200"
+                      aria-label="Change room"
+                    >
+                      Change
+                    </button>
+                  </>
                 )}
               </div>
-              <p className="truncate text-xs text-slate-400">Connect to a room to start sending audio for transcription</p>
             </div>
           </div>
 
@@ -103,7 +107,7 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
               </div>
             )}
 
-            <div className="flex shrink-0 items-center rounded-lg border border-slate-700 bg-slate-950/45 p-0.5" role="group" aria-label="Audio source">
+            <div className="flex shrink-0 items-center rounded-lg border border-slate-700 bg-slate-950/45" role="group" aria-label="Audio source">
               {(['microphone', 'chrome-tab'] as const).map(source => {
                 const SourceIcon = source === 'chrome-tab' ? MonitorUp : Mic2;
                 const isSelected = audioSource === source;
@@ -115,8 +119,8 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
                     disabled={!canChangeAudioSource}
                     aria-pressed={isSelected}
                     aria-label={AUDIO_SOURCE_LABELS[source]}
-                    className={`flex min-h-11 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-60 ${isSelected
-                      ? 'bg-violet-500 text-white'
+                    className={`flex min-h-11 items-center gap-1.5 rounded-md px-2.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 disabled:cursor-not-allowed disabled:opacity-60 ${isSelected
+                      ? 'bg-teal-700 text-white'
                       : 'text-slate-400 hover:bg-slate-800 hover:text-slate-200'
                     }`}
                   >
@@ -134,7 +138,7 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
       <main id="main-content" className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
         {!livekitRoomName ? (
           <div className="mx-auto max-w-md app-panel p-6 text-center my-8">
-            <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-violet-400/10 text-violet-200 mb-4">
+            <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-teal-400/10 text-teal-200">
               <Radio size={22} className="animate-pulse" />
             </span>
             <h2 className="text-lg font-semibold text-white">Join Transcription Room</h2>
@@ -154,7 +158,7 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
                 name="roomName"
                 placeholder="Enter room name..."
                 required
-                className="h-11 w-full rounded-lg border border-slate-700 bg-slate-950/40 px-3 text-sm text-white placeholder:text-slate-500 focus:border-violet-500/70 focus:outline-none"
+                className="h-11 w-full rounded-lg border border-slate-700 bg-slate-950/40 px-3 text-sm text-white placeholder:text-slate-500 focus:border-teal-500/70 focus:outline-none"
               />
               <button type="submit" className="control-button control-button--primary h-11 w-full font-medium">
                 Continue to Room

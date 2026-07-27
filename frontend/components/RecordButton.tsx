@@ -18,7 +18,7 @@ const RecordButton: React.FC<RecordButtonProps> = ({ isConnected, isConnecting, 
     transition-colors duration-150
     ${isConnected
             ? 'border-red-400/50 bg-red-500 text-white hover:bg-red-600'
-            : 'border-violet-300/40 bg-violet-600 text-white hover:bg-violet-500'}
+            : 'border-teal-300/35 bg-teal-700 text-white hover:bg-teal-600'}
     ${isConnecting ? 'opacity-70 cursor-wait' : 'cursor-pointer'}
   `;
 

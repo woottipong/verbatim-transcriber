@@ -1,6 +1,6 @@
 {
-  "name": "Real-time Thai Transcription",
-  "description": "Real-time Thai speech-to-text comparing Google and Azure with verbatim accuracy.",
+  "name": "CaptionLive",
+  "description": "Real-time transcription from microphone or browser audio.",
   "requestFramePermissions": [
     "microphone"
   ]

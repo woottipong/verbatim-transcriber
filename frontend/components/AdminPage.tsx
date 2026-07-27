@@ -12,7 +12,6 @@ import {
     Radio,
     RefreshCw,
     Search,
-    Settings,
     Trash2,
     UserMinus,
     Users,
@@ -457,20 +456,22 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                 notice && { id: `admin-notice-${notice.message}`, tone: notice.tone, message: notice.message, onDismiss: () => setNotice(null) },
             ]} />
             <header className="app-header">
-                <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
+                <div className="app-header__content mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
                     <div className="flex min-w-0 items-center gap-3">
                         {onBack && (
                             <button onClick={onBack} className="control-button control-button--quiet !min-h-11 !px-2.5" aria-label="Close admin">
                                 <ArrowLeft size={18} />
                             </button>
                         )}
-                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-violet-400/45 bg-violet-500/20 text-violet-200">
-                            <Settings size={19} aria-hidden="true" />
-                        </span>
+                        <img src="/captionlive-mark.svg" alt="" className="h-10 w-10 shrink-0 rounded-lg" aria-hidden="true" />
                         <div className="min-w-0">
-                            <h1 className="truncate text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">Thai Transcription</h1>
+                            <h1 className="flex min-w-0 items-center gap-2 truncate text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
+                                <span className="shrink-0 text-teal-200">CaptionLive</span>
+                                <span className="h-4 w-px shrink-0 bg-slate-700" aria-hidden="true" />
+                                <span className="truncate">Control Room</span>
+                            </h1>
                             <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                                <p className="truncate text-xs text-slate-400">Room operations</p>
+                                <p className="truncate text-xs text-slate-400">Manage rooms and transcription</p>
                                 <span className="h-2 w-px bg-slate-700 hidden sm:inline" aria-hidden="true" />
                                 <div className="hidden items-center gap-1.5 text-[10px] text-slate-500 sm:flex select-none">
                                     <span className="status-dot status-dot--live !h-1.5 !w-1.5" aria-hidden="true" />
@@ -501,7 +502,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                     <h3 className="text-sm font-semibold text-white">Rooms</h3>
                                     <p className="mt-0.5 text-xs text-slate-500">{rooms.length} available</p>
                                 </div>
-                                <Radio size={16} className="text-violet-300" aria-hidden="true" />
+                                <Radio size={16} className="text-teal-300" aria-hidden="true" />
                             </div>
                             <label className="relative block">
                                 <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden="true" />
@@ -525,7 +526,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                         const isSelected = room.name === selectedRoomName;
                                         const runningCount = runningAgentCounts.get(room.name) ?? 0;
                                         return (
-                                            <button key={room.name} onClick={() => setSelectedRoomName(room.name)} className={`w-full rounded-lg border px-3 py-3 text-left transition-colors ${isSelected ? 'border-violet-400/55 bg-violet-400/10' : 'border-transparent hover:border-slate-700 hover:bg-slate-800/55'}`} aria-current={isSelected ? 'page' : undefined}>
+                                            <button key={room.name} onClick={() => setSelectedRoomName(room.name)} className={`w-full rounded-lg border px-3 py-3 text-left transition-colors ${isSelected ? 'border-teal-400/45 bg-teal-400/10' : 'border-transparent hover:border-slate-700 hover:bg-slate-800/55'}`} aria-current={isSelected ? 'page' : undefined}>
                                                 <div className="flex items-start justify-between gap-3">
                                                     <span className={`min-w-0 truncate text-sm font-semibold ${isSelected ? 'text-white' : 'text-slate-200'}`}>{room.name}</span>
                                                     <span className={`status-dot shrink-0 ${runningCount > 0 ? 'status-dot--live' : ''}`} aria-hidden="true" />
@@ -546,9 +547,9 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                         {!selectedRoom ? (
                             <div className="app-panel flex min-h-[32rem] items-center justify-center p-6 text-center">
                                 <div className="max-w-sm">
-                                    <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-violet-400/10 text-violet-200"><Plus size={22} /></span>
+                                    <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-teal-400/10 text-teal-200"><Plus size={22} /></span>
                                     <h3 className="mt-4 text-lg font-semibold text-white">Create your first room</h3>
-                                    <p className="mt-2 text-sm leading-6 text-slate-400">A room is the shared channel for the Audio Sender, transcription agent, Viewer, and external transcript consumers.</p>
+                                    <p className="mt-2 text-sm leading-6 text-slate-400">A room is the shared channel for the Audio Source, transcription agent, Transcript, and external transcript consumers.</p>
                                     <button onClick={event => { rememberDialogTrigger(event.currentTarget); setIsCreateDialogOpen(true); }} className="control-button control-button--primary mt-5"><Plus size={16} aria-hidden="true" /> Create room</button>
                                 </div>
                             </div>
@@ -575,10 +576,10 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                     <section className="admin-section" aria-labelledby="connections-heading">
                                         <SectionHeading id="connections-heading" icon={<ExternalLink size={16} />} title="Connections" detail="Connect audio and share the live transcript." />
                                         <div className="mt-4">
-                                            <ShareRow icon={<Radio size={16} />} label="Audio Sender" description="Microphone or Chrome Tab audio" onOpen={() => openLink(streamUrl)} onCopy={() => void copyText(streamUrl, 'Audio Sender link')} />
+                                            <ShareRow icon={<Radio size={16} />} label="Audio Source" description="Microphone or Chrome Tab audio" onOpen={() => openLink(streamUrl)} onCopy={() => void copyText(streamUrl, 'Audio Source link')} />
                                         </div>
                                         <div className="mt-2">
-                                            <ShareRow icon={<Eye size={16} />} label="Viewer" description="Open the read-only live transcript" onOpen={() => openLink(viewerUrl)} onCopy={() => void copyText(viewerUrl, 'Viewer link')} />
+                                            <ShareRow icon={<Eye size={16} />} label="Transcript" description="Open the read-only live transcript" onOpen={() => openLink(viewerUrl)} onCopy={() => void copyText(viewerUrl, 'Transcript link')} />
                                         </div>
                                     </section>
 
@@ -717,14 +718,14 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                         <SectionHeading id="participants-heading" icon={<Users size={16} />} title="Participants" detail="Manage who is currently connected." />
                                         <div className="mt-4 overflow-hidden rounded-lg border border-slate-700/70">
                                             {selectedRoom.participants.length === 0 ? (
-                                                <p className="px-4 py-6 text-center text-sm text-slate-500">No participants connected yet. Open the Audio Sender link to begin.</p>
+                                                <p className="px-4 py-6 text-center text-sm text-slate-500">No participants connected yet. Open the Audio Source link to begin.</p>
                                             ) : (
                                                 <div className="divide-y divide-slate-700/60">
                                                     {selectedRoom.participants.map(participant => (
                                                         <div key={participant.identity} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
                                                             <div className="flex min-w-0 items-center gap-3">
                                                                 {participant.isAgent ? (
-                                                                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-400/10 text-violet-200"><Bot size={15} /></span>
+                                                                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-400/10 text-teal-200"><Bot size={15} /></span>
                                                                 ) : (
                                                                     <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-slate-400"><Users size={15} /></span>
                                                                 )}
@@ -735,7 +736,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                                             </div>
                                                             <div className="flex items-center gap-2">
                                                                 {participant.isAgent ? (
-                                                                    <span className="rounded-full bg-violet-400/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-violet-200">Managed above</span>
+                                                                    <span className="rounded-full bg-teal-400/10 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-teal-200">Managed above</span>
                                                                 ) : (
                                                                     <button
                                                                         onClick={event => {
@@ -847,7 +848,7 @@ function SectionHeading({ id, icon, title, detail }: { id: string; icon: React.R
 function ShareRow({ icon, label, description, onOpen, onCopy }: { icon: React.ReactNode; label: string; description: string; onOpen: () => void; onCopy: () => void }) {
     return (
         <div className="admin-control-surface flex flex-col gap-2 rounded-lg p-2.5 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex min-w-0 items-center gap-3"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-violet-400/10 text-violet-200">{icon}</span><div className="min-w-0"><p className="text-sm font-medium text-white">{label}</p><p className="text-xs text-violet-100/65">{description}</p></div></div>
+            <div className="flex min-w-0 items-center gap-3"><span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-teal-400/10 text-teal-200">{icon}</span><div className="min-w-0"><p className="text-sm font-medium text-white">{label}</p><p className="text-xs text-teal-100/65">{description}</p></div></div>
             <div className="flex shrink-0 gap-1">
                 <button onClick={onOpen} className="control-button control-button--inline !min-h-11"><ExternalLink size={14} aria-hidden="true" /> Open</button>
                 <button onClick={onCopy} className="control-button control-button--inline !min-h-11"><Copy size={14} aria-hidden="true" /> Copy</button>

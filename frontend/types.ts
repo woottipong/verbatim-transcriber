@@ -1,5 +1,5 @@
 /**
- * Type definitions for Real-time Thai Transcription
+ * Type definitions for CaptionLive
  */
 
 // ============================================

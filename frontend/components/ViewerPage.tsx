@@ -8,7 +8,7 @@
  */
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Users, Radio, Trash2, X, Bot, Eye, Volume2, VolumeX } from 'lucide-react';
+import { RefreshCw, Users, Radio, Trash2, X, Bot, Volume2, VolumeX } from 'lucide-react';
 import { useRoomViewer } from '../hooks/useRoomViewer';
 import { ConnectionState } from '../types';
 import { toHttpUrl } from '../lib/runtime';
@@ -154,7 +154,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
             <span className="sr-only" aria-live="polite" aria-atomic="true">{viewer.transcripts.at(-1)?.text ?? ''}</span>
             {/* Header */}
             <header className="app-header">
-                <div className="max-w-7xl mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
+                <div className="app-header__content max-w-7xl mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
                     <div className="flex items-center gap-3">
                         {onBack && (
                             <button
@@ -165,12 +165,14 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                 <X size={20} />
                             </button>
                         )}
-                        <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-emerald-400/35 bg-emerald-400/10 text-emerald-200">
-                            <Eye size={18} />
-                        </span>
+                        <img src="/captionlive-mark.svg" alt="" className="h-10 w-10 shrink-0 rounded-lg" aria-hidden="true" />
                         <div>
-                            <h1 className="text-lg font-bold text-white">Transcript Viewer</h1>
-                            <p className="text-xs text-slate-400">Watch live transcriptions</p>
+                            <h1 className="flex min-w-0 items-center gap-2 text-lg font-semibold tracking-tight text-white">
+                                <span className="shrink-0 text-teal-200">CaptionLive</span>
+                                <span className="h-4 w-px shrink-0 bg-slate-700" aria-hidden="true" />
+                                <span className="truncate">Transcript</span>
+                            </h1>
+                            <p className="text-xs text-slate-400">Follow live transcription</p>
                         </div>
                     </div>
 
@@ -238,7 +240,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                                             }}
                                             disabled={viewer.connectionState === ConnectionState.CONNECTING}
                                             className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${viewer.currentRoomName === room.name
-                                                ? 'border-violet-400/55 bg-violet-400/10 text-white'
+                                                ? 'border-teal-400/45 bg-teal-400/10 text-white'
                                                 : 'border-slate-700 bg-slate-950/20 text-slate-300 hover:bg-slate-700/35'
                                                 }`}
                                         >
@@ -270,7 +272,7 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
                         {viewer.connectionState === ConnectionState.CONNECTED && (
                             <section className="app-panel p-4">
                                 <h2 className="text-sm font-semibold text-white flex items-center gap-2 mb-3">
-                                    <Bot size={14} className="text-purple-400" />
+                                    <Bot size={14} className="text-teal-300" />
                                     Active Agents
                                 </h2>
 

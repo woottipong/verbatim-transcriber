@@ -43,9 +43,9 @@ const providerPresentations: Record<AgentProvider, ProviderPresentation> = {
         draftText: 'text-sky-300',
     },
     gemini: {
-        accent: 'bg-violet-400',
-        badge: 'text-violet-300 bg-violet-500/15 border-violet-400/30',
-        draftText: 'text-violet-300',
+        accent: 'bg-amber-400',
+        badge: 'text-amber-300 bg-amber-500/10 border-amber-400/30',
+        draftText: 'text-amber-300',
     },
     azure: {
         accent: 'bg-cyan-400',

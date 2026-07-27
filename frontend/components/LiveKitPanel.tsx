@@ -189,7 +189,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
       <header className="panel-header px-4 py-3 sm:px-5">
         <div className="session-toolbar">
           <div className="session-toolbar__identity">
-            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-violet-500/15 text-violet-300">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-teal-500/10 text-teal-300">
               <Radio size={16} aria-hidden="true" />
             </span>
             <div className="min-w-0">
@@ -265,7 +265,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                   type="button"
                   onClick={() => setViewMode('timeline')}
                   aria-pressed={viewMode === 'timeline'}
-                  className={`h-11 px-3 text-xs font-semibold rounded-md transition-colors cursor-pointer ${viewMode === 'timeline' ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                  className={`view-toggle-button ${viewMode === 'timeline' ? 'view-toggle-button--active' : ''}`}
                 >
                   Lines
                 </button>
@@ -273,7 +273,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                   type="button"
                   onClick={() => setViewMode('paragraph')}
                   aria-pressed={viewMode === 'paragraph'}
-                  className={`h-11 px-3 text-xs font-semibold rounded-md transition-colors cursor-pointer ${viewMode === 'paragraph' ? 'bg-violet-500 text-white' : 'text-slate-400 hover:text-slate-200'}`}
+                  className={`view-toggle-button ${viewMode === 'paragraph' ? 'view-toggle-button--active' : ''}`}
                 >
                   Text
                 </button>
@@ -327,7 +327,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                     onClick={() => setSelectedProvider(provider)}
                     aria-pressed={visibleMobileProvider === provider}
                     className={`min-h-11 shrink-0 rounded-md px-3 text-xs font-semibold transition-colors ${visibleMobileProvider === provider
-                      ? 'bg-violet-500 text-white'
+                      ? 'bg-teal-700 text-white'
                       : 'text-slate-300 hover:bg-slate-800 hover:text-white'
                     }`}
                   >
@@ -361,7 +361,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                         disabled={!exportText}
                         onClick={() => handleExportProvider(provider, exportText)}
                         aria-label={`Export ${formatProviderName(provider)} transcript as text`}
-                        className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-400 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="inline-flex min-h-11 items-center gap-1.5 rounded-md px-2 text-xs font-semibold text-slate-300 transition-colors hover:bg-slate-800 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Download size={13} aria-hidden="true" />
                         Export .txt
@@ -485,7 +485,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
 
       <footer className="flex items-center justify-between border-t border-slate-700/70 px-4 py-2.5 text-xs text-slate-400 sm:px-5">
         <span className="min-w-0 truncate pr-3">{session.headline} · {session.detail}</span>
-        <span className="shrink-0 tabular-nums text-violet-300">{displayLineCount} Lines</span>
+        <span className="shrink-0 tabular-nums text-teal-300">{displayLineCount} Lines</span>
       </footer>
     </article>
   );

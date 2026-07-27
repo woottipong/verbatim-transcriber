@@ -65,7 +65,7 @@ test('admin readiness leads the operator from audio to transcription', () => {
     assert.deepEqual(deriveAdminReadiness([], 0), {
         state: 'waiting-audio',
         title: 'Waiting for audio',
-        detail: 'Open Audio Sender to publish microphone or tab audio.',
+        detail: 'Open Audio Source to publish microphone or tab audio.',
         nextAction: 'open-audio',
     });
     assert.deepEqual(deriveAdminReadiness([

@@ -67,8 +67,8 @@ export function deriveAdminReadiness(
             state: 'waiting-audio',
             title: 'Waiting for audio',
             detail: activeAgentCount > 0
-                ? `${activeAgentCount === 1 ? 'Provider is' : `${activeAgentCount} providers are`} ready and waiting for Audio Sender.`
-                : 'Open Audio Sender to publish microphone or tab audio.',
+                ? `${activeAgentCount === 1 ? 'Provider is' : `${activeAgentCount} providers are`} ready and waiting for Audio Source.`
+                : 'Open Audio Source to publish microphone or tab audio.',
             nextAction: 'open-audio',
         };
     }

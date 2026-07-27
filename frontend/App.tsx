@@ -34,6 +34,15 @@ export default function App() {
     return () => window.removeEventListener('hashchange', handleHashChange);
   }, []);
 
+  useEffect(() => {
+    const pageTitle = route.page === 'admin'
+      ? 'Control Room'
+      : route.page === 'stream'
+        ? 'Audio Source'
+        : 'Transcript';
+    document.title = `${pageTitle} · CaptionLive`;
+  }, [route.page]);
+
   // Handlers
   const handleConfigSave = useCallback((newConfig: AppConfig) => {
     setConfig(newConfig);

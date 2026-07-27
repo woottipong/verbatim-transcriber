@@ -1,6 +1,6 @@
 /**
  * Application Constants
- * Centralized configuration for the Real-time Thai Transcription
+ * Centralized configuration for CaptionLive
  */
 
 // Storage Keys (versioned to force updates when structure changes)

@@ -1,5 +1,5 @@
 /**
- * Utility functions for the Real-time Thai Transcription
+ * Utility functions for CaptionLive
  */
 
 /**

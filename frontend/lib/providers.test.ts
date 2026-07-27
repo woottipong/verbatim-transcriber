@@ -22,9 +22,9 @@ test('only bilingual providers show source language labels', () => {
 
 test('provides one shared visual presentation for every provider surface', () => {
     assert.deepEqual(getProviderPresentation('gemini'), {
-        accent: 'bg-violet-400',
-        badge: 'text-violet-300 bg-violet-500/15 border-violet-400/30',
-        draftText: 'text-violet-300',
+        accent: 'bg-amber-400',
+        badge: 'text-amber-300 bg-amber-500/10 border-amber-400/30',
+        draftText: 'text-amber-300',
     });
     assert.deepEqual(getProviderPresentation('unknown'), {
         accent: 'bg-slate-500',
