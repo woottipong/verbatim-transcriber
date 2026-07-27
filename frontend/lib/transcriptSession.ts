@@ -1,0 +1,230 @@
+import type { TranscriptSegment } from '../types';
+import {
+    GEMINI_TRANSCRIPT_UPDATE_INTERVAL_MS,
+    INTERIM_TRANSCRIPT_UPDATE_INTERVAL_MS,
+    TranscriptUpdateBuffer,
+} from './transcriptUpdates.ts';
+import {
+    type InterimTranscript,
+    type PendingTranslation,
+    type TranscriptMessage,
+    attachTranslation,
+    attachTranslationToInterims,
+    clearInterimsBySource,
+    clearPendingTranslationsBySource,
+    createCommittedTranscript,
+    createInterimTranscript,
+    getTranscriptKey,
+    getTranscriptTurnKey,
+    isAppendOnlyInterimProvider,
+    parseTranscriptMessage,
+    prunePendingTranslations,
+    removeInterim,
+    storePendingTranslation,
+    upsertInterim,
+} from './transcriptMessages.ts';
+
+interface BufferedTranscriptMessage extends TranscriptMessage {
+    key: string;
+    sourceIdentity: string;
+}
+
+export interface TranscriptSessionSnapshot {
+    transcripts: TranscriptSegment[];
+    interimTranscripts: Map<string, InterimTranscript>;
+}
+
+export interface TranscriptIngestOptions {
+    resolveProvider?: (sourceIdentity: string) => string;
+    onProviderObserved?: (sourceIdentity: string, provider: string) => void;
+}
+
+interface TranscriptSessionOptions {
+    idPrefix: string;
+    schedule?: (callback: () => void, delayMs: number) => number;
+    cancel?: (timerId: number) => void;
+}
+
+const EMPTY_SNAPSHOT: TranscriptSessionSnapshot = {
+    transcripts: [],
+    interimTranscripts: new Map(),
+};
+const decoder = new TextDecoder();
+
+export class TranscriptSession {
+    private readonly options: TranscriptSessionOptions;
+    private snapshot: TranscriptSessionSnapshot = EMPTY_SNAPSHOT;
+    private translationsByTurn = new Map<string, PendingTranslation>();
+    private readonly listeners = new Set<() => void>();
+    private readonly transcriptUpdates: TranscriptUpdateBuffer<BufferedTranscriptMessage>;
+    private readonly geminiUpdates: TranscriptUpdateBuffer<BufferedTranscriptMessage>;
+    private segmentId = 0;
+
+    constructor(options: TranscriptSessionOptions) {
+        this.options = options;
+        this.transcriptUpdates = new TranscriptUpdateBuffer(
+            message => this.applySource(message),
+            INTERIM_TRANSCRIPT_UPDATE_INTERVAL_MS,
+            options.schedule,
+            options.cancel,
+            message => message.isFinal,
+            message => message.key,
+        );
+        this.geminiUpdates = new TranscriptUpdateBuffer(
+            message => this.applyGemini(message),
+            GEMINI_TRANSCRIPT_UPDATE_INTERVAL_MS,
+            options.schedule,
+            options.cancel,
+            message => message.isFinal,
+            message => message.key,
+            'immediate',
+        );
+    }
+
+    readonly subscribe = (listener: () => void): (() => void) => {
+        this.listeners.add(listener);
+        return () => this.listeners.delete(listener);
+    };
+
+    readonly getSnapshot = (): TranscriptSessionSnapshot => this.snapshot;
+
+    ingest(payload: Uint8Array, sourceIdentity: string, options: TranscriptIngestOptions = {}): boolean {
+        let decoded: unknown;
+        try {
+            decoded = JSON.parse(decoder.decode(payload));
+        } catch {
+            return false;
+        }
+
+        const parsed = parseTranscriptMessage(decoded);
+        if (!parsed) return false;
+
+        const provider = parsed.provider || options.resolveProvider?.(sourceIdentity) || 'unknown';
+        const message = { ...parsed, provider };
+        if (parsed.provider) options.onProviderObserved?.(sourceIdentity, parsed.provider);
+
+        const bufferedMessage: BufferedTranscriptMessage = {
+            ...message,
+            key: getTranscriptKey(message, sourceIdentity),
+            sourceIdentity,
+        };
+        if (isAppendOnlyInterimProvider(provider)) {
+            this.geminiUpdates.push(bufferedMessage);
+        } else if (message.role === 'translation') {
+            this.applyTranslation(bufferedMessage);
+        } else {
+            this.transcriptUpdates.push(bufferedMessage);
+        }
+        return true;
+    }
+
+    removeSource(sourceIdentity: string): void {
+        this.transcriptUpdates.removeWhere(message => message.sourceIdentity === sourceIdentity);
+        this.geminiUpdates.removeWhere(message => message.sourceIdentity === sourceIdentity);
+        this.translationsByTurn = clearPendingTranslationsBySource(this.translationsByTurn, sourceIdentity);
+        const interimTranscripts = clearInterimsBySource(this.snapshot.interimTranscripts, sourceIdentity);
+        if (interimTranscripts.size !== this.snapshot.interimTranscripts.size) {
+            this.publish(this.snapshot.transcripts, interimTranscripts);
+        }
+    }
+
+    reset(clearCommitted = false): void {
+        this.transcriptUpdates.clear();
+        this.geminiUpdates.clear();
+        this.translationsByTurn.clear();
+        if (clearCommitted) this.segmentId = 0;
+
+        const transcripts = clearCommitted ? [] : this.snapshot.transcripts;
+        if (transcripts.length === this.snapshot.transcripts.length && this.snapshot.interimTranscripts.size === 0) {
+            return;
+        }
+        this.publish(transcripts, new Map());
+    }
+
+    private applyGemini(message: BufferedTranscriptMessage): void {
+        if (message.role === 'translation') {
+            this.applyTranslation(message);
+            return;
+        }
+        this.applySource(message);
+    }
+
+    private applyTranslation(message: BufferedTranscriptMessage): void {
+        this.translationsByTurn = storePendingTranslation(
+            this.translationsByTurn,
+            message,
+            message.sourceIdentity,
+        );
+        const transcripts = attachTranslation(
+            this.snapshot.transcripts,
+            message,
+            message.sourceIdentity,
+        ).transcripts;
+        const interimTranscripts = attachTranslationToInterims(
+            this.snapshot.interimTranscripts,
+            message,
+            message.sourceIdentity,
+        ).interims;
+        this.publish(transcripts, interimTranscripts);
+    }
+
+    private applySource(message: BufferedTranscriptMessage): void {
+        const provider = message.provider || 'unknown';
+        if (message.isFinal) {
+            const segment = createCommittedTranscript(
+                `${this.options.idPrefix}-${++this.segmentId}`,
+                message,
+                provider,
+                message.speaker || message.sourceIdentity,
+            );
+            let transcripts = [...this.snapshot.transcripts.slice(-499), segment];
+            if (message.turnId) {
+                const pending = this.getPendingTranslation(message);
+                if (pending) {
+                    transcripts = attachTranslation(
+                        transcripts,
+                        pending.message,
+                        pending.sourceIdentity,
+                    ).transcripts;
+                }
+            }
+            this.publish(transcripts, removeInterim(this.snapshot.interimTranscripts, message.key));
+            return;
+        }
+
+        let interimTranscripts = upsertInterim(
+            this.snapshot.interimTranscripts,
+            createInterimTranscript(message, message.sourceIdentity, provider),
+        );
+        if (message.turnId) {
+            const pending = this.getPendingTranslation(message);
+            if (pending) {
+                interimTranscripts = attachTranslationToInterims(
+                    interimTranscripts,
+                    pending.message,
+                    pending.sourceIdentity,
+                ).interims;
+            }
+        }
+        this.publish(this.snapshot.transcripts, interimTranscripts);
+    }
+
+    private getPendingTranslation(message: BufferedTranscriptMessage): PendingTranslation | undefined {
+        this.translationsByTurn = prunePendingTranslations(this.translationsByTurn);
+        return this.translationsByTurn.get(getTranscriptTurnKey(message, message.sourceIdentity));
+    }
+
+    private publish(
+        transcripts: TranscriptSegment[],
+        interimTranscripts: Map<string, InterimTranscript>,
+    ): void {
+        if (
+            transcripts === this.snapshot.transcripts &&
+            interimTranscripts === this.snapshot.interimTranscripts
+        ) {
+            return;
+        }
+        this.snapshot = { transcripts, interimTranscripts };
+        this.listeners.forEach(listener => listener());
+    }
+}

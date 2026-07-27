@@ -1,0 +1,70 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+    deleteRoom,
+    removeRoomParticipant,
+    startRoomAgent,
+    stopRoomAgent,
+} from './api.ts';
+
+test('control room adapter owns agent endpoint details', async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+        requests.push({ url: String(input), init });
+        return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+
+    try {
+        await startRoomAgent('ws://localhost:3000', 'room one', 'google');
+        await stopRoomAgent('ws://localhost:3000', 'room one', 'google');
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+
+    assert.equal(requests[0].url, 'http://localhost:3000/livekit/agent/start');
+    assert.equal(requests[0].init?.method, 'POST');
+    assert.deepEqual(JSON.parse(String(requests[0].init?.body)), {
+        roomName: 'room one',
+        provider: 'google',
+    });
+    assert.equal(requests[1].url, 'http://localhost:3000/livekit/agent/stop');
+});
+
+test('control room adapter encodes destructive operation targets', async () => {
+    const urls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async input => {
+        urls.push(String(input));
+        return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+
+    try {
+        await removeRoomParticipant('https://api.example.com', 'room/one', 'user/a');
+        await deleteRoom('https://api.example.com', 'room/one');
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+
+    assert.deepEqual(urls, [
+        'https://api.example.com/livekit/rooms/room%2Fone/participants/user%2Fa',
+        'https://api.example.com/livekit/rooms/room%2Fone',
+    ]);
+});
+
+test('control room adapter preserves backend errors', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response(
+        JSON.stringify({ error: 'Provider is unavailable' }),
+        { status: 503, headers: { 'Content-Type': 'application/json' } },
+    );
+
+    try {
+        await assert.rejects(
+            () => startRoomAgent('http://localhost:3000', 'room', 'google'),
+            /Provider is unavailable/,
+        );
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});

@@ -18,32 +18,19 @@ import {
     X,
 } from 'lucide-react';
 import ToastViewport from './ToastViewport';
-import {
-    AgentStatus,
-    createRoom,
-    createTranscriptToken,
-    fetchAgentStatus,
-    fetchDetailedRooms,
-    ParticipantInfo,
-    RoomDetails,
-    RunningAgent,
-    TranscriptTokenResponse,
-} from '../lib/api';
+import type { ParticipantInfo, RunningAgent } from '../lib/api';
 import { buildStreamUrl, buildViewerUrl } from '../lib/appRoutes';
 import {
     canRemoveParticipant,
-    describeTranscriptFeedError,
     deriveAdminReadiness,
-    isTranscriptLinkUsable,
-    isTranscriptTokenResponse,
     keepSelectedRoom,
     maskTranscriptWebSocketUrl,
     selectRoomAfterDelete,
     validateRoomName,
 } from '../lib/adminRooms';
-import { getControlAuthHeaders, toHttpUrl } from '../lib/runtime';
 import { providerLabels } from '../lib/providers';
 import type { AgentProvider } from '../lib/providers';
+import { useControlRoomOperations } from '../hooks/useControlRoomOperations';
 
 interface AdminPageProps {
     onBack?: () => void;
@@ -52,17 +39,6 @@ interface AdminPageProps {
 
 interface Notice {
     tone: 'success' | 'error';
-    message: string;
-}
-
-interface TranscriptLinkState {
-    roomName: string;
-    provider: AgentProvider;
-    response: TranscriptTokenResponse;
-}
-
-interface TranscriptFeedErrorState {
-    roomName: string;
     message: string;
 }
 
@@ -96,33 +72,48 @@ function handleDialogKeyDown(event: React.KeyboardEvent<HTMLElement>) {
 }
 
 export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
-    const httpBackendUrl = toHttpUrl(backendUrl);
     const appBaseUrl = `${window.location.origin}${window.location.pathname}`;
-    const [rooms, setRooms] = useState<RoomDetails[]>([]);
     const [selectedRoomName, setSelectedRoomName] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
-    const [agentStatus, setAgentStatus] = useState<AgentStatus>({ count: 0, agents: [] });
-    const [agentStatusError, setAgentStatusError] = useState<string | null>(null);
     const [agentProvider, setAgentProvider] = useState<AgentProvider>('google');
-    const [isLoadingRooms, setIsLoadingRooms] = useState(false);
-    const [isStartingAgent, setIsStartingAgent] = useState(false);
-    const [stoppingAgentKey, setStoppingAgentKey] = useState<string | null>(null);
-    const [isCreatingRoom, setIsCreatingRoom] = useState(false);
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
     const [newRoomName, setNewRoomName] = useState('');
     const [createRoomError, setCreateRoomError] = useState<string | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-    const [isDeletingRoom, setIsDeletingRoom] = useState(false);
     const [participantRemoveConfirm, setParticipantRemoveConfirm] = useState<ParticipantInfo | null>(null);
-    const [isRemovingParticipant, setIsRemovingParticipant] = useState(false);
-    const [generatingTranscriptProvider, setGeneratingTranscriptProvider] = useState<AgentProvider | null>(null);
-    const [transcriptLinks, setTranscriptLinks] = useState<Partial<Record<AgentProvider, TranscriptLinkState>>>({});
-    const [transcriptFeedErrors, setTranscriptFeedErrors] = useState<Partial<Record<AgentProvider, TranscriptFeedErrorState>>>({});
     const [notice, setNotice] = useState<Notice | null>(null);
     const createRoomInputRef = useRef<HTMLInputElement>(null);
     const dialogTriggerRef = useRef<HTMLElement | null>(null);
-    const roomsRequestRef = useRef(0);
-    const agentStatusRequestRef = useRef(0);
+    const showNotice = useCallback((nextNotice: Notice) => setNotice(nextNotice), []);
+    const handleRoomsError = useCallback(
+        (message: string) => showNotice({ tone: 'error', message }),
+        [showNotice],
+    );
+    const {
+        rooms,
+        agentStatus,
+        agentStatusError,
+        isLoadingRooms,
+        isCreatingRoom,
+        isStartingAgent,
+        stoppingAgentKey,
+        isRemovingParticipant,
+        isDeletingRoom,
+        generatingTranscriptProvider,
+        transcriptFeedErrors,
+        refreshRooms,
+        refreshAgentStatus,
+        createRoom,
+        startAgent: startAgentOperation,
+        stopAgent: stopAgentOperation,
+        removeParticipant: removeParticipantOperation,
+        deleteRoom: deleteRoomOperation,
+        generateTranscriptLink,
+        activeTranscriptLink: getActiveTranscriptLink,
+    } = useControlRoomOperations({
+        backendUrl,
+        onRoomsError: handleRoomsError,
+    });
 
     const selectedRoom = rooms.find(room => room.name === selectedRoomName) || null;
     const selectedAgents = useMemo(
@@ -149,20 +140,8 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         if (!query) return rooms;
         return rooms.filter(room => room.name.toLowerCase().includes(query));
     }, [rooms, searchQuery]);
-    const activeTranscriptLink = (provider: AgentProvider): TranscriptTokenResponse | null => {
-        const link = transcriptLinks[provider];
-        return link?.roomName === selectedRoomName
-            && link.provider === provider
-            && isTranscriptTokenResponse(link.response)
-            && isTranscriptLinkUsable(link.response)
-            ? link.response
-            : null;
-    };
+    const activeTranscriptLink = (provider: AgentProvider) => getActiveTranscriptLink(selectedRoomName, provider);
     const readiness = deriveAdminReadiness(selectedRoom?.participants ?? [], selectedAgents.length);
-
-    const showNotice = useCallback((nextNotice: Notice) => {
-        setNotice(nextNotice);
-    }, []);
 
     const rememberDialogTrigger = (trigger: HTMLElement) => {
         dialogTriggerRef.current = trigger;
@@ -203,63 +182,6 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [isCreateDialogOpen, isCreatingRoom]);
 
-    const refreshRooms = useCallback(async () => {
-        const requestId = ++roomsRequestRef.current;
-        setIsLoadingRooms(true);
-        try {
-            const nextRooms = await fetchDetailedRooms(backendUrl);
-            if (requestId !== roomsRequestRef.current) return;
-            setRooms(nextRooms);
-        } catch (err) {
-            if (requestId !== roomsRequestRef.current) return;
-            showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to load rooms' });
-        } finally {
-            if (requestId === roomsRequestRef.current) setIsLoadingRooms(false);
-        }
-    }, [backendUrl, showNotice]);
-
-    const refreshAgentStatus = useCallback(async () => {
-        const requestId = ++agentStatusRequestRef.current;
-        try {
-            const nextStatus = await fetchAgentStatus(backendUrl);
-            if (requestId === agentStatusRequestRef.current) {
-                setAgentStatus(nextStatus);
-                setAgentStatusError(null);
-            }
-        } catch (err) {
-            if (requestId !== agentStatusRequestRef.current) return;
-            // Agent routes are intentionally absent when no ASR provider is configured.
-            console.warn('[Admin] Agent status unavailable:', err);
-            setAgentStatusError('Could not refresh provider status. Showing the last known state.');
-        }
-    }, [backendUrl]);
-
-    useEffect(() => {
-        let disposed = false;
-        let nextPoll: number | undefined;
-        const scheduleNextPoll = () => {
-            if (!disposed) nextPoll = window.setTimeout(poll, 5000);
-        };
-        const poll = async () => {
-            if (!document.hidden) {
-                await Promise.allSettled([refreshRooms(), refreshAgentStatus()]);
-            }
-            scheduleNextPoll();
-        };
-        const handleVisibilityChange = () => {
-            if (document.hidden || disposed) return;
-            if (nextPoll !== undefined) window.clearTimeout(nextPoll);
-            void poll();
-        };
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-        void poll();
-        return () => {
-            disposed = true;
-            if (nextPoll !== undefined) window.clearTimeout(nextPoll);
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-        };
-    }, [refreshAgentStatus, refreshRooms]);
-
     const handleCreateRoom = async (event: React.FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         const normalizedName = newRoomName.trim();
@@ -269,14 +191,9 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             return;
         }
 
-        setIsCreatingRoom(true);
         setCreateRoomError(null);
         try {
-            const room = await createRoom(backendUrl, normalizedName);
-            setRooms(current => [
-                ...current.filter(existing => existing.name !== room.name),
-                { ...room, participants: room.participants || [] },
-            ]);
+            const room = await createRoom(normalizedName);
             setSelectedRoomName(room.name);
             setNewRoomName('');
             setIsCreateDialogOpen(false);
@@ -284,49 +201,27 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             showNotice({ tone: 'success', message: `Room “${room.name}” created. Start the agent when ready.` });
         } catch (err) {
             setCreateRoomError(err instanceof Error ? err.message : 'Failed to create room');
-        } finally {
-            setIsCreatingRoom(false);
         }
     };
 
     const startAgent = async () => {
         if (!selectedRoom) return;
-        setIsStartingAgent(true);
         setNotice(null);
         try {
-            const response = await fetch(`${httpBackendUrl}/livekit/agent/start`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
-                body: JSON.stringify({ roomName: selectedRoom.name, provider: agentProvider }),
-            });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || 'Failed to start agent');
-            await refreshAgentStatus();
+            await startAgentOperation(selectedRoom.name, agentProvider);
             showNotice({ tone: 'success', message: `${providerLabels[agentProvider]} is connecting to “${selectedRoom.name}”.` });
         } catch (err) {
             showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to start agent' });
-        } finally {
-            setIsStartingAgent(false);
         }
     };
 
     const stopAgent = async (agent: RunningAgent) => {
-        setStoppingAgentKey(agent.key);
         setNotice(null);
         try {
-            const response = await fetch(`${httpBackendUrl}/livekit/agent/stop`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
-                body: JSON.stringify({ roomName: agent.room, provider: agent.provider }),
-            });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || 'Failed to stop agent');
-            await refreshAgentStatus();
+            await stopAgentOperation(agent);
             showNotice({ tone: 'success', message: `Agent stopped for “${agent.room}”.` });
         } catch (err) {
             showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to stop agent' });
-        } finally {
-            setStoppingAgentKey(null);
         }
     };
 
@@ -334,94 +229,38 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         if (!selectedRoom || !participantRemoveConfirm || !canRemoveParticipant(participantRemoveConfirm)) return;
         const roomName = selectedRoom.name;
         const identity = participantRemoveConfirm.identity;
-        setIsRemovingParticipant(true);
         try {
-            const response = await fetch(
-                `${httpBackendUrl}/livekit/rooms/${encodeURIComponent(roomName)}/participants/${encodeURIComponent(identity)}`,
-                { method: 'DELETE', headers: getControlAuthHeaders() },
-            );
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || 'Failed to remove participant');
-            await refreshRooms();
+            await removeParticipantOperation(roomName, identity);
             setParticipantRemoveConfirm(null);
             restoreDialogFocus();
             showNotice({ tone: 'success', message: `${identity} was removed from the room.` });
         } catch (err) {
             showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to remove participant' });
-        } finally {
-            setIsRemovingParticipant(false);
         }
     };
 
     const deleteRoom = async () => {
         if (!deleteConfirm) return;
         const roomToDelete = deleteConfirm;
-        setIsDeletingRoom(true);
         try {
-            const response = await fetch(`${httpBackendUrl}/livekit/rooms/${encodeURIComponent(roomToDelete)}`, {
-                method: 'DELETE',
-                headers: getControlAuthHeaders(),
-            });
-            const data = await response.json().catch(() => ({}));
-            if (!response.ok) throw new Error(data.error || 'Failed to delete room');
-            const remainingRooms = rooms.filter(room => room.name !== roomToDelete);
-            setRooms(remainingRooms);
+            await deleteRoomOperation(roomToDelete);
             setSelectedRoomName(selectRoomAfterDelete(roomToDelete, rooms));
-            setTranscriptLinks(current => {
-                const next = { ...current };
-                for (const provider of Object.keys(next) as AgentProvider[]) {
-                    if (next[provider]?.roomName === roomToDelete) delete next[provider];
-                }
-                return next;
-            });
-            setTranscriptFeedErrors(current => {
-                const next = { ...current };
-                for (const provider of Object.keys(next) as AgentProvider[]) {
-                    if (next[provider]?.roomName === roomToDelete) delete next[provider];
-                }
-                return next;
-            });
             setDeleteConfirm(null);
             restoreDialogFocus();
             showNotice({ tone: 'success', message: `Room “${roomToDelete}” deleted.` });
         } catch (err) {
             showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to delete room' });
-        } finally {
-            setIsDeletingRoom(false);
         }
     };
 
-    const getTranscriptLink = async (provider: AgentProvider): Promise<TranscriptTokenResponse | null> => {
+    const getTranscriptLink = async (provider: AgentProvider) => {
         if (!selectedRoom) return null;
         const roomName = selectedRoom.name;
-        setGeneratingTranscriptProvider(provider);
-        setTranscriptFeedErrors(current => {
-            const next = { ...current };
-            delete next[provider];
-            return next;
-        });
         try {
-            const response = await createTranscriptToken(backendUrl, roomName, provider);
-            if (!isTranscriptTokenResponse(response) || response.provider !== provider) {
-                throw new Error('Backend returned an invalid transcript link');
-            }
-            setTranscriptLinks(current => ({
-                ...current,
-                [provider]: { roomName, provider, response },
-            }));
-            return response;
-        } catch (err) {
-            const message = describeTranscriptFeedError(
-                err instanceof Error ? err.message : 'Failed to generate transcript link',
-            );
-            setTranscriptFeedErrors(current => ({
-                ...current,
-                [provider]: { roomName, message },
-            }));
+            return await generateTranscriptLink(roomName, provider);
+        } catch {
             showNotice({ tone: 'error', message: 'Could not generate the transcript feed link.' });
             return null;
-        } finally {
-            setGeneratingTranscriptProvider(current => current === provider ? null : current);
         }
     };
 

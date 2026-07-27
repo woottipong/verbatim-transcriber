@@ -86,6 +86,15 @@ export class TranscriptUpdateBuffer<T> {
         }
     }
 
+    removeWhere(predicate: (update: T) => boolean): void {
+        for (const [key, update] of this.pending) {
+            if (predicate(update)) this.pending.delete(key);
+        }
+        for (const [key, update] of this.pendingFinals) {
+            if (predicate(update)) this.pendingFinals.delete(key);
+        }
+    }
+
     private scheduleFlush(): void {
         this.timerId = this.schedule(() => {
             this.timerId = null;

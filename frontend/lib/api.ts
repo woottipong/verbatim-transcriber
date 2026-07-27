@@ -122,7 +122,53 @@ export async function fetchAgentStatus(backendUrl: string): Promise<AgentStatus>
     return parseApiResponse<AgentStatus>(response, 'Failed to load agent status');
 }
 
-async function parseApiResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
+export async function startRoomAgent(
+    backendUrl: string,
+    roomName: string,
+    provider: AgentProvider,
+): Promise<void> {
+    const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/agent/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
+        body: JSON.stringify({ roomName, provider }),
+    });
+    await parseApiResponse(response, 'Failed to start agent');
+}
+
+export async function stopRoomAgent(
+    backendUrl: string,
+    roomName: string,
+    provider: string,
+): Promise<void> {
+    const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/agent/stop`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
+        body: JSON.stringify({ roomName, provider }),
+    });
+    await parseApiResponse(response, 'Failed to stop agent');
+}
+
+export async function removeRoomParticipant(
+    backendUrl: string,
+    roomName: string,
+    identity: string,
+): Promise<void> {
+    const response = await fetch(
+        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/participants/${encodeURIComponent(identity)}`,
+        { method: 'DELETE', headers: getControlAuthHeaders() },
+    );
+    await parseApiResponse(response, 'Failed to remove participant');
+}
+
+export async function deleteRoom(backendUrl: string, roomName: string): Promise<void> {
+    const response = await fetch(
+        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}`,
+        { method: 'DELETE', headers: getControlAuthHeaders() },
+    );
+    await parseApiResponse(response, 'Failed to delete room');
+}
+
+async function parseApiResponse<T = unknown>(response: Response, fallbackMessage: string): Promise<T> {
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
         throw new Error(typeof data.error === 'string' ? data.error : `${fallbackMessage}: ${response.status}`);
