@@ -656,7 +656,7 @@ func newTranscriptMessage(result domain.TranscriptResult, provider, speaker stri
 	}
 	return TranscriptMessage{
 		Type:         "transcript",
-		Text:         domain.NormalizeThaiSpacing(result.Text),
+		Text:         domain.NormalizeTranscriptSpacing(result.Text),
 		IsFinal:      result.IsFinal,
 		Confidence:   result.Confidence,
 		Provider:     provider,

@@ -3,7 +3,7 @@ type CancelUpdate = (timerId: number) => void;
 type FinalDelivery = 'next-interval' | 'immediate';
 
 export const INTERIM_TRANSCRIPT_UPDATE_INTERVAL_MS = 33;
-export const GEMINI_TRANSCRIPT_UPDATE_INTERVAL_MS = 100;
+export const GEMINI_TRANSCRIPT_UPDATE_INTERVAL_MS = 50;
 
 export class TranscriptUpdateBuffer<T> {
     private readonly pending = new Map<string, T>();

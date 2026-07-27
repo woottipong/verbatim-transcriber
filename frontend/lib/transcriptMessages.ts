@@ -37,6 +37,11 @@ const PENDING_TRANSLATION_TTL_MS = 30_000;
 const MAX_INTERIM_TRANSCRIPTS = 64;
 const FINAL_DISPLAY_GROUP_WINDOW_MS = 1_600;
 const STRONG_SENTENCE_END = /[.!?…。！？]$/u;
+const THAI_SCRIPT = /[\u0E00-\u0E7F]/u;
+
+function containsThaiText(segment: Pick<TranscriptSegment, 'text' | 'translation'>): boolean {
+    return THAI_SCRIPT.test(segment.text) || Boolean(segment.translation && THAI_SCRIPT.test(segment.translation.text));
+}
 
 function joinTranscriptChunks(previous: string, next: string): string {
     const left = previous.trim();
@@ -62,6 +67,7 @@ export function groupFinalTranscriptRows(
             previous.speaker === segment.speaker &&
             normalizeLanguageTag(previous.languageCode) === normalizeLanguageTag(segment.languageCode) &&
             gap >= 0 && gap <= windowMs &&
+            !containsThaiText(previous) && !containsThaiText(segment) &&
             !STRONG_SENTENCE_END.test(previous.text.trim())
         );
         if (!canGroup || !previous) return [...rows, segment];

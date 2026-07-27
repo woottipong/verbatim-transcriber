@@ -2,16 +2,21 @@ package domain
 
 import "testing"
 
-func TestNormalizeThaiSpacing(t *testing.T) {
+func TestNormalizeTranscriptSpacing(t *testing.T) {
 	tests := []struct {
 		name  string
 		input string
 		want  string
 	}{
 		{
-			name:  "removes spaces inserted between Thai characters",
+			name:  "preserves spaces between Thai text",
 			input: "ทด สอบ ถอด ความ 1 2 3 4",
-			want:  "ทดสอบถอดความ 1 2 3 4",
+			want:  "ทด สอบ ถอด ความ 1 2 3 4",
+		},
+		{
+			name:  "preserves intentional Thai phrase boundary",
+			input: "ค่ะ ครับ",
+			want:  "ค่ะ ครับ",
 		},
 		{
 			name:  "preserves boundaries around Latin text and numbers",
@@ -47,9 +52,16 @@ func TestNormalizeThaiSpacing(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := NormalizeThaiSpacing(tt.input); got != tt.want {
-				t.Fatalf("NormalizeThaiSpacing(%q) = %q, want %q", tt.input, got, tt.want)
+			if got := NormalizeTranscriptSpacing(tt.input); got != tt.want {
+				t.Fatalf("NormalizeTranscriptSpacing(%q) = %q, want %q", tt.input, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestNormalizeThaiSpacingCompatibility(t *testing.T) {
+	const input = "ค่ะ ครับ สระภาษาอังกฤษคือ a e i o u"
+	if got, want := NormalizeThaiSpacing(input), NormalizeTranscriptSpacing(input); got != want {
+		t.Fatalf("NormalizeThaiSpacing(%q) = %q, want %q", input, got, want)
 	}
 }

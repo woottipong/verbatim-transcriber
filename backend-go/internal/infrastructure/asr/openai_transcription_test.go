@@ -308,6 +308,327 @@ func TestOpenAITranscriptionReconnectsAndReplaysRecentAudio(t *testing.T) {
 	}
 }
 
+func TestOpenAITranscriptionStopDuringReconnectDoesNotExposeTransientError(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"session.updated"}`)); err != nil {
+			return
+		}
+		_, _, _ = conn.ReadMessage()
+	}))
+	defer server.Close()
+
+	provider, err := NewOpenAITranscriptionProvider(context.Background(), OpenAITranscriptionConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+	websocketURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	var dialCount atomic.Int32
+	reconnectStarted := make(chan struct{})
+	allowReconnect := make(chan struct{})
+	provider.dial = func(ctx context.Context, _ string, headers http.Header) (*websocket.Conn, *http.Response, error) {
+		if dialCount.Add(1) == 1 {
+			return (&websocket.Dialer{}).DialContext(ctx, websocketURL, headers)
+		}
+		close(reconnectStarted)
+		<-allowReconnect
+		return nil, nil, errors.New("network unavailable")
+	}
+	provider.reconnectDelay = func(int) time.Duration { return 0 }
+
+	if err := provider.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := provider.SendAudio(pcm16Batch(4000, 40*time.Millisecond, 24000)); err != nil {
+		t.Fatalf("SendAudio() error = %v", err)
+	}
+	select {
+	case <-reconnectStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for reconnect")
+	}
+	if err := provider.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	close(allowReconnect)
+	if err := provider.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil after normal Stop during reconnect", err)
+	}
+}
+
+func TestOpenAITranscriptionStopDuringAPIErrorReconnectDoesNotExposeTransientError(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"session.updated"}`)); err != nil {
+			return
+		}
+		_ = conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","error":{"message":"temporary upstream error"}}`))
+		for {
+			if _, _, err := conn.ReadMessage(); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	provider, err := NewOpenAITranscriptionProvider(context.Background(), OpenAITranscriptionConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+	websocketURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	var dialCount atomic.Int32
+	reconnectStarted := make(chan struct{})
+	allowReconnect := make(chan struct{})
+	provider.dial = func(ctx context.Context, _ string, headers http.Header) (*websocket.Conn, *http.Response, error) {
+		if dialCount.Add(1) == 1 {
+			return (&websocket.Dialer{}).DialContext(ctx, websocketURL, headers)
+		}
+		close(reconnectStarted)
+		<-allowReconnect
+		return nil, nil, errors.New("network unavailable")
+	}
+	provider.reconnectDelay = func(int) time.Duration { return 0 }
+	if err := provider.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	select {
+	case <-reconnectStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for API-error reconnect")
+	}
+	if err := provider.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	close(allowReconnect)
+	if err := provider.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil after normal Stop during API-error reconnect", err)
+	}
+}
+
+func TestOpenAITranscriptionParentCancellationDuringReconnectIsNormalTermination(t *testing.T) {
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"session.updated"}`)); err != nil {
+			return
+		}
+		_, _, _ = conn.ReadMessage()
+	}))
+	defer server.Close()
+
+	provider, err := NewOpenAITranscriptionProvider(context.Background(), OpenAITranscriptionConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+	websocketURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	provider.dial = func(ctx context.Context, _ string, headers http.Header) (*websocket.Conn, *http.Response, error) {
+		return (&websocket.Dialer{}).DialContext(ctx, websocketURL, headers)
+	}
+	reconnectWaiting := make(chan struct{})
+	provider.reconnectDelay = func(int) time.Duration {
+		select {
+		case <-reconnectWaiting:
+		default:
+			close(reconnectWaiting)
+		}
+		return time.Hour
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := provider.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := provider.SendAudio(pcm16Batch(4000, 40*time.Millisecond, 24000)); err != nil {
+		t.Fatalf("SendAudio() error = %v", err)
+	}
+	select {
+	case <-reconnectWaiting:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for reconnect backoff")
+	}
+	cancel()
+	select {
+	case _, ok := <-provider.Results():
+		if ok {
+			t.Fatal("unexpected result after parent context cancellation")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("results remained open after parent context cancellation")
+	}
+	if err := provider.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil after parent context cancellation", err)
+	}
+	if err := provider.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+}
+
+func TestOpenAITranscriptionReplaysAudioThatArrivesDuringHandoff(t *testing.T) {
+	var connectionCount atomic.Int32
+	secondSetup := make(chan struct{})
+	allowSecondReady := make(chan struct{})
+	secondAudio := make(chan []byte, 4)
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		connection := connectionCount.Add(1)
+		if _, _, err := conn.ReadMessage(); err != nil {
+			return
+		}
+		if connection == 2 {
+			close(secondSetup)
+			<-allowSecondReady
+		}
+		if err := conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"session.updated"}`)); err != nil {
+			return
+		}
+		for {
+			_, payload, err := conn.ReadMessage()
+			if err != nil {
+				return
+			}
+			var event struct {
+				Type  string `json:"type"`
+				Audio string `json:"audio"`
+			}
+			if json.Unmarshal(payload, &event) != nil || event.Type != "input_audio_buffer.append" {
+				continue
+			}
+			audio, err := base64.StdEncoding.DecodeString(event.Audio)
+			if err != nil {
+				return
+			}
+			if connection == 1 {
+				return
+			}
+			secondAudio <- audio
+		}
+	}))
+	defer server.Close()
+
+	provider, err := NewOpenAITranscriptionProvider(context.Background(), OpenAITranscriptionConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+	websocketURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	provider.dial = func(ctx context.Context, _ string, headers http.Header) (*websocket.Conn, *http.Response, error) {
+		return (&websocket.Dialer{}).DialContext(ctx, websocketURL, headers)
+	}
+	provider.reconnectDelay = func(int) time.Duration { return 0 }
+	if err := provider.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = provider.Stop() })
+
+	initial := pcm16Batch(2000, 40*time.Millisecond, 24000)
+	late := pcm16Batch(6000, 40*time.Millisecond, 24000)
+	if err := provider.SendAudio(initial); err != nil {
+		t.Fatalf("SendAudio(initial) error = %v", err)
+	}
+	select {
+	case <-secondSetup:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for replacement connection")
+	}
+
+	provider.writeMu.Lock()
+	close(allowSecondReady)
+	time.Sleep(20 * time.Millisecond)
+	if err := provider.SendAudio(late); err != nil {
+		provider.writeMu.Unlock()
+		t.Fatalf("SendAudio(late) error = %v", err)
+	}
+	provider.writeMu.Unlock()
+
+	want := append(append([]byte(nil), initial...), late...)
+	var replayed []byte
+	deadline := time.After(500 * time.Millisecond)
+	for len(replayed) < len(want) {
+		select {
+		case audio := <-secondAudio:
+			replayed = append(replayed, audio...)
+		case <-deadline:
+			t.Fatalf("replayed audio bytes = %d, want %d including handoff audio", len(replayed), len(want))
+		}
+	}
+	if string(replayed) != string(want) {
+		t.Fatalf("replayed audio did not preserve initial and handoff order")
+	}
+}
+
+func TestOpenAITranscriptionRestoresHandoffAudioAfterReplayFailure(t *testing.T) {
+	serverDone := make(chan struct{})
+	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := upgrader.Upgrade(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		<-serverDone
+	}))
+	defer server.Close()
+
+	websocketURL := "ws" + strings.TrimPrefix(server.URL, "http")
+	conn, _, err := (&websocket.Dialer{}).Dial(websocketURL, nil)
+	if err != nil {
+		t.Fatalf("dial test WebSocket: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close test WebSocket: %v", err)
+	}
+	close(serverDone)
+
+	provider, err := NewOpenAITranscriptionProvider(context.Background(), OpenAITranscriptionConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("new provider: %v", err)
+	}
+	audio := pcm16Batch(4000, 40*time.Millisecond, 24000)
+	provider.mu.Lock()
+	provider.conn = conn
+	provider.ctx = context.Background()
+	provider.reconnecting = true
+	provider.handoffBuf.Add(audio)
+	provider.mu.Unlock()
+
+	if _, err := provider.activateReconnectedSession(context.Background()); err == nil {
+		t.Fatal("activateReconnectedSession() error = nil, want replay failure")
+	}
+	provider.mu.Lock()
+	restored, _ := provider.handoffBuf.Drain()
+	provider.mu.Unlock()
+	if string(restored) != string(audio) {
+		t.Fatalf("restored audio bytes = %d, want %d matching bytes", len(restored), len(audio))
+	}
+}
+
 func TestOpenAITranscriptionClosesResultsAfterReconnectIsExhausted(t *testing.T) {
 	upgrader := websocket.Upgrader{CheckOrigin: func(*http.Request) bool { return true }}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

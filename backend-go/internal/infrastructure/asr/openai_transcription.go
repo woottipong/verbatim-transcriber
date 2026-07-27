@@ -103,6 +103,7 @@ type openAITranscriptionProvider struct {
 	transcriptItems map[string]string
 	segmenter       openAITranscriptionSegmenter
 	audioBuf        *ringBuffer
+	handoffBuf      *reconnectAudioBuffer
 	reconnectDelay  func(int) time.Duration
 	loggedAudio     bool
 	loggedEventType map[string]struct{}
@@ -140,6 +141,7 @@ func NewOpenAITranscriptionProvider(ctx context.Context, cfg OpenAITranscription
 		segmenter:       newOpenAITranscriptionSegmenter(normalized.SampleRate),
 		transcriptItems: make(map[string]string),
 		audioBuf:        newRingBuffer(normalized.SampleRate * 2 * int(openAITranscriptionReplay/time.Second)),
+		handoffBuf:      newReconnectAudioBuffer(normalized.SampleRate * 2 * int(openAITranscriptionReplay/time.Second)),
 		reconnectDelay:  defaultOpenAITranscriptionReconnectDelay,
 		loggedEventType: make(map[string]struct{}),
 	}, nil
@@ -307,6 +309,9 @@ func (o *openAITranscriptionProvider) SendAudio(data []byte) error {
 	if started && !stopped && o.audioBuf != nil {
 		o.audioBuf.Write(data)
 	}
+	if reconnecting && o.handoffBuf != nil {
+		o.handoffBuf.Add(data)
+	}
 	o.mu.Unlock()
 	if stopped {
 		return errors.New("OpenAI transcription provider is stopped")
@@ -437,9 +442,9 @@ func (o *openAITranscriptionProvider) receiveResponses(conn *websocket.Conn, rea
 		}
 		if event.kind == openAIEventError {
 			apiErr := errors.New(event.errorText)
-			o.setError(apiErr)
 			log.Printf("❌ [OpenAI Transcribe] API error: %s", event.errorText)
 			if !acknowledged {
+				o.setError(apiErr)
 				signalReady(apiErr)
 			} else {
 				o.beginReconnect(conn, apiErr)
@@ -500,7 +505,12 @@ func (o *openAITranscriptionProvider) beginReconnect(failedConn *websocket.Conn,
 		return
 	}
 	o.reconnecting = true
-	o.lastErr = cause
+	if o.handoffBuf != nil {
+		o.handoffBuf.Reset()
+		if o.audioBuf != nil {
+			o.handoffBuf.Add(o.audioBuf.Read())
+		}
+	}
 	ctx := o.ctx
 	o.mu.Unlock()
 	go o.reconnect(ctx, failedConn, cause)
@@ -516,6 +526,11 @@ func (o *openAITranscriptionProvider) reconnect(ctx context.Context, failedConn 
 			o.mu.Unlock()
 			return
 		}
+		if ctx.Err() != nil {
+			o.mu.Unlock()
+			o.finishReconnectCancellation()
+			return
+		}
 		delayFn := o.reconnectDelay
 		o.mu.Unlock()
 		if delayFn == nil {
@@ -526,7 +541,7 @@ func (o *openAITranscriptionProvider) reconnect(ctx context.Context, failedConn 
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				o.finishReconnectFailure(ctx.Err())
+				o.finishReconnectCancellation()
 				return
 			case <-timer.C:
 			}
@@ -538,41 +553,80 @@ func (o *openAITranscriptionProvider) reconnect(ctx context.Context, failedConn 
 			continue
 		}
 
-		o.mu.Lock()
-		replay := o.audioBuf.Read()
-		conn := o.conn
-		o.mu.Unlock()
 		o.transcriptMu.Lock()
 		o.segmenter.reset()
 		o.transcriptMu.Unlock()
-		if len(replay) > 0 {
-			payload, err := openAITranscriptionAudioAppendPayload(replay)
-			if err == nil {
-				err = o.writeTextTo(conn, payload)
-			}
-			if err != nil {
-				lastErr = fmt.Errorf("replay audio after reconnect: %w", err)
+		count, err := o.activateReconnectedSession(ctx)
+		if err != nil {
+			lastErr = err
+			o.mu.Lock()
+			conn := o.conn
+			o.mu.Unlock()
+			if conn != nil {
 				_ = conn.Close()
-				continue
 			}
-			if err := o.observeAudio(replay); err != nil {
-				lastErr = err
-				_ = conn.Close()
-				continue
-			}
-			log.Printf("🔄 [OpenAI Transcribe] Replayed %d bytes of recent audio", len(replay))
+			continue
 		}
-
-		o.mu.Lock()
-		o.reconnecting = false
-		o.reconnectCount++
-		o.lastErr = nil
-		count := o.reconnectCount
-		o.mu.Unlock()
 		log.Printf("✅ [OpenAI Transcribe] Session reconnected (#%d)", count)
 		return
 	}
 	o.finishReconnectFailure(lastErr)
+}
+
+func (o *openAITranscriptionProvider) activateReconnectedSession(ctx context.Context) (int, error) {
+	for {
+		o.mu.Lock()
+		if o.stopped || ctx.Err() != nil {
+			o.mu.Unlock()
+			return 0, context.Canceled
+		}
+		replay, dropped := o.handoffBuf.Drain()
+		conn := o.conn
+		rate := o.cfg.SampleRate
+		if len(replay) == 0 {
+			o.reconnecting = false
+			o.reconnectCount++
+			o.lastErr = nil
+			count := o.reconnectCount
+			o.mu.Unlock()
+			o.logDroppedReconnectAudio(dropped, rate)
+			return count, nil
+		}
+		o.mu.Unlock()
+
+		payload, err := openAITranscriptionAudioAppendPayload(replay)
+		if err == nil {
+			err = o.writeTextTo(conn, payload)
+		}
+		if err == nil {
+			err = o.observeAudio(replay)
+		}
+		if err != nil {
+			o.mu.Lock()
+			o.handoffBuf.RestoreFront(replay, dropped)
+			o.mu.Unlock()
+			return 0, fmt.Errorf("replay audio after reconnect: %w", err)
+		}
+		o.logDroppedReconnectAudio(dropped, rate)
+		log.Printf("🔄 [OpenAI Transcribe] Replayed %d bytes of recent audio", len(replay))
+	}
+}
+
+func (o *openAITranscriptionProvider) logDroppedReconnectAudio(dropped int64, rate int) {
+	if dropped <= 0 {
+		return
+	}
+	log.Printf("⚠️ [OpenAI Transcribe] Reconnect audio buffer overflowed (dropped_bytes=%d dropped_ms=%d)",
+		dropped, dropped*1000/int64(rate*2))
+}
+
+func (o *openAITranscriptionProvider) finishReconnectCancellation() {
+	o.mu.Lock()
+	o.reconnecting = false
+	o.started = false
+	o.lastErr = nil
+	o.mu.Unlock()
+	o.closeResults()
 }
 
 func (o *openAITranscriptionProvider) finishReconnectFailure(err error) {

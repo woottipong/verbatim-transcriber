@@ -34,6 +34,21 @@ test('exports nearby finalized chunks using the same rows shown in the UI', () =
   assert.equal(text, 'First chunk continues here');
 });
 
+test('exports Thai final rows without inventing or removing phrase boundaries', () => {
+  const text = formatTranscriptText([
+    {
+      id: '1', text: 'ค่ะ ครับ สระภาษาอังกฤษคือ a e i o u', isFinal: true,
+      timestamp: 1_000, provider: 'gpt-realtime-whisper', speaker: 'one', languageCode: 'th',
+    },
+    {
+      id: '2', text: 'นั่นเองนะคะ', isFinal: true,
+      timestamp: 2_000, provider: 'gpt-realtime-whisper', speaker: 'one', languageCode: 'th',
+    },
+  ]);
+
+  assert.equal(text, 'ค่ะ ครับ สระภาษาอังกฤษคือ a e i o u\nนั่นเองนะคะ');
+});
+
 test('builds a safe provider transcript filename', () => {
   assert.equal(
     buildTranscriptFilename('Demo Room', 'Gemini Live', new Date(2026, 6, 22)),

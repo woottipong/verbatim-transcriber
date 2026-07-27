@@ -1,7 +1,11 @@
 package asr
 
 import (
+	"context"
+	"errors"
+	"io"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -463,6 +467,13 @@ func TestGeminiConfigDefaultsToThaiTranslation(t *testing.T) {
 	}
 }
 
+func TestGeminiConfigRejectsNonPositiveSampleRateByUsingDefault(t *testing.T) {
+	cfg := normalizeGeminiConfig(GeminiConfig{SampleRate: -1})
+	if got, want := cfg.SampleRate, 16000; got != want {
+		t.Fatalf("sample rate = %d, want %d", got, want)
+	}
+}
+
 func TestGeminiConfigCanonicalizesSupportedTargetLanguage(t *testing.T) {
 	cfg := normalizeGeminiConfig(GeminiConfig{TargetLanguageCode: " PT_br "})
 	if got, want := cfg.TargetLanguageCode, "pt-BR"; got != want {
@@ -489,6 +500,560 @@ func TestGeminiInputTranscriptionConfigOmitsEmptyLanguageHint(t *testing.T) {
 	}
 }
 
+func TestGeminiLiveConnectConfigEnablesDeveloperAPISessionManagement(t *testing.T) {
+	cfg := normalizeGeminiConfig(GeminiConfig{
+		LanguageCode:       "en",
+		TargetLanguageCode: "th",
+	})
+
+	connectCfg := geminiLiveConnectConfig(cfg, "resume-handle")
+	if connectCfg.SessionResumption == nil || connectCfg.SessionResumption.Transparent {
+		t.Fatalf("session resumption = %#v, want non-transparent Developer API resumption", connectCfg.SessionResumption)
+	}
+	if got, want := connectCfg.SessionResumption.Handle, "resume-handle"; got != want {
+		t.Fatalf("session handle = %q, want %q", got, want)
+	}
+	if connectCfg.ContextWindowCompression == nil || connectCfg.ContextWindowCompression.SlidingWindow == nil {
+		t.Fatalf("context window compression = %#v, want sliding window", connectCfg.ContextWindowCompression)
+	}
+}
+
+func TestReconnectAudioBufferReportsDroppedAudio(t *testing.T) {
+	buffer := newReconnectAudioBuffer(4)
+	buffer.Add([]byte{1, 2, 3})
+	buffer.Add([]byte{4, 5, 6})
+
+	data, dropped := buffer.Drain()
+	if !slices.Equal(data, []byte{3, 4, 5, 6}) {
+		t.Fatalf("buffered data = %v, want newest four bytes", data)
+	}
+	if dropped != 2 {
+		t.Fatalf("dropped bytes = %d, want 2", dropped)
+	}
+	if next, nextDropped := buffer.Drain(); len(next) != 0 || nextDropped != 0 {
+		t.Fatalf("second drain = (%v, %d), want empty reset buffer", next, nextDropped)
+	}
+}
+
+func TestGeminiProviderResumesAfterGoAwayAndKeepsResultsOpen(t *testing.T) {
+	first := newFakeGeminiSession()
+	second := newFakeGeminiSession()
+	provider, err := NewGeminiProvider(t.Context(), GeminiConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("NewGeminiProvider() error = %v", err)
+	}
+
+	var connectMu sync.Mutex
+	var handles []string
+	sessions := []geminiSession{first, second}
+	secondStarted := make(chan struct{})
+	allowSecond := make(chan struct{})
+	provider.connect = func(_ context.Context, handle string) (geminiSession, error) {
+		connectMu.Lock()
+		handles = append(handles, handle)
+		index := len(handles) - 1
+		connectMu.Unlock()
+		if index >= len(sessions) {
+			return nil, io.EOF
+		}
+		if index == 1 {
+			close(secondStarted)
+			<-allowSecond
+		}
+		return sessions[index], nil
+	}
+	provider.reconnectDelay = func(int) time.Duration { return 0 }
+	provider.rotationAfter = time.Hour
+
+	if err := provider.Start(t.Context()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = provider.Stop() })
+
+	first.receive <- &genai.LiveServerMessage{SessionResumptionUpdate: &genai.LiveServerSessionResumptionUpdate{
+		NewHandle: "resume-1",
+		Resumable: true,
+	}}
+	first.receive <- &genai.LiveServerMessage{GoAway: &genai.LiveServerGoAway{TimeLeft: time.Second}}
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for resumed connection attempt")
+	}
+	audio := pcm16Batch(1200, 100*time.Millisecond, 16000)
+	if err := provider.SendAudio(audio); err != nil {
+		t.Fatalf("SendAudio() while reconnecting error = %v", err)
+	}
+	close(allowSecond)
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		connectMu.Lock()
+		connected := len(handles) >= 2
+		connectMu.Unlock()
+		if connected && second.sentCount() > 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for resumed connection and replay")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	connectMu.Lock()
+	gotHandles := append([]string(nil), handles...)
+	connectMu.Unlock()
+	if !slices.Equal(gotHandles, []string{"", "resume-1"}) {
+		t.Fatalf("connect handles = %q, want initial and resumed handle", gotHandles)
+	}
+	if got := second.sentAudio(0); !slices.Equal(got, audio) {
+		t.Fatalf("replayed audio bytes = %d, want %d matching bytes", len(got), len(audio))
+	}
+
+	second.receive <- interimInput("หลัง reconnect")
+	select {
+	case result, ok := <-provider.Results():
+		if !ok || result.Text != "หลัง reconnect" {
+			t.Fatalf("result after reconnect = %#v, open=%t", result, ok)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for result after reconnect")
+	}
+}
+
+func TestGeminiProviderDoesNotResumeUnsafeHandleAfterGoAway(t *testing.T) {
+	first := newFakeGeminiSession()
+	second := newFakeGeminiSession()
+	provider, err := NewGeminiProvider(t.Context(), GeminiConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("NewGeminiProvider() error = %v", err)
+	}
+
+	var connectMu sync.Mutex
+	var handles []string
+	sessions := []geminiSession{first, second}
+	provider.connect = func(_ context.Context, handle string) (geminiSession, error) {
+		connectMu.Lock()
+		defer connectMu.Unlock()
+		handles = append(handles, handle)
+		if len(handles) > len(sessions) {
+			return nil, io.EOF
+		}
+		return sessions[len(handles)-1], nil
+	}
+	provider.reconnectDelay = func(int) time.Duration { return 0 }
+	provider.rotationAfter = time.Hour
+
+	if err := provider.Start(t.Context()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = provider.Stop() })
+	first.receive <- &genai.LiveServerMessage{SessionResumptionUpdate: &genai.LiveServerSessionResumptionUpdate{
+		NewHandle: "resume-unsafe",
+		Resumable: true,
+	}}
+	first.receive <- &genai.LiveServerMessage{SessionResumptionUpdate: &genai.LiveServerSessionResumptionUpdate{
+		Resumable: false,
+	}}
+	first.receive <- &genai.LiveServerMessage{GoAway: &genai.LiveServerGoAway{TimeLeft: time.Second}}
+	time.Sleep(20 * time.Millisecond)
+
+	connectMu.Lock()
+	beforeClose := len(handles)
+	connectMu.Unlock()
+	if beforeClose != 1 {
+		t.Fatalf("connect count after unsafe GoAway = %d, want old connection kept until close", beforeClose)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		connectMu.Lock()
+		connected := len(handles) >= 2
+		gotHandles := append([]string(nil), handles...)
+		connectMu.Unlock()
+		if connected {
+			if !slices.Equal(gotHandles, []string{"", ""}) {
+				t.Fatalf("connect handles = %q, want fresh fallback after unsafe handle", gotHandles)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for fresh reconnect")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestGeminiProviderDefersScheduledRotationUntilHandleIsSafe(t *testing.T) {
+	first := newFakeGeminiSession()
+	second := newFakeGeminiSession()
+	provider, err := NewGeminiProvider(t.Context(), GeminiConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("NewGeminiProvider() error = %v", err)
+	}
+
+	var connectMu sync.Mutex
+	connectCount := 0
+	provider.connect = func(_ context.Context, _ string) (geminiSession, error) {
+		connectMu.Lock()
+		defer connectMu.Unlock()
+		connectCount++
+		if connectCount == 1 {
+			return first, nil
+		}
+		return second, nil
+	}
+	provider.reconnectDelay = func(int) time.Duration { return 0 }
+	provider.rotationAfter = 10 * time.Millisecond
+
+	if err := provider.Start(t.Context()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = provider.Stop() })
+	time.Sleep(15 * time.Millisecond)
+	connectMu.Lock()
+	beforeHandle := connectCount
+	connectMu.Unlock()
+	if beforeHandle != 1 {
+		t.Fatalf("connect count without safe handle = %d, want rotation deferred", beforeHandle)
+	}
+
+	first.receive <- &genai.LiveServerMessage{SessionResumptionUpdate: &genai.LiveServerSessionResumptionUpdate{
+		NewHandle: "resume-safe",
+		Resumable: true,
+	}}
+	deadline := time.Now().Add(time.Second)
+	for {
+		connectMu.Lock()
+		connected := connectCount >= 2
+		connectMu.Unlock()
+		if connected {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for deferred scheduled rotation")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestGeminiProviderClosesResultsAfterReconnectIsExhausted(t *testing.T) {
+	first := newFakeGeminiSession()
+	provider, err := NewGeminiProvider(t.Context(), GeminiConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("NewGeminiProvider() error = %v", err)
+	}
+
+	var connectMu sync.Mutex
+	connectCount := 0
+	provider.connect = func(_ context.Context, _ string) (geminiSession, error) {
+		connectMu.Lock()
+		defer connectMu.Unlock()
+		connectCount++
+		if connectCount == 1 {
+			return first, nil
+		}
+		return nil, io.ErrUnexpectedEOF
+	}
+	provider.reconnectDelay = func(int) time.Duration { return 0 }
+	provider.rotationAfter = time.Hour
+
+	if err := provider.Start(t.Context()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	select {
+	case _, ok := <-provider.Results():
+		if ok {
+			t.Fatal("results remained open after reconnect attempts were exhausted")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for terminal reconnect failure")
+	}
+	if provider.Err() == nil {
+		t.Fatal("Err() = nil after terminal reconnect failure")
+	}
+	connectMu.Lock()
+	gotConnectCount := connectCount
+	connectMu.Unlock()
+	if got, want := gotConnectCount, geminiMaxReconnectAttempts+1; got != want {
+		t.Fatalf("connect count = %d, want %d", got, want)
+	}
+}
+
+func TestGeminiProviderDoesNotReconnectAfterParentContextCancellation(t *testing.T) {
+	first := newFakeGeminiSession()
+	provider, err := NewGeminiProvider(t.Context(), GeminiConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("NewGeminiProvider() error = %v", err)
+	}
+
+	var connectMu sync.Mutex
+	connectCount := 0
+	provider.connect = func(_ context.Context, _ string) (geminiSession, error) {
+		connectMu.Lock()
+		defer connectMu.Unlock()
+		connectCount++
+		return first, nil
+	}
+	provider.reconnectDelay = func(int) time.Duration { return 0 }
+	provider.rotationAfter = time.Hour
+
+	ctx, cancel := context.WithCancel(t.Context())
+	if err := provider.Start(ctx); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	cancel()
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if err := provider.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	connectMu.Lock()
+	gotConnectCount := connectCount
+	connectMu.Unlock()
+	if gotConnectCount != 1 {
+		t.Fatalf("connect count = %d, want no reconnect after context cancellation", gotConnectCount)
+	}
+	if err := provider.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil after normal context cancellation", err)
+	}
+}
+
+func TestGeminiProviderStopDuringReconnectDoesNotExposeTransientError(t *testing.T) {
+	first := newFakeGeminiSession()
+	second := newFakeGeminiSession()
+	provider, err := NewGeminiProvider(t.Context(), GeminiConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("NewGeminiProvider() error = %v", err)
+	}
+
+	secondStarted := make(chan struct{})
+	allowSecond := make(chan struct{})
+	connectCount := 0
+	provider.connect = func(_ context.Context, _ string) (geminiSession, error) {
+		connectCount++
+		if connectCount == 1 {
+			return first, nil
+		}
+		close(secondStarted)
+		<-allowSecond
+		return second, nil
+	}
+	provider.reconnectDelay = func(int) time.Duration { return 0 }
+	provider.rotationAfter = time.Hour
+
+	if err := provider.Start(t.Context()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	first.receive <- &genai.LiveServerMessage{SessionResumptionUpdate: &genai.LiveServerSessionResumptionUpdate{
+		NewHandle: "resume-stop",
+		Resumable: true,
+	}}
+	first.receive <- &genai.LiveServerMessage{GoAway: &genai.LiveServerGoAway{TimeLeft: time.Second}}
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for reconnect")
+	}
+	if err := provider.Stop(); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+	close(allowSecond)
+	if err := provider.Err(); err != nil {
+		t.Fatalf("Err() = %v, want nil after normal Stop during reconnect", err)
+	}
+}
+
+func TestGeminiProviderBuffersSendThatLosesRaceWithReconnect(t *testing.T) {
+	first := newBlockingSendGeminiSession(errors.New("old connection closed"))
+	second := newFakeGeminiSession()
+	provider, err := NewGeminiProvider(t.Context(), GeminiConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("NewGeminiProvider() error = %v", err)
+	}
+
+	secondStarted := make(chan struct{})
+	allowSecond := make(chan struct{})
+	connectCount := 0
+	provider.connect = func(_ context.Context, _ string) (geminiSession, error) {
+		connectCount++
+		if connectCount == 1 {
+			return first, nil
+		}
+		close(secondStarted)
+		<-allowSecond
+		return second, nil
+	}
+	provider.reconnectDelay = func(int) time.Duration { return 0 }
+	provider.rotationAfter = time.Hour
+	if err := provider.Start(t.Context()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = provider.Stop() })
+
+	audio := pcm16Batch(1200, 100*time.Millisecond, 16000)
+	sendDone := make(chan error, 1)
+	go func() { sendDone <- provider.SendAudio(audio) }()
+	select {
+	case <-first.sendStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for blocked send")
+	}
+	provider.beginReconnect(first, errors.New("scheduled rotation"), nil)
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for replacement connection")
+	}
+	close(first.allowSend)
+	select {
+	case err := <-sendDone:
+		if err != nil {
+			t.Fatalf("SendAudio() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for raced send")
+	}
+	close(allowSecond)
+
+	deadline := time.Now().Add(time.Second)
+	for second.sentCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("raced audio batch was not replayed on the replacement session")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := second.sentAudio(0); !slices.Equal(got, audio) {
+		t.Fatalf("replayed audio bytes = %d, want %d matching bytes", len(got), len(audio))
+	}
+}
+
+func TestGeminiProviderKeepsBufferedAudioWhenReplayFails(t *testing.T) {
+	first := newFakeGeminiSession()
+	second := &errorSendGeminiSession{
+		fakeGeminiSession: newFakeGeminiSession(),
+		sendErr:           errors.New("replacement connection closed during replay"),
+	}
+	third := newFakeGeminiSession()
+	provider, err := NewGeminiProvider(t.Context(), GeminiConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("NewGeminiProvider() error = %v", err)
+	}
+
+	secondStarted := make(chan struct{})
+	allowSecond := make(chan struct{})
+	connectCount := 0
+	provider.connect = func(_ context.Context, _ string) (geminiSession, error) {
+		connectCount++
+		switch connectCount {
+		case 1:
+			return first, nil
+		case 2:
+			close(secondStarted)
+			<-allowSecond
+			return second, nil
+		default:
+			return third, nil
+		}
+	}
+	provider.reconnectDelay = func(int) time.Duration { return 0 }
+	provider.rotationAfter = time.Hour
+	if err := provider.Start(t.Context()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = provider.Stop() })
+
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for first replacement connection")
+	}
+	audio := pcm16Batch(1200, 100*time.Millisecond, 16000)
+	if err := provider.SendAudio(audio); err != nil {
+		t.Fatalf("SendAudio() while reconnecting error = %v", err)
+	}
+	close(allowSecond)
+
+	deadline := time.Now().Add(time.Second)
+	for third.sentCount() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("buffered audio was lost after replay failed")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if got := third.sentAudio(0); !slices.Equal(got, audio) {
+		t.Fatalf("replayed audio bytes = %d, want %d matching bytes", len(got), len(audio))
+	}
+}
+
+func TestGeminiProviderFinalizesActiveTurnBeforeFreshFallback(t *testing.T) {
+	first := newFakeGeminiSession()
+	second := newFakeGeminiSession()
+	provider, err := NewGeminiProvider(t.Context(), GeminiConfig{APIKey: "test-key"})
+	if err != nil {
+		t.Fatalf("NewGeminiProvider() error = %v", err)
+	}
+
+	connectCount := 0
+	provider.connect = func(_ context.Context, _ string) (geminiSession, error) {
+		connectCount++
+		if connectCount == 1 {
+			return first, nil
+		}
+		return second, nil
+	}
+	provider.reconnectDelay = func(int) time.Duration { return 0 }
+	provider.rotationAfter = time.Hour
+	if err := provider.Start(t.Context()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = provider.Stop() })
+
+	first.receive <- interimInput("old draft")
+	select {
+	case result := <-provider.Results():
+		if result.Text != "old draft" || result.IsFinal {
+			t.Fatalf("initial result = %#v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for initial draft")
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	select {
+	case result := <-provider.Results():
+		if result.Text != "old draft" || !result.IsFinal || result.TurnID != "gemini-1" {
+			t.Fatalf("fresh-fallback final = %#v, want finalized old turn", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for old turn finalization")
+	}
+	second.receive <- interimInput("new draft")
+	select {
+	case result := <-provider.Results():
+		if result.Text != "new draft" || result.IsFinal || result.TurnID != "gemini-2" {
+			t.Fatalf("new session result = %#v, want fresh gemini-2 draft", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for new session draft")
+	}
+}
+
 func TestGeminiProviderDoesNotEmitWhenStopped(t *testing.T) {
 	provider := &GeminiProvider{results: make(chan domain.TranscriptResult, 1)}
 	if err := provider.Stop(); err != nil {
@@ -497,4 +1062,86 @@ func TestGeminiProviderDoesNotEmitWhenStopped(t *testing.T) {
 	if err := provider.SendAudio([]byte{1, 2}); err == nil {
 		t.Fatal("SendAudio() after Stop() returned nil")
 	}
+}
+
+type fakeGeminiSession struct {
+	receive   chan *genai.LiveServerMessage
+	closed    chan struct{}
+	closeOnce sync.Once
+	mu        sync.Mutex
+	sent      [][]byte
+}
+
+type blockingSendGeminiSession struct {
+	*fakeGeminiSession
+	sendStarted chan struct{}
+	allowSend   chan struct{}
+	sendErr     error
+	sendOnce    sync.Once
+}
+
+type errorSendGeminiSession struct {
+	*fakeGeminiSession
+	sendErr error
+}
+
+func (s *errorSendGeminiSession) SendRealtimeInput(genai.LiveRealtimeInput) error {
+	return s.sendErr
+}
+
+func newBlockingSendGeminiSession(sendErr error) *blockingSendGeminiSession {
+	return &blockingSendGeminiSession{
+		fakeGeminiSession: newFakeGeminiSession(),
+		sendStarted:       make(chan struct{}),
+		allowSend:         make(chan struct{}),
+		sendErr:           sendErr,
+	}
+}
+
+func (s *blockingSendGeminiSession) SendRealtimeInput(genai.LiveRealtimeInput) error {
+	s.sendOnce.Do(func() { close(s.sendStarted) })
+	<-s.allowSend
+	return s.sendErr
+}
+
+func newFakeGeminiSession() *fakeGeminiSession {
+	return &fakeGeminiSession{
+		receive: make(chan *genai.LiveServerMessage, 8),
+		closed:  make(chan struct{}),
+	}
+}
+
+func (s *fakeGeminiSession) SendRealtimeInput(input genai.LiveRealtimeInput) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if input.Audio != nil {
+		s.sent = append(s.sent, append([]byte(nil), input.Audio.Data...))
+	}
+	return nil
+}
+
+func (s *fakeGeminiSession) Receive() (*genai.LiveServerMessage, error) {
+	select {
+	case message := <-s.receive:
+		return message, nil
+	case <-s.closed:
+		return nil, io.EOF
+	}
+}
+
+func (s *fakeGeminiSession) Close() error {
+	s.closeOnce.Do(func() { close(s.closed) })
+	return nil
+}
+
+func (s *fakeGeminiSession) sentCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.sent)
+}
+
+func (s *fakeGeminiSession) sentAudio(index int) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]byte(nil), s.sent[index]...)
 }
