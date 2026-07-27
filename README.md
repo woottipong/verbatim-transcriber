@@ -1,83 +1,153 @@
-# Thai Verbatim Transcriber
+# CaptionLive
 
-LiveKit-based real-time Thai speech transcription for publishers, viewers, and operators. Microphone or Chrome Tab audio travels through WebRTC to a Go room agent, which transcribes with Google Cloud STT, Gemini Live, Azure Speech, or GPT Realtime Whisper and publishes text back through the LiveKit data channel.
+<p>
+  <img src="frontend/public/captionlive-mark.svg" alt="CaptionLive logo" width="64" height="64">
+</p>
 
-## Key features
+CaptionLive is a real-time transcription workspace built on LiveKit. It sends microphone or browser-tab audio over WebRTC, transcribes it through one or more provider agents, and delivers live Draft and final text to the in-app Transcript view or signed external WebSocket feeds.
 
-- One LiveKit workflow for microphone or Chrome Tab audio publishing and transcription.
-- Selectable Google, Gemini, Azure, or GPT Realtime Whisper room agents.
-- Replaceable Draft text, grouped final rows, a source-only Text view, and per-provider final-only text export.
-- Read-only viewer with room audio playback and provider filtering.
-- Admin-first room workspace for rooms, participants, share links, and agent lifecycle.
-- Secure, read-only transcript WebSocket links for external integrations.
-- Input-level visualization, explicit session state, and consistent top-right notifications.
+The system is designed for operators who need explicit room, audio, provider, and output state—not a meeting bot or a browser-to-provider proxy.
 
-## Contents
+## What the system provides
 
-- [Architecture](#architecture)
-- [Prerequisites](#prerequisites)
-- [Getting started](#getting-started)
-- [ASR providers](#asr-providers)
-- [Configuration](#configuration)
-- [Backend API](#backend-api)
-- [Development and testing](#development-and-testing)
-- [Troubleshooting](#troubleshooting)
+- Microphone and Chrome Tab audio publishing through LiveKit.
+- Independent Google, Gemini, Azure, and GPT Realtime Whisper provider agents.
+- Replaceable interim Draft text and committed final transcript rows.
+- Read-only live Transcript view with provider filtering and final-only text export.
+- Signed provider-specific WebSocket feeds for external systems.
+- Room, participant, provider, and link management from one Control Room.
+
+## Product surfaces
+
+| Surface | Route | Responsibility |
+| --- | --- | --- |
+| **Control Room** | `#admin` or `/` | Create rooms, share links, run providers, monitor participants, and generate external feeds |
+| **Audio Source** | `#stream?room=<room>` | Select microphone or Chrome Tab audio and publish it to the room |
+| **Transcript** | `#viewer?room=<room>&autoconnect=1` | Subscribe to room audio and follow live transcript output without publishing |
+
+The normal operating sequence is:
+
+1. Create or select a room in **Control Room**.
+2. Open **Audio Source** and connect microphone or Chrome Tab audio.
+3. Start one or more transcription providers.
+4. Follow output in **Transcript**, export finalized text, or generate a signed external feed.
+
+## System flow
+
+```mermaid
+flowchart LR
+    Admin["Control Room"]
+    Source["Audio Source"]
+    Viewer["Transcript"]
+    Backend["Go API"]
+    LiveKit["LiveKit room"]
+    Agent["Room agent<br>one per active provider"]
+    Providers["Google · Gemini · Azure · GPT"]
+    Hub["Transcript hub"]
+    External["External systems"]
+
+    Admin -->|"HTTP: rooms, agents, links"| Backend
+    Source -->|"HTTP: participant token"| Backend
+    Viewer -->|"HTTP: participant token"| Backend
+
+    Source -->|"WebRTC audio"| LiveKit
+    LiveKit -->|"subscribed Opus track"| Agent
+    Agent -->|"decoded PCM"| Providers
+    Providers -->|"provider transcript"| Agent
+
+    Agent -->|"reliable data packets"| LiveKit
+    LiveKit -->|"live transcript + room audio"| Viewer
+    Agent -->|"normalized source transcript"| Hub
+    Hub -->|"signed provider WebSocket"| External
+```
+
+### Control plane and media plane
+
+CaptionLive separates control traffic from realtime media:
+
+- **HTTP control plane:** tokens, rooms, participants, provider lifecycle, and signed transcript links.
+- **LiveKit media plane:** browser audio, participant audio subscription, and transcript data packets.
+- **External output plane:** read-only provider-specific WebSocket feeds from the backend transcript hub.
+
+Audio never travels through the public backend WebSocket API. The browser publishes audio only to LiveKit, and ASR credentials remain in the Go backend.
+
+## Transcript lifecycle
+
+Provider output stays identifiable and replaceable while it is still changing:
+
+```text
+Provider interim → replace active Draft
+Provider final   → commit transcript row and clear Draft
+```
+
+The lean external WebSocket uses one JSON object per text frame:
+
+```json
+{"text":"ผู้ป่วยมีอาการ","isFinal":false}
+{"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":false}
+{"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":true}
+```
+
+Interim and final text originates from the selected ASR provider. CaptionLive routes provider results, accumulates provider deltas into full snapshots where required, and applies shared Thai spacing normalization; it does not invent interim wording.
+
+Important output rules:
+
+- Provider feeds are isolated by room and provider.
+- A client replaces its active Draft when `isFinal` is `false`.
+- A client appends committed output and clears the Draft when `isFinal` is `true`.
+- External feeds are read-only and have no audio input, commands, history, or replay.
+- Gemini translation stays on the LiveKit data channel for the bilingual in-app view; provider WebSocket feeds expose source transcript text.
+
+See [backend-go/README.md](backend-go/README.md#http-api) for the complete HTTP and WebSocket contracts.
 
 ## Architecture
 
-```text
-Publisher / Viewer / Admin (React)
-              │
-              ├── HTTP → Go backend (tokens, rooms, agent control)
-              │
-              └── WebRTC + data channel
-                         │
-                    LiveKit server
-                         │
-                    Go room agent
-                         │
-              Google / Gemini / Azure / OpenAI Realtime Whisper
-```
+| Layer | Technology | Main responsibility |
+| --- | --- | --- |
+| Frontend | React 19, TypeScript, Vite, Tailwind CSS | Control Room, Audio Source, Transcript, LiveKit client state |
+| Backend | Go 1.24, Fiber | Control API, tokens, room agents, transcript hub |
+| Realtime | LiveKit | WebRTC audio transport and reliable transcript data channel |
+| Audio | Opus + CGO | Decode browser audio and resample PCM for each provider |
+| ASR | Google, Gemini, Azure, OpenAI | Interim/final transcription and provider-specific behavior |
 
-The public application does not expose direct audio WebSocket endpoints. Azure's WebSocket connection is an internal upstream protocol used only by the Azure provider.
-
-### Repository layout
+### Repository structure
 
 ```text
 .
-├── AGENTS.md                 # Repository rules for coding agents
-├── PRODUCT.md                # Product and design principles
-├── start.sh                  # Frontend/backend development launcher
-├── frontend/                 # React application
-│   ├── components/           # Publisher, viewer, admin, and status UI
-│   ├── hooks/                # LiveKit publisher/viewer and audio hooks
-│   └── lib/                  # Transcript, session, API, and signal helpers
-├── backend-go/               # Fiber API and LiveKit transcription agent
-│   ├── config/               # Environment-backed configuration
-│   ├── internal/delivery/    # HTTP routes and handlers
-│   ├── internal/domain/      # Provider contracts and Thai normalization
-│   └── internal/infrastructure/ # LiveKit agent and ASR providers
-└── livekit/                  # Local LiveKit Docker Compose setup
+├── frontend/                  # CaptionLive React application
+│   ├── components/            # Control Room, Audio Source, Transcript, shared UI
+│   ├── hooks/                 # LiveKit publisher/viewer and audio lifecycle
+│   ├── lib/                   # Transcript state, routing, export, and API helpers
+│   └── public/                # CaptionLive logo and favicon
+├── backend-go/                # Fiber API and LiveKit room agents
+│   ├── config/                # Environment-backed configuration
+│   └── internal/
+│       ├── delivery/          # HTTP/WebSocket routes and handlers
+│       ├── domain/            # Provider contracts and normalization
+│       └── infrastructure/    # LiveKit agent, transcript hub, ASR providers
+├── livekit/                   # Local LiveKit Docker Compose environment
+├── start.sh                  # Local frontend/backend launcher
+└── AGENTS.md                 # Repository development rules
 ```
 
-## Technology
+## Supported providers
 
-| Area | Technology |
+| Provider | Main output |
 | --- | --- |
-| Frontend | React 19, TypeScript 5.8, Vite 6, Tailwind CSS 3 |
-| Realtime client | LiveKit Client SDK |
-| Backend | Go 1.24, Fiber v2 |
-| Realtime server | LiveKit |
-| Audio decode | Opus through `gopkg.in/hraban/opus.v2` (CGO) |
-| ASR | Google Speech-to-Text V2, Gemini Live API, Azure Speech, OpenAI Realtime Whisper |
+| Google Cloud STT | Thai source transcript with interim and final results |
+| Gemini Live | Source transcript plus configured-target translation in the in-app Lines view |
+| Azure Speech | Source interim hypotheses and finalized phrases |
+| GPT Realtime Whisper | Source-only Draft and final transcription |
+
+Provider models, sample rates, endpointing, reconnect behavior, and credentials are documented in [backend-go/README.md](backend-go/README.md#provider-behavior).
 
 ## Prerequisites
 
-- Node.js 18 or newer and pnpm.
+- Node.js 18 or newer and `pnpm`.
 - Go 1.24.4 or a compatible newer release.
-- Docker with Docker Compose for local LiveKit.
-- A C compiler, `pkg-config`, and system Opus development library.
-- Credentials for at least one ASR provider.
+- Docker with Docker Compose.
+- A C compiler, `pkg-config`, and the system Opus development library.
+- Credentials for at least one transcription provider.
 
 ```bash
 # macOS
@@ -99,7 +169,7 @@ docker compose ps
 cd ..
 ```
 
-The development defaults use `devkey` / `secret` and are not production-safe.
+Local defaults use `devkey` / `secret`; replace them outside local development.
 
 ### 2. Configure the backend
 
@@ -107,7 +177,7 @@ The development defaults use `devkey` / `secret` and are not production-safe.
 cp backend-go/.env.example backend-go/.env
 ```
 
-Edit `backend-go/.env` and configure LiveKit plus at least one provider. Never commit `.env` or credential JSON files.
+Set the LiveKit connection and credentials for at least one provider. To generate external transcript links, also set `TRANSCRIPT_WS_SECRET` to a secret of at least 32 random bytes.
 
 ### 3. Configure the frontend
 
@@ -118,179 +188,38 @@ pnpm install
 cd ..
 ```
 
-### 4. Run
+### 4. Start CaptionLive
 
 ```bash
 ./start.sh
 ```
 
-Or run the services separately:
-
-```bash
-# Terminal 1
-cd backend-go
-go run .
-
-# Terminal 2
-cd frontend
-pnpm dev
-```
-
 Open:
 
-- Admin: [http://localhost:5173](http://localhost:5173)
-- Stream publisher: `http://localhost:5173/#stream?room=test`
-- Viewer: `http://localhost:5173/#viewer?room=test&autoconnect=1`
-- Health: [http://localhost:3000/health](http://localhost:3000/health)
+- Control Room: [http://localhost:5173](http://localhost:5173)
+- Audio Source: [http://localhost:5173/#stream?room=test](http://localhost:5173/#stream?room=test)
+- Transcript: [http://localhost:5173/#viewer?room=test&autoconnect=1](http://localhost:5173/#viewer?room=test&autoconnect=1)
+- Backend health: [http://localhost:3000/health](http://localhost:3000/health)
 
-## Application pages
+LiveKit must already be running; `start.sh` starts only the frontend and backend.
 
-- **Admin:** the root workspace creates/selects rooms, starts or stops a configured provider Agent, and generates Stream, Viewer, and external transcript links.
-- **Stream:** selects Microphone or Chrome Tab before connecting, then publishes the chosen audio through LiveKit. A room query parameter only pre-fills the room and never requests capture permission by itself. Chrome Tab capture requires selecting a browser tab and enabling **Share tab audio** in the browser picker.
-- **Viewer:** joins without publishing, subscribes to room audio, and filters transcript rows by provider. A Viewer link with `autoconnect=1` connects automatically.
+## Essential configuration
 
-## ASR providers
-
-| Provider | Agent input | Default | Transcript behavior |
-| --- | --- | --- | --- |
-| Google | 48 kHz Linear16 PCM | `chirp_2`, `th-TH`, `asia-southeast1`, punctuation on | Interim snapshots and final utterances; reconnects before the five-minute limit |
-| Gemini | 16 kHz PCM | `gemini-3.5-live-translate-preview`, optional source hint, target defaults to `th` | Replaceable source/translation Draft state is paired by application turn; session resumption, context compression, safe nine-minute rotation, and bounded reconnect keep long-running audio connected |
-| GPT Realtime Whisper | 24 kHz PCM16 | Realtime transcription intent with model `gpt-realtime-whisper`, source language defaults to `th` | Replaceable source Draft deltas and completed finals; 650 ms silence/30-second hard boundary; bounded reconnect with recent-audio replay; no translation output |
-| Azure | 16 kHz PCM/WAV stream | Thai conversation recognition, `southeastasia` | Interim hypotheses and finalized phrases |
-
-Latency and interim frequency depend on service, model, region, network, and speech pattern. A provider may finalize an utterance without emitting interim updates.
-
-## Configuration
-
-### Backend variables
-
-| Variable | Required | Default | Purpose |
-| --- | --- | --- | --- |
-| `HOST` | No | `localhost` | Fiber bind host |
-| `PORT` | No | `3000` | Fiber HTTP port |
-| `ALLOWED_ORIGINS` | No | Local origins | Comma-separated CORS allowlist |
-| `LIVEKIT_API_KEY` | For LiveKit routes | — | LiveKit API key |
-| `LIVEKIT_API_SECRET` | For LiveKit routes | — | LiveKit API secret |
-| `LIVEKIT_WS_URL` | No | `ws://localhost:7880` | LiveKit server URL |
-| `TRANSCRIPT_WS_SECRET` | For external transcript links | — | Server-side HS256 signing secret; use at least 32 random bytes |
-| `CONTROL_API_KEY` | Required for remote control API | — | At least 32 random bytes; protects room, agent, participant-token, and transcript-link APIs |
-| `GOOGLE_CLOUD_PROJECT` | For Google | — | Google Cloud project |
-| `GOOGLE_APPLICATION_CREDENTIALS` | Google service account | — | Credential JSON path |
-| `GOOGLE_API_KEY` | Alternative Google auth | — | Google API key |
-| `GOOGLE_CLOUD_LOCATION` | No | `asia-southeast1` | Speech-to-Text V2 location |
-| `GOOGLE_SPEECH_MODEL` | No | `chirp_2` | Google model |
-| `GEMINI_API_KEY` | For Gemini | — | Gemini API key |
-| `GEMINI_MODEL` | No | `gemini-3.5-live-translate-preview` | Gemini model |
-| `GEMINI_LANGUAGE_CODE` | No | — | Optional source language hint; empty enables detection |
-| `GEMINI_TARGET_LANGUAGE_CODE` | No | `th` | Supported BCP-47 translation target and UI language badge |
-| `OPENAI_API_KEY` | For GPT Realtime Whisper | — | OpenAI API key; enables the `gpt-realtime-whisper` provider |
-| `OPENAI_LANGUAGE_CODE` | No | `th` | Source-language hint sent to the transcription session |
-| `AZURE_SUBSCRIPTION_KEY` | For Azure | — | Azure Speech key |
-| `AZURE_REGION` | No | `southeastasia` | Azure region |
-
-Gemini target examples include `th`, `en`, `de`, `es`, `ja`, `ko`, `vi`, `zh-Hans`, `zh-Hant`, `pt-BR`, and `pt-PT`. Unsupported values are rejected when the provider starts. See the [complete supported target list](backend-go/README.md#gemini-live-translation-target-languages).
-
-### Frontend variables
-
-| Variable | Default | Purpose |
+| Variable | Where | Purpose |
 | --- | --- | --- |
-| `VITE_BACKEND_URL` | `http://localhost:3000` | Backend HTTP base URL |
-| `VITE_LIVEKIT_URL` | `ws://localhost:7880` | Browser LiveKit URL |
-| `VITE_CONTROL_API_KEY` | — | Shared control API key for trusted internal deployments; do not embed in a public frontend build |
+| `LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` | Backend and LiveKit | Server authentication |
+| `LIVEKIT_WS_URL` | Backend | LiveKit connection used by room agents |
+| `VITE_LIVEKIT_URL` | Frontend | LiveKit connection used by browsers |
+| `VITE_BACKEND_URL` | Frontend | Go HTTP API base URL |
+| `TRANSCRIPT_WS_SECRET` | Backend | Enables signed external transcript feeds |
+| `CONTROL_API_KEY` | Backend and trusted frontend | Protects remote control-plane APIs |
+| Provider credentials | Backend | Enables Google, Gemini, Azure, or OpenAI |
 
-Frontend connection values are embedded by Vite at build time. There is no runtime Settings screen for changing the backend URL; update the environment and rebuild or restart Vite.
+Never commit `.env` files, service-account JSON, API keys, or generated tokens. See the [backend configuration reference](backend-go/README.md#environment-variables) and [frontend configuration reference](frontend/README.md#environment).
 
-## Backend API
-
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/health` | Health check |
-| `GET` | `/providers` | Provider and LiveKit availability |
-| `POST` | `/livekit/token` | Create a participant token |
-| `POST` | `/livekit/rooms/` | Create an empty room; does not start an Agent |
-| `GET` | `/livekit/rooms/` | List rooms |
-| `GET` | `/livekit/rooms/detailed` | List rooms with participants |
-| `POST` | `/livekit/rooms/:room/transcript-token` | Issue a 24-hour room-scoped transcript WebSocket URL |
-| `GET` | `/livekit/rooms/:room/transcripts/ws?token=...` | Read-only interim/final transcript stream |
-| `POST` | `/livekit/rooms/:room/transcript-token/:provider` | Issue a 24-hour room/provider-scoped WebSocket URL |
-| `GET` | `/ws/transcript/:provider/:room?token=...` | Read-only lean provider transcript stream |
-| `GET` / `DELETE` | `/livekit/rooms/:name` | Inspect or delete a room |
-| `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove a participant |
-| `POST` | `/livekit/agent/start` | Start a room agent |
-| `POST` | `/livekit/agent/stop` | Stop a room agent |
-| `GET` | `/livekit/agent/status` | List running agents |
+## Development and verification
 
 ```bash
-curl -X POST http://localhost:3000/livekit/agent/start \
-  -H 'Content-Type: application/json' \
-  -d '{"roomName":"test","provider":"google"}'
-```
-
-Valid providers are `google`, `gemini`, `azure`, and `gpt-realtime-whisper` when configured.
-
-### External transcript WebSocket
-
-The Admin workspace generates a separate signed URL for each running provider after `TRANSCRIPT_WS_SECRET` is configured. Provider URLs use `/ws/transcript/:provider/:room?token=...`; the token is bound to the provider and current LiveKit room identity. Deleting and recreating a room with the same name invalidates old links. The socket carries source transcripts only, cannot publish audio or control the room, and has no ready event or history/replay.
-
-Each WebSocket text frame is one complete provider-derived snapshot:
-
-```json
-{"text":"ผู้ป่วยมีอาการ","isFinal":false}
-{"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":false}
-{"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":true}
-```
-
-Clients replace their active Draft when `isFinal` is false. When it is true, clients append the text to committed output and clear the Draft. The text originates from each ASR provider; the gateway only accumulates provider deltas into snapshots and applies the shared transcript spacing normalization. Gemini translation packets remain on the LiveKit data channel for bilingual UI rows.
-
-The legacy room-wide endpoint remains available at `/livekit/rooms/:room/transcripts/ws?token=...`. Its first event is `session.ready`, followed by versioned events with a room-scoped sequence:
-
-```json
-{
-  "schemaVersion": "1.0",
-  "type": "transcript.interim",
-  "id": "event-id",
-  "sequence": 1,
-  "room": "test",
-  "timestamp": "2026-07-16T10:00:00.123Z",
-  "transcript": {
-    "text": "กำลังทดสอบ",
-    "isFinal": false,
-    "confidence": 0.91,
-    "provider": "google",
-    "speaker": "user-123"
-  }
-}
-```
-
-`transcript.final` events have `isFinal: true`. The gateway consumes the same normalized messages published to LiveKit, so interim and final behavior stays consistent across the Viewer and external integration.
-
-## Transcript message contract
-
-```json
-{
-  "type": "transcript",
-  "text": "ทดสอบหนึ่งสองสาม",
-  "isFinal": false,
-  "confidence": 0.92,
-  "provider": "google",
-  "timestamp": 1784196259000,
-  "speaker": "user-1784196259605"
-}
-```
-
-Thai spacing is normalized in the Go agent. Non-final source text is replaceable Draft state keyed by provider and speaker; Gemini also keys source/translation pairs by its application `turnId`. Final values become bounded committed rows. The Lines view can show Gemini translation beneath its source. Text view shows source only and marks any active Draft inline; per-provider `.txt` export contains finalized source text only. For readability, adjacent finals from the same provider, speaker, and language are displayed together when they arrive within 1.6 seconds and the previous chunk has no strong sentence-ending punctuation.
-
-The Stream page coalesces Draft rendering without delaying the first update or a final result: 33 ms for general interim traffic and 50 ms for Gemini. GPT Realtime Whisper continuously streams 24 kHz PCM16, commits after 650 ms of low-energy audio or a 30-second hard duration, and retries recoverable upstream failures with bounded backoff plus up to one second of recent-audio replay. Gemini uses the same 650 ms silence boundary with a fixed 500 ms translation grace period. Gemini also enables Live API session resumption and sliding-window context compression, reconnects on `GoAway` or transport failure, and attempts a nine-minute connection rotation when the server has supplied a safe resumption handle; up to fifteen seconds of audio received during the handoff is replayed.
-
-When an Audio Sender disconnects or unpublishes its track normally, the track-scoped provider is released but the room agent remains connected and waits for the next audio track. An unexpected provider error stops the agent so Admin status does not report a falsely healthy transcriber.
-
-## Development and testing
-
-```bash
-# LiveKit
-cd livekit
-docker compose up -d
-
 # Frontend
 cd frontend
 pnpm test
@@ -303,38 +232,36 @@ go test -race ./...
 go build ./...
 ```
 
-`start.sh` supports `--frontend-only`, `--backend-only`, `--build`, and `--help`; it does not start LiveKit.
+Use `go test -race ./...` after agent lifecycle, channel, mutex, or reconnect changes. The Go Opus dependency requires CGO and a discoverable system Opus library.
 
-## Troubleshooting
+## Operational boundaries
 
-- **Port in use:** inspect with `lsof -nP -iTCP:3000 -sTCP:LISTEN` or port `5173`, then stop the stale process.
-- **No provider available:** call `/providers`, verify credentials, and restart the backend after changing `.env`.
-- **Google model permission/location error:** use a model available in the configured region; the Thai realtime default is `chirp_2` in `asia-southeast1`.
-- **No Draft text:** some utterances finalize without interim updates. For Gemini or GPT Realtime Whisper, also verify that PCM audio reaches the provider and that the local silence boundary can complete the active turn.
-- **IPv6 STUN timeout:** if ICE reaches `connected`, an IPv6 timeout usually indicates an unavailable IPv6 path, not a failed session.
-- **Opus build failure:** install `libopus`/`libopus-dev`, verify `pkg-config --modversion opus`, and ensure `go env CGO_ENABLED` returns `1`.
+- There are no public browser-to-ASR or browser-to-backend audio WebSocket endpoints.
+- Audio source changes are allowed only while the Audio Source is disconnected.
+- Chrome Tab audio requires selecting a browser tab and enabling **Share tab audio**.
+- A normal Audio Source disconnect releases its track-scoped provider while the room agent waits for the next track.
+- Unexpected provider failure stops the affected room agent instead of reporting a false healthy state.
+- Remote deployments require HTTPS/WSS, restricted origins, correct LiveKit external IP/UDP configuration, and TURN where necessary.
+- `VITE_CONTROL_API_KEY` is suitable only for trusted internal deployments; do not embed it in a public frontend build.
 
-## Documentation
+## Documentation map
 
-- [Agent guide](AGENTS.md)
-- [Product principles](PRODUCT.md)
-- [Frontend](frontend/README.md)
-- [Backend](backend-go/README.md)
-- [Local LiveKit](livekit/README.md)
-- [LiveKit flow](backend-go/docs/LIVEKIT_FLOW.md)
-- [Google flow](backend-go/docs/GOOGLE_GRPC_FLOW.md)
-- [Azure flow](backend-go/docs/AZURE_WEBSOCKET_FLOW.md)
-- [Google five-minute handling](backend-go/docs/ISSUE_GOOGLE_5MIN_LIMIT.md)
-- [Cloud VAD and endpointing](backend-go/docs/VAD_CONFIGURATION.md)
-- [Editor mode proposal](backend-go/docs/EDITOR_MODE_DESIGN.md)
+Start here, then move to the document that owns the detail:
 
-## Security and deployment
+| Document | Use it for |
+| --- | --- |
+| [Frontend guide](frontend/README.md) | Routes, browser requirements, transcript UI state, frontend environment |
+| [Backend guide](backend-go/README.md) | Provider behavior, environment variables, HTTP/WebSocket contracts |
+| [LiveKit local setup](livekit/README.md) | Containers, ports, verification, and production networking checklist |
+| [LiveKit data flow](backend-go/docs/LIVEKIT_FLOW.md) | Detailed publisher, agent, viewer, and transcript packet flow |
+| [Google gRPC flow](backend-go/docs/GOOGLE_GRPC_FLOW.md) | Google streaming implementation |
+| [Azure WebSocket flow](backend-go/docs/AZURE_WEBSOCKET_FLOW.md) | Azure upstream provider protocol |
+| [Google stream-limit handling](backend-go/docs/ISSUE_GOOGLE_5MIN_LIMIT.md) | Google reconnect and replay behavior |
+| [VAD and endpointing](backend-go/docs/VAD_CONFIGURATION.md) | Silence boundaries and provider endpointing |
+| [Product principles](PRODUCT.md) | Product and interface decisions |
+| [Repository agent guide](AGENTS.md) | Development constraints and verification rules |
 
-- Never expose ASR credentials or LiveKit secrets to the browser.
-- Replace local LiveKit development credentials before remote deployment.
-- Use HTTPS/WSS and a restricted `ALLOWED_ORIGINS` list outside localhost.
-- Configure external IP, firewall, UDP ports, and TURN for the target LiveKit network.
-- The repository does not currently include production frontend/backend deployment manifests.
+`backend-go/docs/EDITOR_MODE_DESIGN.md` is a design proposal, not implemented behavior.
 
 ## License
 

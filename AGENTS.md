@@ -6,24 +6,34 @@ This file applies to the entire repository. More specific `AGENTS.md` files may 
 
 ## Project overview
 
-Thai Verbatim Transcriber is a real-time Thai transcription workspace built around LiveKit rooms. A browser publishes microphone or Chrome Tab audio through WebRTC, a Go agent subscribes to the track, sends decoded PCM to one ASR provider, and publishes transcript messages back through the LiveKit data channel.
+CaptionLive is a real-time transcription workspace built around LiveKit rooms. The Audio Source publishes microphone or Chrome Tab audio through WebRTC. Each active room/provider agent subscribes to that track, sends decoded PCM to one ASR provider, then publishes normalized transcript messages to the LiveKit data channel and backend transcript hub. A room may run multiple provider agents concurrently.
 
-There is no browser-to-ASR or browser-to-backend audio WebSocket mode. Do not restore the removed `/google`, `/azure`, or `/gemini` client WebSocket endpoints or provider-comparison UI unless explicitly requested.
+There is no browser-to-ASR or browser-to-backend **audio** WebSocket mode. Do not restore the removed `/google`, `/azure`, or `/gemini` client audio WebSocket endpoints. The supported public application WebSockets are read-only transcript outputs; keep them separate from provider upstream protocols.
+
+Use the current product vocabulary in user-facing UI and documentation:
+
+- Product: **CaptionLive**
+- Admin/operator surface: **Control Room**
+- Publisher surface: **Audio Source**
+- Read-only viewer surface: **Transcript**
 
 ## Current architecture
 
 ```text
-Publisher / Viewer / Admin (React)
-              │
-              ├── HTTP → Go backend (tokens, rooms, agent control)
-              │
-              └── WebRTC + data channel
-                         │
-                    LiveKit server
-                         │
-                    Go room agent
-                         │
-              Google / Gemini / Azure / GPT Realtime Whisper
+Control Room ── HTTP ─────────────────────────► Go backend
+Audio Source ── HTTP token ───────────────────► Go backend
+Transcript  ── HTTP token ────────────────────► Go backend
+
+Audio Source ── WebRTC audio ─────────────────► LiveKit room
+                                                   │
+                                                   ├──► room/provider agent
+                                                   │        │
+                                                   │        └──► Google / Gemini /
+                                                   │             Azure / GPT Realtime Whisper
+                                                   │
+Transcript ◄── room audio + transcript data ──────┘
+
+External system ◄── signed provider WebSocket ── transcript hub
 ```
 
 - `frontend/`: React 19, TypeScript, Vite, Tailwind CSS, LiveKit client.
@@ -34,13 +44,15 @@ Publisher / Viewer / Admin (React)
 ## Important entry points
 
 - Frontend shell and hash routing: `frontend/App.tsx`
-- Publisher connection: `frontend/hooks/useLiveKit.ts`
-- Viewer connection: `frontend/hooks/useRoomViewer.ts`
+- Audio Source connection: `frontend/hooks/useLiveKit.ts`
+- Transcript connection: `frontend/hooks/useRoomViewer.ts`
 - Transcript parsing/state helpers: `frontend/lib/transcriptMessages.ts`
 - Backend entry point: `backend-go/main.go`
 - HTTP routes: `backend-go/internal/delivery/routes.go`
 - Agent lifecycle API: `backend-go/internal/delivery/handler/agent.go`
+- Transcript-link and WebSocket handlers: `backend-go/internal/delivery/handler/transcript.go`
 - LiveKit agent/audio pipeline: `backend-go/internal/infrastructure/agent/agent.go`
+- External transcript fan-out: `backend-go/internal/infrastructure/transcript/`
 - Provider interface and Thai normalization: `backend-go/internal/domain/domain.go`
 - Provider implementations: `backend-go/internal/infrastructure/asr/`
 
@@ -54,6 +66,16 @@ Preserve these provider-specific semantics:
 - Gemini requests an application turn boundary after the shared 650 ms low-energy window or a 30-second hard duration, then allows a fixed 500 ms translation grace period. Alignment is best-effort.
 - GPT Realtime Whisper uses transcription intent at 24 kHz PCM16, publishes source-only Draft/final text, commits after the shared 650 ms silence window or 30-second hard duration, and performs bounded reconnect with up to one second of recent-audio replay.
 - Non-final source text remains replaceable Draft state keyed by provider and speaker. Gemini additionally keys source/translation state by `turnId`; final source text becomes a committed row.
+
+## Transcript output contracts
+
+- The LiveKit data channel carries validated transcript packets for the in-app Transcript surface. Lines view may include Gemini source/translation pairs.
+- Provider-specific external feeds use `/ws/transcript/:provider/:room?token=...` and send lean JSON text frames shaped as `{"text":"...","isFinal":false}`.
+- External interim frames replace the client's active Draft. A final frame is appended to committed output and clears that Draft.
+- Provider-specific feeds are signed, read-only, source-transcript-only, and have no audio input, commands, ready event, history, or replay.
+- Keep provider identity in the URL/token scope; do not combine providers into an unlabelled payload.
+- Text originates from upstream provider results. The gateway may accumulate provider deltas into full snapshots and apply shared Thai spacing normalization, but must not invent transcript wording.
+- The legacy room-wide versioned WebSocket remains a separate compatibility contract. Do not silently change one contract into the other.
 
 ## Backend conventions
 
@@ -69,7 +91,11 @@ Preserve these provider-specific semantics:
 
 ## Frontend conventions
 
-- Keep publisher, viewer, and admin experiences visually and behaviorally consistent.
+- Keep Audio Source, Transcript, and Control Room experiences visually and behaviorally consistent.
+- Keep user-facing product names aligned with the CaptionLive vocabulary above. Internal route/component names may remain `admin`, `stream`, and `viewer`.
+- Reuse `frontend/public/captionlive-mark.svg`, `captionlive-logo.svg`, and `favicon.svg`; do not replace them with unrelated page icons in the primary header.
+- Preserve the Slate + Teal visual system. Use shared semantic tokens in `frontend/index.css`; reserve teal for brand/action/selection, emerald for success, amber for warning, red for danger, and provider colors for provider identity.
+- Keep primary headers aligned through `--app-header-row-height`, `--app-header-height`, and `.app-header__content` rather than page-specific fixed heights.
 - Use `parseTranscriptMessage` for data-channel payload validation.
 - Keep committed transcripts bounded; do not allow unbounded state growth.
 - Preserve independent interim entries by provider/speaker.
@@ -124,6 +150,8 @@ Use `pnpm` for frontend dependency operations. Keep `pnpm-lock.yaml` authoritati
 ## Documentation rules
 
 - Keep `README.md`, `frontend/README.md`, `backend-go/README.md`, `livekit/README.md`, examples, and technical docs consistent with implementation.
+- Keep the root `README.md` focused on the product mental model, end-to-end flow, essential setup, and documentation map. Put provider/API/configuration depth in the owning subproject document.
+- Use CaptionLive surface names in user-facing documentation, while retaining internal route or code names where they help developers find implementation.
 - Treat `backend-go/docs/EDITOR_MODE_DESIGN.md` as a design proposal, not implemented behavior.
 - Document upstream provider protocols separately from public application APIs.
 - Do not claim latency or recognition quality as guaranteed; describe values as operational expectations when needed.
