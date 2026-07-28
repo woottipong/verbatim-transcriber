@@ -1,7 +1,7 @@
 import type { TranscriptSegment } from '../types';
 import { groupFinalTranscriptRows } from './transcriptMessages.ts';
 
-type TranscriptTextSegment = Pick<TranscriptSegment, 'text' | 'isFinal'> & Partial<Pick<TranscriptSegment, 'id' | 'timestamp' | 'provider' | 'speaker' | 'role' | 'languageCode' | 'turnId' | 'translation'>>;
+type TranscriptTextSegment = Pick<TranscriptSegment, 'text' | 'isFinal'> & Partial<Pick<TranscriptSegment, 'id' | 'timestamp' | 'provider' | 'role' | 'languageCode' | 'turnId' | 'translation'>>;
 
 function toFilenameSlug(value: string, fallback: string): string {
   const slug = value

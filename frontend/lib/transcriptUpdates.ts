@@ -72,7 +72,7 @@ export class TranscriptUpdateBuffer<T> {
             return;
         }
 
-        // Reinsert so updates from multiple speakers retain latest-arrival order.
+        // Reinsert so updates from multiple transcript keys retain latest-arrival order.
         this.pending.delete(key);
         this.pending.set(key, update);
     }

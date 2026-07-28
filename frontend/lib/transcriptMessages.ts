@@ -6,10 +6,9 @@ export interface TranscriptMessage {
     type: 'transcript';
     text: string;
     isFinal: boolean;
-    confidence?: number;
     timestamp?: number;
+    sequence?: number;
     provider?: string;
-    speaker?: string;
     role: TranscriptRole;
     languageCode?: string;
     turnId?: string;
@@ -19,7 +18,6 @@ export interface InterimTranscript {
     key: string;
     text: string;
     provider: string;
-    speaker: string;
     sourceIdentity: string;
     languageCode?: string;
     turnId?: string;
@@ -64,7 +62,6 @@ export function groupFinalTranscriptRows(
             previous.isFinal && segment.isFinal &&
             previous.role !== 'translation' && segment.role !== 'translation' &&
             previous.provider === segment.provider &&
-            previous.speaker === segment.speaker &&
             normalizeLanguageTag(previous.languageCode) === normalizeLanguageTag(segment.languageCode) &&
             gap >= 0 && gap <= windowMs &&
             !containsThaiText(previous) && !containsThaiText(segment) &&
@@ -111,7 +108,6 @@ export function appendTranscriptIfNew(
             const segment = current[index];
             if (
                 segment.provider === next.provider &&
-                segment.speaker === next.speaker &&
                 segment.role === next.role &&
                 segment.turnId === next.turnId
             ) {
@@ -140,7 +136,6 @@ export function appendTranscriptIfNew(
         previous &&
         previous.text === next.text &&
         previous.provider === next.provider &&
-        previous.speaker === next.speaker &&
         previous.role === next.role &&
         previous.turnId === next.turnId
     ) {
@@ -180,7 +175,6 @@ export function createCommittedTranscript(
     id: string,
     message: TranscriptMessage,
     provider: string,
-    speaker: string,
 ): TranscriptSegment {
     return {
         id,
@@ -188,7 +182,6 @@ export function createCommittedTranscript(
         isFinal: message.isFinal,
         timestamp: message.timestamp ?? Date.now(),
         provider,
-        speaker,
         role: message.role,
         ...(message.languageCode ? { languageCode: message.languageCode } : {}),
         ...(message.turnId ? { turnId: message.turnId } : {}),
@@ -223,40 +216,40 @@ export function parseTranscriptMessage(value: unknown): TranscriptMessage | unde
         text,
         isFinal: candidate.isFinal,
         role,
-        ...(typeof candidate.confidence === 'number' ? { confidence: candidate.confidence } : {}),
         ...(typeof candidate.timestamp === 'number' ? { timestamp: candidate.timestamp } : {}),
+        ...(typeof candidate.sequence === 'number' && Number.isSafeInteger(candidate.sequence) && candidate.sequence > 0
+            ? { sequence: candidate.sequence }
+            : {}),
         ...(typeof candidate.provider === 'string' ? { provider: candidate.provider } : {}),
-        ...(typeof candidate.speaker === 'string' ? { speaker: candidate.speaker } : {}),
         ...(typeof candidate.languageCode === 'string' ? { languageCode: candidate.languageCode } : {}),
         ...(turnId ? { turnId } : {}),
     };
 }
 
-export function getTranscriptKey(message: TranscriptMessage, sourceIdentity: string): string {
+export function getTranscriptKey(message: TranscriptMessage): string {
     const provider = message.provider || 'unknown';
-    const speaker = message.speaker || sourceIdentity;
     return message.turnId
-        ? `${provider}:${speaker}:${message.turnId}:${message.role}`
-        : `${provider}:${speaker}`;
+        ? `${provider}:${message.turnId}:${message.role}`
+        : provider;
 }
 
-export function getTranscriptTurnKey(message: Pick<TranscriptMessage, 'provider' | 'speaker' | 'turnId'>, sourceIdentity: string): string {
-    return `${message.provider || 'unknown'}:${message.speaker || sourceIdentity}:${message.turnId || 'unknown'}`;
+export function getTranscriptTurnKey(
+    message: Pick<TranscriptMessage, 'provider' | 'turnId'>,
+): string {
+    return `${message.provider || 'unknown'}:${message.turnId || 'unknown'}`;
 }
 
 export function attachTranslation(
     current: TranscriptSegment[],
     message: TranscriptMessage,
-    sourceIdentity: string,
 ): { transcripts: TranscriptSegment[]; attached: boolean } {
     if (message.role !== 'translation' || !message.turnId) return { transcripts: current, attached: false };
 
     const provider = message.provider || 'unknown';
-    const speaker = message.speaker || sourceIdentity;
     let index = -1;
     for (let candidate = current.length - 1; candidate >= 0; candidate--) {
         const segment = current[candidate];
-        if (segment.provider === provider && segment.speaker === speaker && segment.turnId === message.turnId && segment.role !== 'translation') {
+        if (segment.provider === provider && segment.turnId === message.turnId && segment.role !== 'translation') {
             index = candidate;
             break;
         }
@@ -264,7 +257,7 @@ export function attachTranslation(
     if (index < 0) return { transcripts: current, attached: false };
 
     const next = current.map(segment => (
-        segment.provider === provider && segment.speaker === speaker && segment.turnId === message.turnId && segment.translation
+        segment.provider === provider && segment.turnId === message.turnId && segment.translation
             ? { ...segment, translation: undefined }
             : segment
     ));
@@ -298,7 +291,7 @@ export function storePendingTranslation(
     now = Date.now(),
 ): Map<string, PendingTranslation> {
     const next = prunePendingTranslations(current, now);
-    const key = getTranscriptTurnKey(message, sourceIdentity);
+    const key = getTranscriptTurnKey(message);
     next.delete(key);
     next.set(key, { message, sourceIdentity, receivedAt: now });
     while (next.size > MAX_PENDING_TRANSLATIONS) {
@@ -322,13 +315,11 @@ export function createInterimTranscript(
     providerOverride?: string,
 ): InterimTranscript {
     const provider = providerOverride || message.provider || 'unknown';
-    const speaker = message.speaker || sourceIdentity;
-    const normalizedMessage = { ...message, provider, speaker };
+    const normalizedMessage = { ...message, provider };
     return {
-        key: getTranscriptKey(normalizedMessage, sourceIdentity),
+        key: getTranscriptKey(normalizedMessage),
         text: message.text,
         provider,
-        speaker,
         sourceIdentity,
         ...(message.languageCode ? { languageCode: message.languageCode } : {}),
         ...(message.turnId ? { turnId: message.turnId } : {}),
@@ -338,19 +329,17 @@ export function createInterimTranscript(
 export function attachTranslationToInterims(
     current: ReadonlyMap<string, InterimTranscript>,
     message: TranscriptMessage,
-    sourceIdentity: string,
 ): { interims: Map<string, InterimTranscript>; attached: boolean } {
     if (message.role !== 'translation' || !message.turnId) {
         return { interims: new Map(current), attached: false };
     }
 
     const provider = message.provider || 'unknown';
-    const speaker = message.speaker || sourceIdentity;
     const entries = Array.from(current);
     let matchingKey: string | undefined;
     for (let index = entries.length - 1; index >= 0; index--) {
         const [key, interim] = entries[index];
-        if (interim.provider === provider && interim.speaker === speaker && interim.turnId === message.turnId) {
+        if (interim.provider === provider && interim.turnId === message.turnId) {
             matchingKey = key;
             break;
         }

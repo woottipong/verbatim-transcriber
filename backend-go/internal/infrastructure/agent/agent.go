@@ -25,7 +25,9 @@ import (
 	"gopkg.in/hraban/opus.v2"
 )
 
-// TranscriptMessage represents a transcript sent to clients via Data Channel
+// TranscriptMessage is the normalized internal transcript shared with sinks.
+// The LiveKit data-channel contract is intentionally narrower; see
+// dataChannelTranscript.
 type TranscriptMessage struct {
 	Type         string                `json:"type"`
 	Text         string                `json:"text"`
@@ -39,14 +41,25 @@ type TranscriptMessage struct {
 	TurnID       string                `json:"turnId,omitempty"`
 }
 
-// TranscriptSink receives the same normalized transcript messages that are
-// published to the LiveKit data channel.
+type dataChannelTranscript struct {
+	Type         string                `json:"type"`
+	Text         string                `json:"text"`
+	IsFinal      bool                  `json:"isFinal"`
+	Provider     string                `json:"provider"`
+	Timestamp    int64                 `json:"timestamp"`
+	Sequence     uint64                `json:"sequence"`
+	Role         domain.TranscriptRole `json:"role,omitempty"`
+	LanguageCode string                `json:"languageCode,omitempty"`
+	TurnID       string                `json:"turnId,omitempty"`
+}
+
+// TranscriptSink receives the complete normalized transcript used by
+// server-side feeds. Browser packets use the narrower dataChannelTranscript.
 type TranscriptSink interface {
 	Publish(room string, message TranscriptMessage)
 }
 
 const liveAudioBatchDuration = 40 * time.Millisecond
-const maxLoggedTranscriptRunes = 160
 
 func audioBatchTargetBytes(sampleRate int, duration time.Duration) int {
 	return sampleRate * 2 * int(duration) / int(time.Second)
@@ -94,12 +107,6 @@ func resamplePCM16(samples []int16, sourceRate, targetRate int) []byte {
 	return out
 }
 
-func transcriptDeliveryReliable(_ bool) bool {
-	// Transcript snapshots are small and every interim state is meaningful UI.
-	// Reliable delivery prevents active drafts from disappearing on busy rooms.
-	return true
-}
-
 func transcriptLogValue(value string) string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -124,36 +131,34 @@ func formatTranscriptLog(message TranscriptMessage) string {
 	}
 	textRunes := []rune(message.Text)
 	line := fmt.Sprintf(
-		"%s [Transcript] state=%s provider=%s role=%s turn=%s lang=%s speaker=%s chars=%d",
+		"%s [Transcript] state=%s provider=%s role=%s turn=%s lang=%s chars=%d",
 		marker,
 		state,
 		transcriptLogValue(message.Provider),
 		role,
 		transcriptLogValue(message.TurnID),
 		transcriptLogValue(message.LanguageCode),
-		transcriptLogValue(message.Speaker),
 		len(textRunes),
 	)
-
-	logText := message.Text
-	if len(textRunes) > maxLoggedTranscriptRunes {
-		logText = string(textRunes[:maxLoggedTranscriptRunes]) + "…"
-	}
-	return fmt.Sprintf("%s text=%q", line, logText)
+	return line
 }
 
 // Agent handles audio transcription in a LiveKit room
 type Agent struct {
-	config            *config.Config
-	room              *lksdk.Room
-	asrProvider       domain.ASRProvider
-	mu                sync.Mutex
-	isRunning         bool
-	stopRequested     bool
-	cancel            context.CancelFunc
-	preferredProvider string // "google", "gemini", "azure", "gpt-realtime-whisper", or "" for auto
-	roomName          string // store room name for status
-	transcriptSink    TranscriptSink
+	config             *config.Config
+	room               *lksdk.Room
+	asrProvider        domain.ASRProvider
+	activeTrackID      string
+	pendingTrackID     string
+	trackChanged       chan struct{}
+	transcriptSequence uint64
+	mu                 sync.Mutex
+	isRunning          bool
+	stopRequested      bool
+	cancel             context.CancelFunc
+	preferredProvider  string // "google", "gemini", "azure", "gpt-realtime-whisper", or "" for auto
+	roomName           string // store room name for status
+	transcriptSink     TranscriptSink
 }
 
 // New creates a new LiveKit ASR Agent
@@ -311,6 +316,9 @@ func (a *Agent) Stop() {
 	a.cancel = nil
 	a.room = nil
 	a.asrProvider = nil
+	a.activeTrackID = ""
+	a.pendingTrackID = ""
+	a.notifyTrackWaitersLocked()
 	a.isRunning = false
 	a.mu.Unlock()
 
@@ -339,6 +347,12 @@ func (a *Agent) IsRunning() bool {
 }
 
 func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote, participant *lksdk.RemoteParticipant) {
+	trackID := track.ID()
+	if !a.waitForAudioTrack(ctx, trackID) {
+		return
+	}
+	defer a.releaseAudioTrack(trackID)
+
 	// Determine which ASR provider to use based on preference
 	var provider domain.ASRProvider
 	var err error
@@ -484,7 +498,10 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		a.stopAfterProviderTermination(provider, err)
 		return
 	}
-	defer cleanupProvider()
+	defer func() {
+		cleanupProvider()
+		a.releaseTrackProvider(provider)
+	}()
 	log.Printf("✅ [Agent] ASR provider started: %s", provider.Name())
 
 	// Handle transcription results
@@ -573,6 +590,72 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 
 }
 
+func (a *Agent) waitForAudioTrack(ctx context.Context, trackID string) bool {
+	registered := false
+	for {
+		a.mu.Lock()
+		if !a.isRunning || a.stopRequested {
+			a.mu.Unlock()
+			return false
+		}
+		if registered && a.pendingTrackID != trackID {
+			a.mu.Unlock()
+			return false
+		}
+		if a.activeTrackID == "" && a.asrProvider == nil {
+			a.activeTrackID = trackID
+			if a.pendingTrackID == trackID {
+				a.pendingTrackID = ""
+			}
+			a.mu.Unlock()
+			return true
+		}
+
+		if !registered {
+			a.pendingTrackID = trackID
+			a.notifyTrackWaitersLocked()
+			registered = true
+		}
+		wait := a.trackChanged
+		if wait == nil {
+			wait = make(chan struct{})
+			a.trackChanged = wait
+		}
+		a.mu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			a.clearPendingAudioTrack(trackID)
+			return false
+		case <-wait:
+		}
+	}
+}
+
+func (a *Agent) releaseAudioTrack(trackID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.activeTrackID == trackID {
+		a.activeTrackID = ""
+		a.notifyTrackWaitersLocked()
+	}
+}
+
+func (a *Agent) clearPendingAudioTrack(trackID string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.pendingTrackID == trackID {
+		a.pendingTrackID = ""
+	}
+}
+
+func (a *Agent) notifyTrackWaitersLocked() {
+	if a.trackChanged != nil {
+		close(a.trackChanged)
+		a.trackChanged = nil
+	}
+}
+
 func startProvider(ctx context.Context, provider domain.ASRProvider) (func(), error) {
 	if err := provider.Start(ctx); err != nil {
 		if stopErr := provider.Stop(); stopErr != nil {
@@ -595,16 +678,18 @@ func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, speaker 
 		msg := newTranscriptMessage(result, provider.Name(), speaker)
 
 		// Convert to JSON
-		data, err := json.Marshal(msg)
+		data, err := json.Marshal(newDataChannelTranscript(msg, a.nextTranscriptSequence()))
 		if err != nil {
 			log.Printf("❌ [Agent] Error marshaling transcript: %v", err)
 			continue
 		}
 
-		log.Print(formatTranscriptLog(msg))
+		if msg.IsFinal {
+			log.Print(formatTranscriptLog(msg))
+		}
 
 		// Publish via Data Channel to all participants
-		if err := a.publishTranscript(data, transcriptDeliveryReliable(result.IsFinal)); err != nil {
+		if err := a.publishTranscript(data, result.IsFinal); err != nil {
 			log.Printf("❌ [Agent] Error publishing transcript: %v", err)
 		}
 
@@ -665,6 +750,27 @@ func newTranscriptMessage(result domain.TranscriptResult, provider, speaker stri
 		Role:         role,
 		LanguageCode: result.LanguageCode,
 		TurnID:       result.TurnID,
+	}
+}
+
+func (a *Agent) nextTranscriptSequence() uint64 {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.transcriptSequence++
+	return a.transcriptSequence
+}
+
+func newDataChannelTranscript(message TranscriptMessage, sequence uint64) dataChannelTranscript {
+	return dataChannelTranscript{
+		Type:         message.Type,
+		Text:         message.Text,
+		IsFinal:      message.IsFinal,
+		Provider:     message.Provider,
+		Timestamp:    message.Timestamp,
+		Sequence:     sequence,
+		Role:         message.Role,
+		LanguageCode: message.LanguageCode,
+		TurnID:       message.TurnID,
 	}
 }
 

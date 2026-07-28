@@ -81,19 +81,18 @@ Clients replace the current Draft for interim frames and commit then clear it fo
   "type": "transcript",
   "text": "emergency room",
   "isFinal": false,
-  "confidence": 0.9,
   "provider": "gemini",
   "timestamp": 1784196259000,
-  "speaker": "user-123",
+  "sequence": 42,
   "role": "source",
   "languageCode": "en",
   "turnId": "gemini-1"
 }
 ```
 
-All transcript packets use reliable data-channel delivery. Non-final source values remain replaceable Draft state by provider/speaker; Gemini also pairs source and translation by application `turnId`. Gemini requests a pseudo-turn boundary after 650 ms of low-energy PCM or 30 seconds of continuous audio and then applies a fixed 500 ms translation grace period. Its Live connection uses standard session resumption, sliding-window context compression, `GoAway`/transport-error reconnect, and a nine-minute rotation when a safe resumption handle is available, replaying up to fifteen seconds of audio received during the handoff. GPT Realtime Whisper uses a transcription-only session, streams 24 kHz PCM, manually commits after the shared 650 ms PCM silence boundary or a 30-second hard duration, publishes source interim deltas and completed finals, and performs bounded reconnects with one second of recent-audio replay.
+Interim transcript packets use lossy data-channel delivery so newer Draft state is not queued behind stale revisions; final packets use reliable delivery. A monotonic agent `sequence` lets clients discard delayed Draft packets that arrive after a newer final. Non-final source values remain replaceable Draft state by provider; Gemini keys Drafts by provider, application `turnId`, and role, and pairs source/translation by provider plus `turnId`. Gemini requests a pseudo-turn boundary after 650 ms of low-energy PCM or 30 seconds of continuous audio and then applies a fixed 500 ms translation grace period. Its Live connection uses standard session resumption, sliding-window context compression, `GoAway`/transport-error reconnect, and a nine-minute rotation when a safe resumption handle is available, replaying up to fifteen seconds of audio received during the handoff. GPT Realtime Whisper uses a transcription-only session, streams 24 kHz PCM, manually commits after the shared 650 ms PCM silence boundary or a 30-second hard duration, publishes source interim deltas and completed finals, and performs bounded reconnects with one second of recent-audio replay.
 
-The frontend coalesces general Draft updates to 33 ms and Gemini updates to 50 ms while applying the first update and final result immediately. Lines view may show a Gemini translation paired beneath its source. Text view shows source only and marks active Draft text inline; per-provider `.txt` export includes finalized source text only. Adjacent finals from the same provider, speaker, and language may be grouped for display/export within a 1.6-second window unless the previous chunk ends with strong punctuation.
+The frontend coalesces general Draft updates to 33 ms and Gemini updates to 50 ms while applying the first update and final result immediately. Lines view may show a Gemini translation paired beneath its source. Text view shows source only and marks active Draft text inline; per-provider `.txt` export includes finalized source text only. Adjacent finals from the same provider and language may be grouped for display/export within a 1.6-second window unless the previous chunk ends with strong punctuation.
 
 ## Key files
 

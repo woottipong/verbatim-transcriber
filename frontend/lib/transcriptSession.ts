@@ -29,6 +29,11 @@ interface BufferedTranscriptMessage extends TranscriptMessage {
     sourceIdentity: string;
 }
 
+interface PacketOrder {
+    sequence: number;
+    sourceIdentity: string;
+}
+
 export interface TranscriptSessionSnapshot {
     transcripts: TranscriptSegment[];
     interimTranscripts: Map<string, InterimTranscript>;
@@ -49,12 +54,14 @@ const EMPTY_SNAPSHOT: TranscriptSessionSnapshot = {
     transcripts: [],
     interimTranscripts: new Map(),
 };
+const MAX_PACKET_ORDER_ENTRIES = 256;
 const decoder = new TextDecoder();
 
 export class TranscriptSession {
     private readonly options: TranscriptSessionOptions;
     private snapshot: TranscriptSessionSnapshot = EMPTY_SNAPSHOT;
     private translationsByTurn = new Map<string, PendingTranslation>();
+    private latestPacketByKey = new Map<string, PacketOrder>();
     private readonly listeners = new Set<() => void>();
     private readonly transcriptUpdates: TranscriptUpdateBuffer<BufferedTranscriptMessage>;
     private readonly geminiUpdates: TranscriptUpdateBuffer<BufferedTranscriptMessage>;
@@ -105,9 +112,10 @@ export class TranscriptSession {
 
         const bufferedMessage: BufferedTranscriptMessage = {
             ...message,
-            key: getTranscriptKey(message, sourceIdentity),
+            key: getTranscriptKey(message),
             sourceIdentity,
         };
+        if (!this.acceptPacket(bufferedMessage)) return true;
         if (isAppendOnlyInterimProvider(provider)) {
             this.geminiUpdates.push(bufferedMessage);
         } else if (message.role === 'translation') {
@@ -122,6 +130,9 @@ export class TranscriptSession {
         this.transcriptUpdates.removeWhere(message => message.sourceIdentity === sourceIdentity);
         this.geminiUpdates.removeWhere(message => message.sourceIdentity === sourceIdentity);
         this.translationsByTurn = clearPendingTranslationsBySource(this.translationsByTurn, sourceIdentity);
+        this.latestPacketByKey = new Map(
+            Array.from(this.latestPacketByKey).filter(([, packet]) => packet.sourceIdentity !== sourceIdentity),
+        );
         const interimTranscripts = clearInterimsBySource(this.snapshot.interimTranscripts, sourceIdentity);
         if (interimTranscripts.size !== this.snapshot.interimTranscripts.size) {
             this.publish(this.snapshot.transcripts, interimTranscripts);
@@ -132,6 +143,7 @@ export class TranscriptSession {
         this.transcriptUpdates.clear();
         this.geminiUpdates.clear();
         this.translationsByTurn.clear();
+        this.latestPacketByKey.clear();
         if (clearCommitted) this.segmentId = 0;
 
         const transcripts = clearCommitted ? [] : this.snapshot.transcripts;
@@ -158,12 +170,10 @@ export class TranscriptSession {
         const transcripts = attachTranslation(
             this.snapshot.transcripts,
             message,
-            message.sourceIdentity,
         ).transcripts;
         const interimTranscripts = attachTranslationToInterims(
             this.snapshot.interimTranscripts,
             message,
-            message.sourceIdentity,
         ).interims;
         this.publish(transcripts, interimTranscripts);
     }
@@ -175,7 +185,6 @@ export class TranscriptSession {
                 `${this.options.idPrefix}-${++this.segmentId}`,
                 message,
                 provider,
-                message.speaker || message.sourceIdentity,
             );
             let transcripts = [...this.snapshot.transcripts.slice(-499), segment];
             if (message.turnId) {
@@ -184,7 +193,6 @@ export class TranscriptSession {
                     transcripts = attachTranslation(
                         transcripts,
                         pending.message,
-                        pending.sourceIdentity,
                     ).transcripts;
                 }
             }
@@ -202,7 +210,6 @@ export class TranscriptSession {
                 interimTranscripts = attachTranslationToInterims(
                     interimTranscripts,
                     pending.message,
-                    pending.sourceIdentity,
                 ).interims;
             }
         }
@@ -211,7 +218,25 @@ export class TranscriptSession {
 
     private getPendingTranslation(message: BufferedTranscriptMessage): PendingTranslation | undefined {
         this.translationsByTurn = prunePendingTranslations(this.translationsByTurn);
-        return this.translationsByTurn.get(getTranscriptTurnKey(message, message.sourceIdentity));
+        return this.translationsByTurn.get(getTranscriptTurnKey(message));
+    }
+
+    private acceptPacket(message: BufferedTranscriptMessage): boolean {
+        if (message.sequence === undefined) return true;
+
+        const previous = this.latestPacketByKey.get(message.key);
+        if (previous && message.sequence <= previous.sequence) return false;
+
+        this.latestPacketByKey.set(message.key, {
+            sequence: message.sequence,
+            sourceIdentity: message.sourceIdentity,
+        });
+        while (this.latestPacketByKey.size > MAX_PACKET_ORDER_ENTRIES) {
+            const oldestKey = this.latestPacketByKey.keys().next().value;
+            if (oldestKey === undefined) break;
+            this.latestPacketByKey.delete(oldestKey);
+        }
+        return true;
     }
 
     private publish(

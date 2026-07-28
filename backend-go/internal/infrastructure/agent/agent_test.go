@@ -3,8 +3,8 @@ package agent
 import (
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -40,6 +40,82 @@ func TestStartProviderReturnsCleanupThatStopsProvider(t *testing.T) {
 
 	if provider.stopCalls != 1 {
 		t.Fatalf("Stop() calls = %d, want 1", provider.stopCalls)
+	}
+}
+
+func TestAgentAllowsOnlyOneActiveAudioTrack(t *testing.T) {
+	agent := &Agent{isRunning: true}
+
+	if !agent.waitForAudioTrack(context.Background(), "track-1") {
+		t.Fatal("first audio track was rejected")
+	}
+
+	acquired := make(chan bool, 1)
+	go func() {
+		acquired <- agent.waitForAudioTrack(context.Background(), "track-2")
+	}()
+
+	agent.releaseAudioTrack("track-1")
+	select {
+	case ok := <-acquired:
+		if !ok {
+			t.Fatal("replacement audio track was rejected after the first was released")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("replacement audio track did not take over")
+	}
+}
+
+func TestAgentRejectsAudioTrackWhileProviderIsStillClosing(t *testing.T) {
+	agent := &Agent{
+		isRunning:   true,
+		asrProvider: &lifecycleProvider{results: make(chan domain.TranscriptResult)},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if agent.waitForAudioTrack(ctx, "track-2") {
+		t.Fatal("audio track was accepted while the previous provider was still active")
+	}
+}
+
+func TestAgentKeepsOnlyLatestPendingAudioTrack(t *testing.T) {
+	agent := &Agent{isRunning: true}
+	if !agent.waitForAudioTrack(context.Background(), "track-1") {
+		t.Fatal("first audio track was rejected")
+	}
+
+	firstPending := make(chan bool, 1)
+	secondPending := make(chan bool, 1)
+	go func() {
+		firstPending <- agent.waitForAudioTrack(context.Background(), "track-2")
+	}()
+	for {
+		agent.mu.Lock()
+		pending := agent.pendingTrackID
+		agent.mu.Unlock()
+		if pending == "track-2" {
+			break
+		}
+	}
+	go func() {
+		secondPending <- agent.waitForAudioTrack(context.Background(), "track-3")
+	}()
+	for {
+		agent.mu.Lock()
+		pending := agent.pendingTrackID
+		agent.mu.Unlock()
+		if pending == "track-3" {
+			break
+		}
+	}
+
+	agent.releaseAudioTrack("track-1")
+	if <-firstPending {
+		t.Fatal("superseded replacement track was accepted")
+	}
+	if !<-secondPending {
+		t.Fatal("latest replacement track was rejected")
 	}
 }
 
@@ -223,6 +299,42 @@ func TestNewTranscriptMessagePreservesTranslationMetadata(t *testing.T) {
 	}
 }
 
+func TestDataChannelTranscriptOmitsInternalSpeakerAndConfidence(t *testing.T) {
+	message := TranscriptMessage{
+		Type:         "transcript",
+		Text:         "ผู้ป่วยมีอาการเจ็บหน้าอก",
+		IsFinal:      true,
+		Confidence:   0.98,
+		Provider:     "google",
+		Timestamp:    1234,
+		Speaker:      "audio-source-1",
+		Role:         domain.TranscriptRoleSource,
+		LanguageCode: "th",
+	}
+
+	data, err := json.Marshal(newDataChannelTranscript(message, 7))
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(data, &payload); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if _, ok := payload["speaker"]; ok {
+		t.Fatal("data-channel payload contains internal speaker")
+	}
+	if _, ok := payload["confidence"]; ok {
+		t.Fatal("data-channel payload contains internal confidence")
+	}
+	if got, want := payload["provider"], "google"; got != want {
+		t.Fatalf("provider = %v, want %q", got, want)
+	}
+	if got, want := payload["sequence"], float64(7); got != want {
+		t.Fatalf("sequence = %v, want %v", got, want)
+	}
+}
+
 func TestAudioBatchTargetBytesUsesLowLatencyWindow(t *testing.T) {
 	if got, want := audioBatchTargetBytes(48000, 40*time.Millisecond), 3840; got != want {
 		t.Fatalf("audioBatchTargetBytes() = %d, want %d", got, want)
@@ -263,37 +375,27 @@ func TestResamplePCM16FiltersFrequenciesAboveTargetNyquist(t *testing.T) {
 	}
 }
 
-func TestTranscriptDeliveryIsReliableForInterimAndFinal(t *testing.T) {
-	if !transcriptDeliveryReliable(false) {
-		t.Fatal("interim transcript should use reliable delivery")
-	}
-	if !transcriptDeliveryReliable(true) {
-		t.Fatal("final transcript should use reliable delivery")
-	}
-}
-
 func TestFormatTranscriptLog(t *testing.T) {
-	longText := strings.Repeat("a", 170)
 	tests := []struct {
 		name    string
 		message TranscriptMessage
 		want    string
 	}{
 		{
-			name: "interim logs metadata and text",
+			name: "interim formats metadata without transcript content",
 			message: TranscriptMessage{
 				Text: "growing interim text", Provider: "gemini", Speaker: "user-1",
 				Role: domain.TranscriptRoleSource, LanguageCode: "th", TurnID: "gemini-12",
 			},
-			want: "🟡 [Transcript] state=interim provider=gemini role=source turn=gemini-12 lang=th speaker=user-1 chars=20 text=\"growing interim text\"",
+			want: "🟡 [Transcript] state=interim provider=gemini role=source turn=gemini-12 lang=th chars=20",
 		},
 		{
-			name: "final logs paired translation metadata and text",
+			name: "final formats paired translation metadata",
 			message: TranscriptMessage{
 				Text: "hello", IsFinal: true, Provider: "gemini", Speaker: "user-1",
 				Role: domain.TranscriptRoleTranslation, LanguageCode: "en", TurnID: "gemini-12",
 			},
-			want: "🟢 [Transcript] state=final provider=gemini role=translation turn=gemini-12 lang=en speaker=user-1 chars=5 text=\"hello\"",
+			want: "🟢 [Transcript] state=final provider=gemini role=translation turn=gemini-12 lang=en chars=5",
 		},
 		{
 			name: "missing optional metadata uses visible placeholders",
@@ -301,15 +403,7 @@ func TestFormatTranscriptLog(t *testing.T) {
 				Text: "done", IsFinal: true, Provider: "google", Speaker: "user-2",
 				Role: domain.TranscriptRoleSource,
 			},
-			want: "🟢 [Transcript] state=final provider=google role=source turn=- lang=- speaker=user-2 chars=4 text=\"done\"",
-		},
-		{
-			name: "long final text is truncated",
-			message: TranscriptMessage{
-				Text: longText, IsFinal: true, Provider: "gemini", Speaker: "user-1",
-				Role: domain.TranscriptRoleSource, LanguageCode: "en", TurnID: "gemini-13",
-			},
-			want: "🟢 [Transcript] state=final provider=gemini role=source turn=gemini-13 lang=en speaker=user-1 chars=170 text=\"" + strings.Repeat("a", 160) + "…\"",
+			want: "🟢 [Transcript] state=final provider=google role=source turn=- lang=- chars=4",
 		},
 		{
 			name: "metadata control characters stay on one log line",
@@ -317,7 +411,7 @@ func TestFormatTranscriptLog(t *testing.T) {
 				Text: "done", IsFinal: true, Provider: "gemini\nforged=true", Speaker: "user-1\tadmin=true",
 				Role: domain.TranscriptRoleSource, LanguageCode: "th\rEN", TurnID: "gemini-1\nstate=final",
 			},
-			want: "🟢 [Transcript] state=final provider=gemini\\nforged=true role=source turn=gemini-1\\nstate=final lang=th\\rEN speaker=user-1\\tadmin=true chars=4 text=\"done\"",
+			want: "🟢 [Transcript] state=final provider=gemini\\nforged=true role=source turn=gemini-1\\nstate=final lang=th\\rEN chars=4",
 		},
 	}
 

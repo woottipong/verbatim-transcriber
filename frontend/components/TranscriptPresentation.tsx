@@ -166,7 +166,7 @@ const InterimTranscriptRow = memo(function InterimTranscriptRow({
                 </span>
             </div>
             <div className="transcript-bilingual col-span-2 min-w-0 sm:col-span-1">
-                <span className="sr-only">Live interim transcript from {interim.speaker}: </span>
+                <span className="sr-only">Live interim transcript: </span>
                 <TranscriptSource segment={interim} className="break-words text-[1rem] leading-7 text-slate-300" />
                 <TranslationBlock translation={interim.translation} />
             </div>

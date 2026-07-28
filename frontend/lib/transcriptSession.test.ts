@@ -42,15 +42,78 @@ test('coalesces viewer interim updates through the shared session', () => {
     assert.equal(session.getSnapshot().interimTranscripts.values().next().value?.text, 'ผู้ป่วยมีอาการเจ็บหน้าอก');
 });
 
+test('ignores a delayed lossy interim after a reliable final', () => {
+    const { session, flushNext } = createSession();
+
+    session.ingest(payload({
+        text: 'ผู้ป่วย', isFinal: false, provider: 'google', sequence: 1,
+    }), 'agent-google');
+    session.ingest(payload({
+        text: 'ผู้ป่วยมีอาการเจ็บหน้าอก', isFinal: true, provider: 'google', sequence: 3,
+    }), 'agent-google');
+    session.ingest(payload({
+        text: 'ผู้ป่วยมีอาการ', isFinal: false, provider: 'google', sequence: 2,
+    }), 'agent-google');
+    flushNext();
+
+    const snapshot = session.getSnapshot();
+    assert.deepEqual(snapshot.transcripts.map(segment => segment.text), ['ผู้ป่วยมีอาการเจ็บหน้าอก']);
+    assert.equal(snapshot.interimTranscripts.size, 0);
+});
+
+test('ignores a delayed Gemini translation draft after its final translation', () => {
+    const { session } = createSession();
+
+    session.ingest(payload({
+        text: 'ผู้ป่วยมีอาการเจ็บหน้าอก', isFinal: true, provider: 'gemini',
+        role: 'source', turnId: 'turn-1', languageCode: 'th', sequence: 1,
+    }), 'agent-gemini');
+    session.ingest(payload({
+        text: 'Patient has chest pain', isFinal: true, provider: 'gemini',
+        role: 'translation', turnId: 'turn-1', languageCode: 'en', sequence: 3,
+    }), 'agent-gemini');
+    session.ingest(payload({
+        text: 'Patient has pain', isFinal: false, provider: 'gemini',
+        role: 'translation', turnId: 'turn-1', languageCode: 'en', sequence: 2,
+    }), 'agent-gemini');
+
+    assert.deepEqual(session.getSnapshot().transcripts[0].translation, {
+        text: 'Patient has chest pain',
+        languageCode: 'en',
+        isFinal: true,
+    });
+});
+
+test('bounds packet-order watermarks for long-running Gemini sessions', () => {
+    const { session } = createSession();
+
+    for (let index = 1; index <= 300; index++) {
+        session.ingest(payload({
+            text: `turn ${index}`,
+            isFinal: true,
+            provider: 'gemini',
+            turnId: `turn-${index}`,
+            sequence: index,
+        }), 'agent-gemini');
+    }
+
+    const ordering = (session as unknown as {
+        latestPacketByKey: Map<string, unknown>;
+    }).latestPacketByKey;
+    assert.equal(ordering.size, 256);
+    assert.equal(ordering.has('gemini:turn-1:source'), false);
+    assert.equal(ordering.has('gemini:turn-300:source'), true);
+});
+
 test('pairs a Gemini translation received before its source and commits one row', () => {
     const { session } = createSession('view');
     session.ingest(payload({
         text: 'Patient has chest pain', isFinal: true, role: 'translation',
-        provider: 'gemini', speaker: 'patient', turnId: 'turn-1', languageCode: 'en',
+        provider: 'gemini', turnId: 'turn-1', languageCode: 'en',
     }), 'agent-gemini');
     session.ingest(payload({
         text: 'ผู้ป่วยมีอาการเจ็บหน้าอก', isFinal: true,
-        provider: 'gemini', speaker: 'patient', turnId: 'turn-1', languageCode: 'th',
+        provider: 'gemini', turnId: 'turn-1', languageCode: 'th',
     }), 'agent-gemini');
 
     const snapshot = session.getSnapshot();

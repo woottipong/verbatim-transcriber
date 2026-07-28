@@ -65,7 +65,7 @@ Preserve these provider-specific semantics:
 - Gemini uses `gemini-3.5-live-translate-preview` at 16 kHz. The model requires an audio response modality, but model audio is discarded. Source and configured-target text are exposed and paired with application `turnId` values.
 - Gemini requests an application turn boundary after the shared 650 ms low-energy window or a 30-second hard duration, then allows a fixed 500 ms translation grace period. Alignment is best-effort.
 - GPT Realtime Whisper uses transcription intent at 24 kHz PCM16, publishes source-only Draft/final text, commits after the shared 650 ms silence window or 30-second hard duration, and performs bounded reconnect with up to one second of recent-audio replay.
-- Non-final source text remains replaceable Draft state keyed by provider and speaker. Gemini additionally keys source/translation state by `turnId`; final source text becomes a committed row.
+- Non-final source text remains replaceable Draft state keyed by provider. Gemini keys source/translation Drafts by provider, `turnId`, and role; final source text becomes a committed row.
 
 ## Transcript output contracts
 
@@ -98,7 +98,7 @@ Preserve these provider-specific semantics:
 - Keep primary headers aligned through `--app-header-row-height`, `--app-header-height`, and `.app-header__content` rather than page-specific fixed heights.
 - Use `parseTranscriptMessage` for data-channel payload validation.
 - Keep committed transcripts bounded; do not allow unbounded state growth.
-- Preserve independent interim entries by provider/speaker.
+- Preserve independent interim entries by provider and, for Gemini, `turnId` plus role.
 - Avoid provider-specific capture hooks. Microphone and Chrome Tab publishing belong to `useLiveKit`; Chrome Tab capture helpers belong to `frontend/lib/audioSources.ts`.
 - Keep selected-audio and session state explicit: room joined, audio source on/off/stopped, and transcription agent connected.
 - Lines view may show paired Gemini translation. Text view must remain source-only and may mark active source Draft inline; per-provider `.txt` export must contain finalized source text only.

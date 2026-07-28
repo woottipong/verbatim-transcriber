@@ -27,8 +27,8 @@ test('exports only finalized source rows', () => {
 
 test('exports nearby finalized chunks using the same rows shown in the UI', () => {
   const text = formatTranscriptText([
-    { id: '1', text: 'First chunk', isFinal: true, timestamp: 1_000, provider: 'gemini', speaker: 'one' },
-    { id: '2', text: 'continues here', isFinal: true, timestamp: 2_200, provider: 'gemini', speaker: 'one' },
+    { id: '1', text: 'First chunk', isFinal: true, timestamp: 1_000, provider: 'gemini' },
+    { id: '2', text: 'continues here', isFinal: true, timestamp: 2_200, provider: 'gemini' },
   ]);
 
   assert.equal(text, 'First chunk continues here');
@@ -38,11 +38,11 @@ test('exports Thai final rows without inventing or removing phrase boundaries', 
   const text = formatTranscriptText([
     {
       id: '1', text: 'ค่ะ ครับ สระภาษาอังกฤษคือ a e i o u', isFinal: true,
-      timestamp: 1_000, provider: 'gpt-realtime-whisper', speaker: 'one', languageCode: 'th',
+      timestamp: 1_000, provider: 'gpt-realtime-whisper', languageCode: 'th',
     },
     {
       id: '2', text: 'นั่นเองนะคะ', isFinal: true,
-      timestamp: 2_000, provider: 'gpt-realtime-whisper', speaker: 'one', languageCode: 'th',
+      timestamp: 2_000, provider: 'gpt-realtime-whisper', languageCode: 'th',
     },
   ]);
 

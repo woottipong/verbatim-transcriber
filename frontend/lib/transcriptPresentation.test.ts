@@ -9,15 +9,15 @@ import type { TranscriptSegment } from '../types.ts';
 import type { InterimTranscript } from './transcriptMessages.ts';
 
 const transcripts: TranscriptSegment[] = [
-    { id: '1', text: 'Google final', isFinal: true, timestamp: 1, provider: 'google', speaker: 'one', role: 'source' },
-    { id: '2', text: 'Azure final', isFinal: true, timestamp: 2, provider: 'azure', speaker: 'one', role: 'source' },
+    { id: '1', text: 'Google final', isFinal: true, timestamp: 1, provider: 'google', role: 'source' },
+    { id: '2', text: 'Azure final', isFinal: true, timestamp: 2, provider: 'azure', role: 'source' },
 ];
 const interims = new Map<string, InterimTranscript>([
     ['gemini:one', {
         key: 'gemini:one',
         text: 'Gemini draft',
         provider: 'gemini',
-        speaker: 'one',
+
         sourceIdentity: 'agent-gemini',
     }],
 ]);

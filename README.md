@@ -106,7 +106,7 @@ See [backend-go/README.md](backend-go/README.md#http-api) for the complete HTTP 
 | --- | --- | --- |
 | Frontend | React 19, TypeScript, Vite, Tailwind CSS | Control Room, Audio Source, Transcript, LiveKit client state |
 | Backend | Go 1.24, Fiber | Control API, tokens, room agents, transcript hub |
-| Realtime | LiveKit | WebRTC audio transport and reliable transcript data channel |
+| Realtime | LiveKit | WebRTC audio transport; lossy Draft and reliable final transcript delivery |
 | Audio | Opus + CGO | Decode browser audio and resample PCM for each provider |
 | ASR | Google, Gemini, Azure, OpenAI | Interim/final transcription and provider-specific behavior |
 
