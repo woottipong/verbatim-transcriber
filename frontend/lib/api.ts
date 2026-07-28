@@ -26,7 +26,6 @@ export interface RunningAgent {
     running: boolean;
     provider: string;
     room: string;
-    mode?: 'live' | 'moderated';
 }
 
 export interface AgentStatus {
@@ -135,12 +134,11 @@ export async function startRoomAgent(
     backendUrl: string,
     roomName: string,
     provider: AgentProvider,
-    mode: 'live' | 'moderated' = 'live',
 ): Promise<void> {
     const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/agent/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
-        body: JSON.stringify({ roomName, provider, mode }),
+        body: JSON.stringify({ roomName, provider }),
     });
     await parseApiResponse(response, 'Failed to start agent');
 }

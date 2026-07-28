@@ -143,11 +143,10 @@ export function useControlRoomOperations({
     const startAgent = useCallback(async (
         roomName: string,
         provider: AgentProvider,
-        mode: 'live' | 'moderated' = 'live',
     ): Promise<void> => {
         setIsStartingAgent(true);
         try {
-            await startRoomAgent(backendUrl, roomName, provider, mode);
+            await startRoomAgent(backendUrl, roomName, provider);
             await refreshAgentStatus();
         } finally {
             setIsStartingAgent(false);

@@ -219,7 +219,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         if (!selectedRoom) return;
         setNotice(null);
         try {
-            await startAgentOperation(selectedRoom.name, agentProvider, 'live');
+            await startAgentOperation(selectedRoom.name, agentProvider);
             showNotice({ tone: 'success', message: `${providerLabels[agentProvider]} is connecting to “${selectedRoom.name}”.` });
         } catch (err) {
             showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to start agent' });
@@ -333,19 +333,14 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                         )}
                         <img src="/captionlive-mark.svg" alt="" className="h-10 w-10 shrink-0 rounded-lg" aria-hidden="true" />
                         <div className="min-w-0">
-                            <h1 className="flex min-w-0 items-center gap-2 truncate text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                                <span className="shrink-0 text-teal-200">CaptionLive</span>
-                                <span className="h-4 w-px shrink-0 bg-slate-700" aria-hidden="true" />
+                            <h1 className="flex min-w-0 items-center gap-2 truncate text-lg font-semibold tracking-tight sm:text-xl">
+                                <span className="shrink-0 text-[var(--accent)]">CaptionLive</span>
+                                <span className="h-4 w-px shrink-0 bg-[var(--line)]" aria-hidden="true" />
                                 <span className="truncate">Control Room</span>
                             </h1>
-                            <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                                <p className="truncate text-xs text-slate-400">Manage rooms and transcription</p>
-                                <span className="h-2 w-px bg-slate-700 hidden sm:inline" aria-hidden="true" />
-                                <div className="hidden items-center gap-1.5 text-[10px] text-slate-500 sm:flex select-none">
-                                    <span className="status-dot status-dot--live !h-1.5 !w-1.5" aria-hidden="true" />
-                                    <span>LiveKit plane</span>
-                                </div>
-                            </div>
+                            <p className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-sm">
+                                <span className="text-[var(--muted)]">Manage rooms and transcription</span>
+                            </p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -453,7 +448,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                             <ShareRow
                                                 icon={<PencilLine size={16} />}
                                                 label="Caption Desk"
-                                                description="Choose an active provider to review captions"
+                                                description="Review and approve captions"
                                                 onOpen={() => openLink(buildCaptionDeskUrl(appBaseUrl, selectedRoom.name, ''))}
                                                 onCopy={() => void copyText(buildCaptionDeskUrl(appBaseUrl, selectedRoom.name, ''), 'Caption Desk link')}
                                             />
@@ -492,7 +487,6 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                                             <span className="flex min-w-0 items-center gap-2 px-3">
                                                                 <span className="status-dot status-dot--live" aria-hidden="true" />
                                                                 <span className="truncate">{providerLabels[agent.provider as AgentProvider] || agent.provider}</span>
-                                                                <span className="text-xs text-slate-400">{agent.mode === 'moderated' ? 'Moderated' : 'Live'}</span>
                                                             </span>
                                                             <button
                                                                 type="button"

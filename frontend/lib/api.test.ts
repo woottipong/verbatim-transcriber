@@ -29,7 +29,6 @@ test('control room adapter owns agent endpoint details', async () => {
     assert.deepEqual(JSON.parse(String(requests[0].init?.body)), {
         roomName: 'room one',
         provider: 'google',
-        mode: 'live',
     });
     assert.equal(requests[1].url, 'http://localhost:3000/livekit/agent/stop');
 });

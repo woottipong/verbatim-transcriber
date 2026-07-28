@@ -24,13 +24,16 @@ export default function CaptionDeskPage({ backendUrl, roomName, providerName }: 
   if (!roomName || !validProvider) {
     return <CaptionDeskLauncher backendUrl={backendUrl} initialRoomName={roomName} />;
   }
-  return <ConnectedCaptionDesk backendUrl={backendUrl} roomName={roomName} provider={provider} />;
+  const hashParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+  const initialInterim = hashParams.get('source') === 'interim';
+  return <ConnectedCaptionDesk backendUrl={backendUrl} roomName={roomName} provider={provider} initialInterim={initialInterim} />;
 }
 
-function ConnectedCaptionDesk({ backendUrl, roomName, provider }: {
+function ConnectedCaptionDesk({ backendUrl, roomName, provider, initialInterim = false }: {
   backendUrl: string;
   roomName: string;
   provider: AgentProvider;
+  initialInterim?: boolean;
 }) {
   const {
     snapshot, connectionState, error, agentConnected, captionConnected, edit,
@@ -38,7 +41,8 @@ function ConnectedCaptionDesk({ backendUrl, roomName, provider }: {
   } =
     useCaptionDesk(backendUrl, roomName, provider);
   const editorRef = useRef<HTMLDivElement>(null);
-  const [useInterimInReview, setUseInterimInReview] = useState(false);
+  const historyRef = useRef<HTMLDivElement>(null);
+  const [useInterimInReview, setUseInterimInReview] = useState(initialInterim);
   const connected = connectionState === ConnectionState.CONNECTED;
   const reviewSourceLocked =
     snapshot.sourceSegmentIds.length > 0 ||
@@ -52,6 +56,11 @@ function ConnectedCaptionDesk({ backendUrl, roomName, provider }: {
       editor.textContent = snapshot.reviewText;
     }
   }, [snapshot.reviewText]);
+  useEffect(() => {
+    if (historyRef.current && snapshot.recentlyPublished.length > 0) {
+      historyRef.current.scrollTop = 0;
+    }
+  }, [snapshot.recentlyPublished.length]);
 
   const release = (splitAtCaret = false) => {
     const splitIndex = splitAtCaret ? getContentEditableCaretOffset(editorRef.current) : undefined;
@@ -67,7 +76,7 @@ function ConnectedCaptionDesk({ backendUrl, roomName, provider }: {
   };
 
   return (
-    <div className="app-shell flex min-h-screen flex-col bg-[var(--canvas)] text-[var(--ink)]">
+    <div className="app-shell flex h-dvh flex-col overflow-hidden bg-[var(--canvas)] text-[var(--ink)]">
       <a href="#main-content" className="app-skip-link">
         Skip to content
       </a>
@@ -115,7 +124,7 @@ function ConnectedCaptionDesk({ backendUrl, roomName, provider }: {
         </div>
       </header>
 
-      <main id="main-content" className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col px-4 py-4 sm:px-6 sm:py-5">
+      <main id="main-content" className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-hidden px-4 py-4 sm:px-6 sm:py-5">
         {(error || snapshot.error || connectionState === ConnectionState.DISCONNECTED) && (
           <div className="mb-4 flex items-center justify-between gap-4 rounded-lg border border-red-400/35 bg-red-500/10 px-4 py-3 text-sm text-red-200" role="alert">
             <span>{snapshot.error || error || 'Caption Desk disconnected. Your current edits are preserved.'}</span>
@@ -127,25 +136,25 @@ function ConnectedCaptionDesk({ backendUrl, roomName, provider }: {
           </div>
         )}
         <div className="caption-desk-workspace grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,19rem)]">
-          <section className="app-panel caption-desk-history order-2 flex max-h-64 min-h-0 flex-col overflow-hidden bg-[var(--canvas-raised)] shadow-none lg:order-2 lg:h-full lg:max-h-full" aria-labelledby="published-captions-heading">
+          <section className="app-panel caption-desk-history order-2 flex min-h-0 flex-col overflow-hidden bg-[var(--canvas-raised)] shadow-none lg:order-2 lg:h-full" aria-labelledby="published-captions-heading">
             <div className="panel-header px-4 py-2.5">
               <h2 id="published-captions-heading" className="text-sm font-semibold">Published</h2>
               <p className="text-xs text-[var(--subtle)]">Release history</p>
             </div>
-            <div className="flex-1 overflow-y-auto">
+            <div ref={historyRef} className="flex-1 overflow-y-auto">
               {snapshot.waiting.length === 0 && snapshot.recentlyPublished.length === 0 ? (
-                <p className="px-4 py-5 text-sm leading-6 text-[var(--subtle)]">Published captions will appear here after you press Enter.</p>
+                <p className="px-4 py-5 text-sm leading-6 text-[var(--subtle)]">Captions you publish will appear here.</p>
               ) : (
                 <ol className="divide-y divide-[var(--line)]">
                   {[...snapshot.waiting].reverse().map(item => (
                     <li key={item.requestId} className="px-4 py-3">
-                      <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-amber-300">
+                      <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-[var(--status-warning-text)]">
                         <RefreshCw className="animate-spin" size={13} aria-hidden="true" /> Sending…
                       </div>
                       <p className="break-words whitespace-pre-wrap text-sm leading-6 text-[var(--ink)] [overflow-wrap:anywhere]">{item.text}</p>
                     </li>
                   ))}
-                  {[...snapshot.recentlyPublished].reverse().map(item => (
+                  {[...snapshot.recentlyPublished].slice(-10).reverse().map(item => (
                     <li key={item.publicationId} className="px-4 py-3">
                       <time className="mb-1 block text-xs text-[var(--subtle)]" dateTime={new Date(item.publishedAt).toISOString()}>
                         {formatPublishedTime(item.publishedAt)}
@@ -158,43 +167,16 @@ function ConnectedCaptionDesk({ backendUrl, roomName, provider }: {
             </div>
           </section>
 
-          <section className="app-panel order-1 flex min-h-[32rem] flex-col lg:order-1 lg:h-full lg:min-h-0" aria-labelledby="review-caption-heading">
+          <section className="app-panel order-1 flex min-h-[20rem] flex-col lg:order-1 lg:h-full lg:min-h-0" aria-labelledby="review-caption-heading">
             <div className="panel-header caption-desk-toolbar px-4 py-2.5 sm:px-5">
               <div className="min-w-0">
                 <h2 id="review-caption-heading" className="font-semibold">Review caption</h2>
                 <p className="truncate text-xs text-[var(--muted)]">Place the cursor at a break, then press Enter to publish up to it.</p>
               </div>
               <div className="caption-desk-toolbar__tools">
-                <fieldset className="flex items-center">
-                  <legend className="sr-only">Review source</legend>
-                  <span id="review-source-label" className="sr-only">Review source</span>
-                  <div className="view-toggle caption-desk-source-toggle">
-                    <button
-                      type="button"
-                      onClick={() => void toggleInterimReview(false)}
-                      disabled={reviewSourceLocked && useInterimInReview}
-                      aria-describedby="review-source-label review-source-help"
-                      aria-pressed={!useInterimInReview}
-                      className={`view-toggle-button disabled:cursor-not-allowed disabled:opacity-40 ${
-                        !useInterimInReview ? 'view-toggle-button--active' : ''
-                      }`}
-                    >
-                      Final
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void toggleInterimReview(true)}
-                      disabled={reviewSourceLocked && !useInterimInReview}
-                      aria-describedby="review-source-label review-source-help"
-                      aria-pressed={useInterimInReview}
-                      className={`view-toggle-button disabled:cursor-not-allowed disabled:opacity-40 ${
-                        useInterimInReview ? 'view-toggle-button--active' : ''
-                      }`}
-                    >
-                      Interim
-                    </button>
-                  </div>
-                </fieldset>
+                <span className="caption-desk-source-badge" aria-label={`Review source: ${useInterimInReview ? 'Interim' : 'Final'}`}>
+                  {useInterimInReview ? 'Interim' : 'Final'}
+                </span>
                 <div className="caption-desk-queue-status text-right text-xs text-[var(--muted)]">
                   {snapshot.sourceSegmentIds.length > 0 && (
                     <>{snapshot.sourceSegmentIds.length} segment{snapshot.sourceSegmentIds.length === 1 ? '' : 's'}</>
@@ -206,11 +188,6 @@ function ConnectedCaptionDesk({ backendUrl, roomName, provider }: {
                   {snapshot.waiting.length > 0 && <span> · Sending {snapshot.waiting.length}</span>}
                 </div>
               </div>
-              <p id="review-source-help" className="sr-only">
-                {reviewSourceLocked
-                  ? 'Publish pending captions before changing the review source.'
-                  : 'Choose whether finalized or live draft text enters the review editor.'}
-              </p>
             </div>
             <div
               ref={editorRef}
@@ -231,7 +208,7 @@ function ConnectedCaptionDesk({ backendUrl, roomName, provider }: {
                 release(true);
               }}
               aria-label="Caption text to review and publish"
-              className="caption-review-editor transcript-paragraph-source min-h-[340px] w-full flex-1 overflow-y-auto bg-transparent px-4 py-3 text-[var(--ink)] caret-[var(--accent)] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] sm:px-5 sm:py-4"
+              className="caption-review-editor transcript-paragraph-source w-full flex-1 overflow-y-auto bg-transparent px-4 py-3 text-[var(--ink)] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] sm:px-5 sm:py-4"
             />
             <span className="sr-only" aria-live="polite">
               {!useInterimInReview && snapshot.isDraftActive
@@ -240,7 +217,8 @@ function ConnectedCaptionDesk({ backendUrl, roomName, provider }: {
             </span>
             <footer className="caption-desk-editor-footer flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-[var(--line)] bg-[var(--control-surface-bg)] px-4 py-2.5 sm:px-5">
               <span className="text-sm text-[var(--muted)]">{snapshot.reviewText.length} characters</span>
-              <span className="text-xs text-[var(--subtle)]">Enter publishes to cursor · Shift+Enter new line</span>
+              <span className="text-xs text-[var(--subtle)] hidden sm:inline">Enter → publish to cursor · Shift+Enter → new line</span>
+              <span className="text-xs text-[var(--subtle)] sm:hidden">Enter → publish · Shift+Enter → new line</span>
             </footer>
           </section>
         </div>
@@ -308,6 +286,7 @@ function CaptionDeskLauncher({
   const [rooms, setRooms] = useState<RoomDetails[]>([]);
   const [roomName, setRoomName] = useState(fixedRoomName);
   const [provider, setProvider] = useState<AgentProvider | ''>('');
+  const [reviewSource, setReviewSource] = useState<'final' | 'interim'>('final');
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -360,11 +339,14 @@ function CaptionDeskLauncher({
   const connect = async () => {
     if (!roomName || !provider) return;
     setConnecting(true);
-    window.location.href = buildCaptionDeskUrl(
-      `${window.location.origin}${window.location.pathname}`,
-      roomName,
-      provider,
-    );
+    const base = `${window.location.origin}${window.location.pathname}`;
+    const url = new URL(base);
+    const params = new URLSearchParams();
+    if (roomName.trim()) params.set('room', roomName.trim());
+    params.set('provider', provider.trim().toLowerCase());
+    if (reviewSource === 'interim') params.set('source', 'interim');
+    url.hash = `caption-desk?${params.toString()}`;
+    window.location.href = url.toString();
   };
 
   return (
@@ -390,7 +372,7 @@ function CaptionDeskLauncher({
       <main id="main-content" className="mx-auto flex w-full max-w-2xl flex-col px-4 py-8 sm:px-6 sm:py-10">
         <section className="app-panel p-5 sm:p-6" aria-labelledby="caption-desk-connect-heading">
           <div className="flex items-start gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-teal-400/10 text-teal-200">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--accent-soft)] text-[var(--accent)]">
               <Radio size={19} aria-hidden="true" />
             </span>
             <div>
@@ -418,10 +400,10 @@ function CaptionDeskLauncher({
 
           {!error && !loading && rooms.length === 0 ? (
             <div className="mt-5 rounded-lg bg-[var(--control-surface-bg)] px-4 py-4">
-              <p className="text-sm font-medium">No rooms are available.</p>
-              <p className="mt-1 text-sm text-[var(--muted)]">Create a room in Control Room, then refresh this page.</p>
+              <p className="text-sm font-medium">No rooms yet.</p>
+              <p className="mt-1 text-sm text-[var(--muted)]">Start by creating one in Control Room, then come back here.</p>
               <div className="mt-4 flex items-center gap-2">
-                <a href="#" className="control-button control-button--quiet">Open Control Room</a>
+                <a href="#admin" className="control-button control-button--quiet">Open Control Room</a>
                 <button type="button" onClick={() => void refresh()} className="control-button control-button--inline">
                   <RefreshCw size={15} /> Refresh
                 </button>
@@ -458,9 +440,59 @@ function CaptionDeskLauncher({
                   {providers.map(item => <option key={item} value={item}>{formatProviderName(item)}</option>)}
                 </select>
                 {!loading && roomName && providers.length === 0 && (
-                  <span className="text-xs font-normal text-amber-200">Start a transcription provider for this room in Control Room.</span>
+                  <span className="text-xs font-normal text-[var(--status-warning-text)]">Start a transcription provider for this room in Control Room.</span>
                 )}
               </label>
+              <div className="grid gap-2.5">
+                <span className="text-sm font-medium text-[var(--ink)]" id="review-source-launcher-label">
+                  Review Source Mode
+                </span>
+                <div
+                  className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+                  role="radiogroup"
+                  aria-labelledby="review-source-launcher-label"
+                >
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={reviewSource === 'final'}
+                    onClick={() => setReviewSource('final')}
+                    className={`flex flex-col text-left p-3.5 rounded-xl border transition-all cursor-pointer ${
+                      reviewSource === 'final'
+                        ? 'border-[var(--accent)] bg-[var(--surface-raised)] ring-1 ring-[var(--accent)]'
+                        : 'border-[var(--line)] bg-[var(--control-surface-bg)] hover:border-[var(--line-strong)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-semibold text-sm text-[var(--ink)]">
+                      <span>Final Text</span>
+                      <span className={`h-2.5 w-2.5 rounded-full transition-colors ${reviewSource === 'final' ? 'bg-[var(--accent)]' : 'border border-[var(--line)]'}`} />
+                    </div>
+                    <p className="mt-1.5 text-xs text-[var(--muted)] leading-relaxed">
+                      Waits for confirmed final text. Stable with zero text flickering.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={reviewSource === 'interim'}
+                    onClick={() => setReviewSource('interim')}
+                    className={`flex flex-col text-left p-3.5 rounded-xl border transition-all cursor-pointer ${
+                      reviewSource === 'interim'
+                        ? 'border-[var(--accent)] bg-[var(--surface-raised)] ring-1 ring-[var(--accent)]'
+                        : 'border-[var(--line)] bg-[var(--control-surface-bg)] hover:border-[var(--line-strong)]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between font-semibold text-sm text-[var(--ink)]">
+                      <span>Live Draft (Interim)</span>
+                      <span className={`h-2.5 w-2.5 rounded-full transition-colors ${reviewSource === 'interim' ? 'bg-[var(--accent)]' : 'border border-[var(--line)]'}`} />
+                    </div>
+                    <p className="mt-1.5 text-xs text-[var(--muted)] leading-relaxed">
+                      Streams real-time words into the editor immediately as spoken.
+                    </p>
+                  </button>
+                </div>
+              </div>
               <button
                 type="button"
                 onClick={() => void connect()}
