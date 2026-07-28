@@ -446,6 +446,36 @@ func TestModeratorBoundsProcessedRequestsAtTwoHundredFiftySix(t *testing.T) {
 	}
 }
 
+func TestModeratorConcurrentIngestAndPublish(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+		for index := 1; index <= 100; index++ {
+			id := fmt.Sprintf("google-%d", index)
+			moderator.Ingest(SourceSegment{
+				ID: id, Provider: "google", Text: id, IsFinal: true, Sequence: uint64(index),
+			})
+			moderator.Snapshot()
+		}
+	}()
+
+	for index := 1; index <= 50; index++ {
+		id := fmt.Sprintf("google-%d", index)
+		moderator.Ingest(SourceSegment{
+			ID: id, Provider: "google", Text: id, IsFinal: true, Sequence: uint64(index),
+		})
+		_, _, _ = moderator.Publish(PublishCommand{
+			RequestID: fmt.Sprintf("req-%d", index),
+			Provider:  "google",
+			SourceSegmentIDs: []string{id},
+			Text:      id,
+		})
+	}
+	<-done
+}
+
 func ingestFinals(moderator *Moderator, ids ...string) {
 	for index, id := range ids {
 		moderator.Ingest(SourceSegment{

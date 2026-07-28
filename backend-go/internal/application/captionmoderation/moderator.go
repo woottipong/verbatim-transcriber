@@ -303,12 +303,7 @@ func (m *Moderator) rebuildPendingIndexLocked() {
 }
 
 func (m *Moderator) rememberPublicationLocked(publication Publication, sources []SourceSegment, hasRemainder, fromDraft bool) {
-	if len(m.processedOrder) == maxProcessedRequest {
-		oldest := m.processedOrder[0]
-		delete(m.processed, oldest)
-		copy(m.processedOrder, m.processedOrder[1:])
-		m.processedOrder = m.processedOrder[:len(m.processedOrder)-1]
-	}
+	m.processedOrder = evictFIFOHead(m.processed, m.processedOrder, maxProcessedRequest)
 	m.processed[publication.RequestID] = processedPublication{
 		publication:  clonePublication(publication),
 		sources:      append([]SourceSegment(nil), sources...),
@@ -322,11 +317,7 @@ func (m *Moderator) rememberConsumedDraftLocked(id string) {
 	if _, exists := m.consumedDrafts[id]; exists {
 		return
 	}
-	if len(m.consumedOrder) == maxConsumedDrafts {
-		oldest := m.consumedOrder[0]
-		delete(m.consumedDrafts, oldest)
-		m.consumedOrder = append([]string(nil), m.consumedOrder[1:]...)
-	}
+	m.consumedOrder = evictFIFOHead(m.consumedDrafts, m.consumedOrder, maxConsumedDrafts)
 	m.consumedDrafts[id] = struct{}{}
 	m.consumedOrder = append(m.consumedOrder, id)
 }
@@ -339,6 +330,14 @@ func (m *Moderator) forgetConsumedDraftLocked(id string) {
 			return
 		}
 	}
+}
+
+func evictFIFOHead[K comparable, V any](store map[K]V, order []K, maxCapacity int) []K {
+	if len(order) >= maxCapacity && len(order) > 0 {
+		delete(store, order[0])
+		return append([]K(nil), order[1:]...)
+	}
+	return order
 }
 
 func clonePublication(publication Publication) Publication {
