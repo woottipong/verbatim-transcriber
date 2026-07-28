@@ -1,32 +1,19 @@
 package handler
 
 import (
-	"context"
+	"errors"
 	"fmt"
-	"log"
 	"strings"
-	"sync"
 
 	"thai-transcriber-backend/config"
-	"thai-transcriber-backend/internal/infrastructure/agent"
+	"thai-transcriber-backend/internal/application/agentsupervisor"
 	"thai-transcriber-backend/models"
 
 	"github.com/gofiber/fiber/v2"
 )
 
-// agentKey creates unique key for agent: room-provider
-func agentKey(room, provider string) string {
-	return fmt.Sprintf("%s-%s", room, provider)
-}
-
-var (
-	// Map of running agents: key = "roomName-provider"
-	agents   = make(map[string]*agent.Agent)
-	agentsMu sync.Mutex
-)
-
 // HandleAgentStart starts the LiveKit ASR agent
-func HandleAgentStart(c *fiber.Ctx, cfg *config.Config) error {
+func HandleAgentStart(c *fiber.Ctx, cfg *config.Config, supervisor *agentsupervisor.Supervisor) error {
 	// Parse request
 	var req models.AgentStartRequest
 	if err := c.BodyParser(&req); err != nil {
@@ -47,35 +34,17 @@ func HandleAgentStart(c *fiber.Ctx, cfg *config.Config) error {
 	}
 	req.Provider = provider
 
-	key := agentKey(req.RoomName, req.Provider)
-
-	agentsMu.Lock()
-	defer agentsMu.Unlock()
-
-	// Check if this specific agent is already running
-	if existingAgent, exists := agents[key]; exists && existingAgent.IsRunning() {
-		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-			"error":   "Agent already running",
-			"message": fmt.Sprintf("Agent for %s in room %s is already running", req.Provider, req.RoomName),
+	if err := supervisor.Start(c.UserContext(), req.RoomName, req.Provider); err != nil {
+		if errors.Is(err, agentsupervisor.ErrAgentAlreadyExists) {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error":   "Agent already running",
+				"message": fmt.Sprintf("Agent for %s in room %s is already running", req.Provider, req.RoomName),
+			})
+		}
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "Agent supervisor is unavailable",
 		})
 	}
-
-	// Create and start agent with provider preference
-	newAgent := agent.New(cfg, req.Provider, TranscriptHub())
-	agents[key] = newAgent
-
-	go func() {
-		ctx := context.Background()
-		if err := newAgent.Start(ctx, req.RoomName); err != nil {
-			log.Printf("❌ [Agent] Failed to start %s agent in room %s: %v", req.Provider, req.RoomName, err)
-			// Log error and remove from map
-			agentsMu.Lock()
-			if current, exists := agents[key]; exists && current == newAgent {
-				delete(agents, key)
-			}
-			agentsMu.Unlock()
-		}
-	}()
 
 	return c.JSON(fiber.Map{
 		"status":   "starting",
@@ -86,7 +55,7 @@ func HandleAgentStart(c *fiber.Ctx, cfg *config.Config) error {
 }
 
 // HandleAgentStop stops the LiveKit ASR agent
-func HandleAgentStop(c *fiber.Ctx, cfg *config.Config) error {
+func HandleAgentStop(c *fiber.Ctx, cfg *config.Config, supervisor *agentsupervisor.Supervisor) error {
 	var req models.AgentStopRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -107,21 +76,17 @@ func HandleAgentStop(c *fiber.Ctx, cfg *config.Config) error {
 	}
 	req.Provider = provider
 
-	key := agentKey(req.RoomName, req.Provider)
-
-	agentsMu.Lock()
-	agentInstance, exists := agents[key]
-	if !exists || !agentInstance.IsRunning() {
-		agentsMu.Unlock()
+	if err := supervisor.Stop(req.RoomName, req.Provider); err != nil {
+		if !errors.Is(err, agentsupervisor.ErrAgentNotFound) {
+			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+				"error": "Agent supervisor is unavailable",
+			})
+		}
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error":   "Agent not running",
 			"message": fmt.Sprintf("No agent for %s in room %s", req.Provider, req.RoomName),
 		})
 	}
-	delete(agents, key)
-	agentsMu.Unlock()
-
-	agentInstance.Stop()
 
 	return c.JSON(fiber.Map{
 		"status":   "stopped",
@@ -132,21 +97,16 @@ func HandleAgentStop(c *fiber.Ctx, cfg *config.Config) error {
 }
 
 // HandleAgentStatus returns the current agent status
-func HandleAgentStatus(c *fiber.Ctx, cfg *config.Config) error {
-	agentsMu.Lock()
-	defer agentsMu.Unlock()
-
-	// Build list of running agents
-	runningAgents := []fiber.Map{}
-	for key, ag := range agents {
-		if ag.IsRunning() {
-			runningAgents = append(runningAgents, fiber.Map{
-				"key":      key,
-				"running":  true,
-				"provider": ag.GetProvider(),
-				"room":     ag.GetRoom(),
-			})
-		}
+func HandleAgentStatus(c *fiber.Ctx, supervisor *agentsupervisor.Supervisor) error {
+	status := supervisor.Status()
+	runningAgents := make([]fiber.Map, 0, len(status))
+	for _, current := range status {
+		runningAgents = append(runningAgents, fiber.Map{
+			"key":      current.Key,
+			"running":  current.Running,
+			"provider": current.Provider,
+			"room":     current.Room,
+		})
 	}
 
 	return c.JSON(fiber.Map{
@@ -178,20 +138,4 @@ func validateAgentProvider(cfg *config.Config, provider string) (string, error) 
 		return "", fmt.Errorf("provider must be google, gemini, azure, or gpt-realtime-whisper")
 	}
 	return provider, nil
-}
-
-func stopAgentsForRoom(roomName string) {
-	toStop := make([]*agent.Agent, 0)
-	agentsMu.Lock()
-	for key, instance := range agents {
-		if instance.GetRoom() == roomName || strings.HasPrefix(key, roomName+"-") {
-			delete(agents, key)
-			toStop = append(toStop, instance)
-		}
-	}
-	agentsMu.Unlock()
-
-	for _, instance := range toStop {
-		instance.Stop()
-	}
 }

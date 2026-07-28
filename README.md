@@ -110,6 +110,51 @@ See [backend-go/README.md](backend-go/README.md#http-api) for the complete HTTP 
 | Audio | Opus + CGO | Decode browser audio and resample PCM for each provider |
 | ASR | Google, Gemini, Azure, OpenAI | Interim/final transcription and provider-specific behavior |
 
+### Backend at a glance
+
+The Go backend is split into delivery, application policy, domain contracts, and infrastructure adapters. `main.go` is the composition root: it constructs the modules once and passes them to the Fiber routes.
+
+```mermaid
+flowchart TB
+    Main["main.go<br>composition root"]
+    Routes["Delivery<br>Fiber routes and handlers"]
+    Rooms["Room Operations"]
+    Supervisor["Room Agent Supervisor"]
+    Access["Transcript Feed Access Policy"]
+    Domain["Domain<br>ASR contract and Thai normalization"]
+    LKAdapter["LiveKit Room adapter"]
+    Agent["LiveKit Room Agent"]
+    Token["Signed token codec"]
+    Hub["Transcript hub"]
+    ASR["Provider adapters"]
+
+    Main --> Routes
+    Main --> Rooms
+    Main --> Supervisor
+    Main --> Access
+
+    Routes --> Rooms
+    Routes --> Supervisor
+    Routes --> Access
+
+    Rooms --> LKAdapter
+    Supervisor --> Agent
+    Access --> Rooms
+    Access --> Token
+    Access --> Hub
+    Agent --> Domain
+    Agent --> ASR
+    Agent --> Hub
+```
+
+The three application modules own the operational rules:
+
+- **Room Operations** provisions and inspects rooms, applies LiveKit timeouts, preserves room identity, and distinguishes a missing room from an empty room.
+- **Room Agent Supervisor** owns asynchronous room/provider agent start, stop, replacement protection, room deletion cleanup, and graceful shutdown.
+- **Transcript Feed Access Policy** issues and authorizes read-only feed grants bound to room name, LiveKit Room SID, transcript generation, and optional provider.
+
+Handlers only parse HTTP input and map module errors to status codes. LiveKit SDK, JWT signing, transcript fan-out, audio processing, and provider protocols stay behind infrastructure modules. See the [backend architecture guide](backend-go/README.md#architecture) for request and lifecycle flows.
+
 ### Repository structure
 
 ```text
@@ -122,9 +167,10 @@ See [backend-go/README.md](backend-go/README.md#http-api) for the complete HTTP 
 ├── backend-go/                # Fiber API and LiveKit room agents
 │   ├── config/                # Environment-backed configuration
 │   └── internal/
+│       ├── application/       # Room operations, agent supervision, transcript access policy
 │       ├── delivery/          # HTTP/WebSocket routes and handlers
 │       ├── domain/            # Provider contracts and normalization
-│       └── infrastructure/    # LiveKit agent, transcript hub, ASR providers
+│       └── infrastructure/    # LiveKit adapters, room agent, transcript/JWT, ASR providers
 ├── livekit/                   # Local LiveKit Docker Compose environment
 ├── start.sh                  # Local frontend/backend launcher
 └── AGENTS.md                 # Repository development rules
@@ -237,6 +283,7 @@ Use `go test -race ./...` after agent lifecycle, channel, mutex, or reconnect ch
 ## Operational boundaries
 
 - There are no public browser-to-ASR or browser-to-backend audio WebSocket endpoints.
+- Audio Source and Transcript participant tokens are issued only for rooms already provisioned through Control Room. Opening an unknown room link shows an unavailable-room state and cannot create a room.
 - Audio source changes are allowed only while the Audio Source is disconnected.
 - Chrome Tab audio requires selecting a browser tab and enabling **Share tab audio**.
 - A normal Audio Source disconnect releases its track-scoped provider while the room agent waits for the next track.

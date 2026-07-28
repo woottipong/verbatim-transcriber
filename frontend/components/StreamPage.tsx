@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Mic2, MonitorUp, Radio } from 'lucide-react';
+import { AlertTriangle, LoaderCircle, Mic2, MonitorUp, Radio } from 'lucide-react';
 import { useAudioDevices } from '../hooks/useAudioDevices';
 import { useLiveKit } from '../hooks/useLiveKit';
 import LiveKitPanel from './LiveKitPanel';
 import MicrophoneInputStrip from './MicrophoneInputStrip';
 import { AppConfig, AudioSource, ConnectionState } from '../types';
-import { toHttpUrl } from '../lib/runtime';
+import { getControlAuthHeaders, toHttpUrl } from '../lib/runtime';
 import { buildStreamUrl } from '../lib/appRoutes';
 import { AUDIO_SOURCE_LABELS } from '../lib/audioSources';
 
@@ -18,6 +18,9 @@ interface StreamPageProps {
 export default function StreamPage({ config, initialRoomName, onConfigSave }: StreamPageProps) {
   const [livekitRoomName, setLivekitRoomName] = useState(initialRoomName);
   const [audioSource, setAudioSource] = useState<AudioSource>('microphone');
+  const [roomAvailability, setRoomAvailability] = useState<'idle' | 'checking' | 'available' | 'missing' | 'error'>(
+    initialRoomName ? 'checking' : 'idle',
+  );
   const { devices: audioDevices } = useAudioDevices();
   const livekitHook = useLiveKit({
     serverUrl: import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880',
@@ -34,11 +37,42 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
     }
   }, [initialRoomName, livekitHook.connectionState]);
 
+  useEffect(() => {
+    if (!livekitRoomName) {
+      setRoomAvailability('idle');
+      return;
+    }
+
+    const controller = new AbortController();
+    let isCurrentRequest = true;
+    setRoomAvailability('checking');
+    void fetch(
+      `${toHttpUrl(config.backendUrl)}/livekit/rooms/${encodeURIComponent(livekitRoomName)}`,
+      { headers: getControlAuthHeaders(), signal: controller.signal },
+    ).then(response => {
+      if (!isCurrentRequest) return;
+      if (response.status === 404) {
+        setRoomAvailability('missing');
+        return;
+      }
+      setRoomAvailability(response.ok ? 'available' : 'error');
+    }).catch(error => {
+      if (!isCurrentRequest || (error instanceof DOMException && error.name === 'AbortError')) return;
+      setRoomAvailability('error');
+    });
+
+    return () => {
+      isCurrentRequest = false;
+      controller.abort();
+    };
+  }, [config.backendUrl, livekitRoomName]);
+
   const handleAudioDeviceChange = useCallback((deviceId: string) => {
     onConfigSave({ ...config, audioDeviceId: deviceId });
   }, [config, onConfigSave]);
 
-  const canChangeAudioSource = livekitHook.connectionState === ConnectionState.DISCONNECTED;
+  const canChangeAudioSource = roomAvailability === 'available'
+    && livekitHook.connectionState === ConnectionState.DISCONNECTED;
 
   return (
     <div className="app-shell">
@@ -164,6 +198,29 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
                 Continue to Room
               </button>
             </form>
+          </div>
+        ) : roomAvailability === 'checking' ? (
+          <div className="mx-auto my-8 flex max-w-md items-center justify-center gap-3 app-panel p-6 text-sm text-slate-300" role="status">
+            <LoaderCircle size={18} className="animate-spin text-teal-300" aria-hidden="true" />
+            Checking room…
+          </div>
+        ) : roomAvailability === 'missing' ? (
+          <div className="mx-auto max-w-md app-panel p-6 text-center my-8" role="alert">
+            <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-amber-400/10 text-amber-300">
+              <AlertTriangle size={22} aria-hidden="true" />
+            </span>
+            <h2 className="text-lg font-semibold text-white">Room not found</h2>
+            <p className="mt-2 text-sm text-slate-400">
+              This stream link is invalid or the room has already ended. Ask the administrator for a new link.
+            </p>
+          </div>
+        ) : roomAvailability === 'error' ? (
+          <div className="mx-auto max-w-md app-panel p-6 text-center my-8" role="alert">
+            <span className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-red-400/10 text-red-300">
+              <AlertTriangle size={22} aria-hidden="true" />
+            </span>
+            <h2 className="text-lg font-semibold text-white">Unable to verify room</h2>
+            <p className="mt-2 text-sm text-slate-400">Check the backend connection, then reload this page.</p>
           </div>
         ) : (
           <section aria-label="LiveKit transcription">

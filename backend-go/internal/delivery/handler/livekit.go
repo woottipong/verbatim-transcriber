@@ -1,20 +1,18 @@
 package handler
 
 import (
-	"context"
 	"errors"
 	"regexp"
 	"strings"
 	"time"
 
 	"thai-transcriber-backend/config"
+	"thai-transcriber-backend/internal/application/agentsupervisor"
+	"thai-transcriber-backend/internal/application/roomoperations"
 	"thai-transcriber-backend/models"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/livekit/protocol/auth"
-	"github.com/livekit/protocol/livekit"
-	"github.com/livekit/psrpc"
-	lksdk "github.com/livekit/server-sdk-go/v2"
 )
 
 var roomNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
@@ -26,41 +24,28 @@ func validateRoomName(name string) error {
 	return nil
 }
 
-// HandleLiveKitToken generates a LiveKit access token
-func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config) error {
+// HandleLiveKitToken generates a LiveKit access token.
+func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config, rooms *roomoperations.Operations) error {
 	var req models.TokenRequest
-
-	// Parse request body
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error":   "Invalid request body",
 			"details": err.Error(),
 		})
 	}
-
-	// Validate required fields
 	if req.Identity == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "identity is required",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "identity is required"})
 	}
-
 	if req.RoomName == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "roomName is required",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "roomName is required"})
 	}
 	if err := validateRoomName(req.RoomName); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": err.Error(),
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	// Set default permissions (all true if not specified)
 	canPublish := true
 	canSubscribe := true
 	canPublishData := true
-
 	if req.CanPublish != nil {
 		canPublish = *req.CanPublish
 	}
@@ -71,27 +56,20 @@ func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config) error {
 		canPublishData = *req.CanPublishData
 	}
 
-	// Only verify existing room for subscribe-only requests (viewers).
-	// Publishers are allowed to join/create rooms on demand.
-	if !canPublish {
-		ctx, cancel := context.WithTimeout(c.UserContext(), 5*time.Second)
-		defer cancel()
-		roomClient := lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
-		rooms, err := roomClient.ListRooms(ctx, &livekit.ListRoomsRequest{})
-		if err != nil {
-			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
-				"error": "Failed to verify room availability",
-			})
-		}
-		if !containsRoom(rooms.Rooms, req.RoomName) {
+	// Every browser participant must join a room provisioned by Control Room.
+	// This prevents publisher tokens from implicitly creating arbitrary rooms.
+	if _, err := rooms.Find(c.UserContext(), req.RoomName); err != nil {
+		if errors.Is(err, roomoperations.ErrRoomNotFound) {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 				"code":  "room_not_found",
 				"error": "Room does not exist or is no longer available",
 			})
 		}
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
+			"error": "Failed to verify room availability",
+		})
 	}
 
-	// Create video grant with permissions
 	grant := &auth.VideoGrant{
 		RoomJoin:       true,
 		Room:           req.RoomName,
@@ -99,42 +77,23 @@ func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config) error {
 		CanSubscribe:   &canSubscribe,
 		CanPublishData: &canPublishData,
 	}
-
-	// Create access token
-	at := auth.NewAccessToken(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
-
-	// Set token properties
-	at.SetVideoGrant(grant).
+	token, err := auth.NewAccessToken(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret).
+		SetVideoGrant(grant).
 		SetIdentity(req.Identity).
-		SetValidFor(time.Duration(cfg.LiveKitConfig.TokenExpiry) * time.Second)
-
-	// Generate JWT token
-	token, err := at.ToJWT()
+		SetValidFor(time.Duration(cfg.LiveKitConfig.TokenExpiry) * time.Second).
+		ToJWT()
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":   "Failed to generate token",
-			"details": err.Error(),
+			"error": "Failed to generate token",
 		})
 	}
 
-	return c.JSON(models.TokenResponse{
-		Token: token,
-		WsURL: cfg.LiveKitURL,
-	})
+	return c.JSON(models.TokenResponse{Token: token, WsURL: cfg.LiveKitURL})
 }
 
-func containsRoom(rooms []*livekit.Room, roomName string) bool {
-	for _, room := range rooms {
-		if room != nil && room.Name == roomName {
-			return true
-		}
-	}
-	return false
-}
-
-// HandleCreateRoom creates an empty LiveKit room. Starting an ASR agent is a
-// separate operator action so room provisioning never requests provider work.
-func HandleCreateRoom(c *fiber.Ctx, cfg *config.Config) error {
+// HandleCreateRoom creates an empty room. Starting an agent remains a separate
+// operator action.
+func HandleCreateRoom(c *fiber.Ctx, rooms *roomoperations.Operations) error {
 	var req models.RoomCreateRequest
 	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid request body"})
@@ -143,203 +102,92 @@ func HandleCreateRoom(c *fiber.Ctx, cfg *config.Config) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
 
-	ctx, cancel := context.WithTimeout(c.UserContext(), 5*time.Second)
-	defer cancel()
-	roomClient := lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
-	room, err := roomClient.CreateRoom(ctx, &livekit.CreateRoomRequest{Name: req.Name})
+	room, err := rooms.Create(c.UserContext(), req.Name)
 	if err != nil {
-		if isRoomConflictError(err) {
+		if errors.Is(err, roomoperations.ErrRoomAlreadyExists) {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "Room already exists"})
 		}
 		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Failed to create room"})
 	}
-
-	return c.Status(fiber.StatusCreated).JSON(models.RoomInfo{
-		Name:            room.Name,
-		NumParticipants: int(room.NumParticipants),
-		CreationTime:    room.CreationTime,
-	})
+	return c.Status(fiber.StatusCreated).JSON(roomInfo(room))
 }
 
-func isRoomConflictError(err error) bool {
-	if code, ok := psrpc.GetErrorCode(err); ok && code == psrpc.AlreadyExists {
-		return true
-	}
-	message := strings.ToLower(err.Error())
-	return strings.Contains(message, "already exists") ||
-		strings.Contains(message, "already_exists") ||
-		strings.Contains(message, "room exists") ||
-		strings.Contains(message, "already_present") ||
-		strings.Contains(message, "already present")
-}
-
-// HandleListRooms returns list of active rooms
-func HandleListRooms(c *fiber.Ctx, cfg *config.Config) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Create RoomService client
-	roomClient := lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
-
-	// List all rooms
-	rooms, err := roomClient.ListRooms(ctx, &livekit.ListRoomsRequest{})
+func HandleListRooms(c *fiber.Ctx, rooms *roomoperations.Operations) error {
+	found, err := rooms.List(c.UserContext())
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":   "Failed to list rooms",
-			"details": err.Error(),
-		})
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Failed to list rooms"})
 	}
-
-	// Convert to response format
-	roomInfos := make([]models.RoomInfo, 0, len(rooms.Rooms))
-	for _, room := range rooms.Rooms {
-		roomInfos = append(roomInfos, models.RoomInfo{
-			Name:            room.Name,
-			NumParticipants: int(room.NumParticipants),
-			CreationTime:    room.CreationTime,
-		})
+	roomInfos := make([]models.RoomInfo, 0, len(found))
+	for _, room := range found {
+		roomInfos = append(roomInfos, roomInfo(room))
 	}
-	return c.JSON(fiber.Map{
-		"rooms": roomInfos,
-		"total": len(roomInfos),
-	})
+	return c.JSON(fiber.Map{"rooms": roomInfos, "total": len(roomInfos)})
 }
 
-// HandleGetRoom returns room info with participants
-func HandleGetRoom(c *fiber.Ctx, cfg *config.Config) error {
+func HandleGetRoom(c *fiber.Ctx, rooms *roomoperations.Operations) error {
 	roomName := c.Params("name")
 	if roomName == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "room name is required",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "room name is required"})
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Create RoomService client
-	roomClient := lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
-
-	// List participants in room
-	participants, err := roomClient.ListParticipants(ctx, &livekit.ListParticipantsRequest{
-		Room: roomName,
-	})
+	details, err := rooms.Get(c.UserContext(), roomName)
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":   "Failed to get room participants",
-			"details": err.Error(),
-		})
+		return writeRoomUpstreamError(c, err, "Failed to get room participants")
 	}
-
-	// Convert to response format
-	participantInfos := make([]models.ParticipantInfo, 0, len(participants.Participants))
-	for _, p := range participants.Participants {
-		isAgent := p.Identity == "asr-agent" ||
-			len(p.Identity) > 6 && p.Identity[:6] == "agent-"
-
-		participantInfos = append(participantInfos, models.ParticipantInfo{
-			Identity: p.Identity,
-			Name:     p.Name,
-			IsAgent:  isAgent,
-			State:    p.State.String(),
-		})
-	}
-
+	participants := participantInfos(details.Participants)
 	return c.JSON(fiber.Map{
 		"name":         roomName,
-		"participants": participantInfos,
-		"total":        len(participantInfos),
+		"participants": participants,
+		"total":        len(participants),
 	})
 }
 
-// HandleDeleteRoom deletes a room and disconnects all participants
-func HandleDeleteRoom(c *fiber.Ctx, cfg *config.Config) error {
+// HandleDeleteRoom deletes a room before coordinating dependent local state.
+func HandleDeleteRoom(
+	c *fiber.Ctx,
+	rooms *roomoperations.Operations,
+	supervisor *agentsupervisor.Supervisor,
+) error {
 	roomName := c.Params("name")
 	if roomName == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "room name is required",
-		})
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "room name is required"})
+	}
+	if err := rooms.Delete(c.UserContext(), roomName); err != nil {
+		return writeRoomUpstreamError(c, err, "Failed to delete room")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Create RoomService client
-	roomClient := lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
-
-	// Delete room
-	_, err := roomClient.DeleteRoom(ctx, &livekit.DeleteRoomRequest{
-		Room: roomName,
-	})
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":   "Failed to delete room",
-			"details": err.Error(),
-		})
-	}
-	stopAgentsForRoom(roomName)
+	supervisor.StopRoom(roomName)
 	TranscriptHub().Invalidate(roomName)
-
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "Room deleted: " + roomName,
 	})
 }
 
-// HandleRemoveParticipant removes a participant from a room
-func HandleRemoveParticipant(c *fiber.Ctx, cfg *config.Config) error {
+func HandleRemoveParticipant(c *fiber.Ctx, rooms *roomoperations.Operations) error {
 	roomName := c.Params("room")
 	identity := c.Params("identity")
-
 	if roomName == "" || identity == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "room and identity are required",
 		})
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	// Create RoomService client
-	roomClient := lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
-
-	// Remove participant
-	_, err := roomClient.RemoveParticipant(ctx, &livekit.RoomParticipantIdentity{
-		Room:     roomName,
-		Identity: identity,
-	})
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":   "Failed to remove participant",
-			"details": err.Error(),
-		})
+	if err := rooms.RemoveParticipant(c.UserContext(), roomName, identity); err != nil {
+		return writeRoomUpstreamError(c, err, "Failed to remove participant")
 	}
-
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "Participant removed: " + identity,
 	})
 }
 
-// HandleGetRoomsDetailed returns detailed list of all rooms with participants
-func HandleGetRoomsDetailed(c *fiber.Ctx, cfg *config.Config) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	// Create RoomService client
-	roomClient := lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
-
-	// List all rooms
-	rooms, err := roomClient.ListRooms(ctx, &livekit.ListRoomsRequest{})
+func HandleGetRoomsDetailed(c *fiber.Ctx, rooms *roomoperations.Operations) error {
+	found, err := rooms.Detailed(c.UserContext())
 	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error":   "Failed to list rooms",
-			"details": err.Error(),
-		})
+		return writeRoomUpstreamError(c, err, "Failed to load detailed rooms")
 	}
 
-	// Build detailed room info
-	type DetailedRoom struct {
+	type detailedRoom struct {
 		Name            string                   `json:"name"`
 		NumParticipants int                      `json:"numParticipants"`
 		MaxParticipants int                      `json:"maxParticipants"`
@@ -347,41 +195,44 @@ func HandleGetRoomsDetailed(c *fiber.Ctx, cfg *config.Config) error {
 		EmptyTimeout    int                      `json:"emptyTimeout"`
 		Participants    []models.ParticipantInfo `json:"participants"`
 	}
-
-	detailedRooms := make([]DetailedRoom, 0, len(rooms.Rooms))
-	for _, room := range rooms.Rooms {
-		// Get participants for each room
-		participants, err := roomClient.ListParticipants(ctx, &livekit.ListParticipantsRequest{
-			Room: room.Name,
-		})
-
-		participantInfos := []models.ParticipantInfo{}
-		if err == nil {
-			for _, p := range participants.Participants {
-				isAgent := p.Identity == "asr-agent" ||
-					(len(p.Identity) > 6 && p.Identity[:6] == "agent-")
-
-				participantInfos = append(participantInfos, models.ParticipantInfo{
-					Identity: p.Identity,
-					Name:     p.Name,
-					IsAgent:  isAgent,
-					State:    p.State.String(),
-				})
-			}
-		}
-
-		detailedRooms = append(detailedRooms, DetailedRoom{
-			Name:            room.Name,
-			NumParticipants: int(room.NumParticipants),
-			MaxParticipants: int(room.MaxParticipants),
-			CreationTime:    room.CreationTime,
-			EmptyTimeout:    int(room.EmptyTimeout),
-			Participants:    participantInfos,
+	response := make([]detailedRoom, 0, len(found))
+	for _, details := range found {
+		response = append(response, detailedRoom{
+			Name:            details.Name,
+			NumParticipants: details.NumParticipants,
+			MaxParticipants: details.MaxParticipants,
+			CreationTime:    details.CreationTime,
+			EmptyTimeout:    details.EmptyTimeout,
+			Participants:    participantInfos(details.Participants),
 		})
 	}
+	return c.JSON(fiber.Map{"rooms": response, "total": len(response)})
+}
 
-	return c.JSON(fiber.Map{
-		"rooms": detailedRooms,
-		"total": len(detailedRooms),
-	})
+func writeRoomUpstreamError(c *fiber.Ctx, err error, message string) error {
+	if errors.Is(err, roomoperations.ErrRoomNotFound) {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Room not found"})
+	}
+	return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": message})
+}
+
+func roomInfo(room roomoperations.Room) models.RoomInfo {
+	return models.RoomInfo{
+		Name:            room.Name,
+		NumParticipants: room.NumParticipants,
+		CreationTime:    room.CreationTime,
+	}
+}
+
+func participantInfos(participants []roomoperations.Participant) []models.ParticipantInfo {
+	response := make([]models.ParticipantInfo, 0, len(participants))
+	for _, participant := range participants {
+		response = append(response, models.ParticipantInfo{
+			Identity: participant.Identity,
+			Name:     participant.Name,
+			IsAgent:  participant.IsAgent,
+			State:    participant.State,
+		})
+	}
+	return response
 }

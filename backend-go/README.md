@@ -30,25 +30,105 @@ The service listens at `http://localhost:3000` by default. LiveKit must be runni
 
 ## Architecture
 
-```text
-main.go
-  └── internal/delivery/routes.go
-        ├── handler/livekit.go   # tokens, rooms, participants
-        └── handler/agent.go     # agent start/stop/status
+`main.go` is the composition root. It creates each long-lived module once, injects infrastructure adapters, and passes the completed modules to the delivery layer.
 
-LiveKit room audio
-  └── internal/infrastructure/agent/agent.go
-        ├── Opus decode at 48 kHz mono
-        ├── 40 ms PCM batching
-        ├── anti-aliased 48→24/16 kHz downsampling
-        └── internal/infrastructure/asr/
-              ├── google.go
-              ├── gemini.go
-              ├── openai_transcription.go
-              └── azure.go
+```mermaid
+flowchart TB
+    Client["Control Room · Audio Source · Transcript · External client"]
+    Delivery["internal/delivery<br>routes and HTTP/WebSocket handlers"]
+
+    subgraph Application["internal/application"]
+        Rooms["Room Operations"]
+        Supervisor["Room Agent Supervisor"]
+        Access["Transcript Feed Access Policy"]
+    end
+
+    subgraph Infrastructure["internal/infrastructure"]
+        LKRoom["livekitroom<br>RoomService adapter"]
+        Agent["agent<br>LiveKit audio pipeline"]
+        Providers["asr<br>provider protocols"]
+        Transcript["transcript<br>hub and JWT codec"]
+    end
+
+    Domain["internal/domain<br>ASR contract and Thai normalization"]
+    LiveKit["LiveKit"]
+
+    Client --> Delivery
+    Delivery --> Rooms
+    Delivery --> Supervisor
+    Delivery --> Access
+
+    Rooms --> LKRoom
+    LKRoom --> LiveKit
+    Supervisor --> Agent
+    Agent --> LiveKit
+    Agent --> Providers
+    Agent --> Domain
+    Agent --> Transcript
+    Access --> Rooms
+    Access --> Transcript
 ```
 
-Provider-independent types and Thai spacing normalization live in `internal/domain`. Request/response DTOs live in `models`.
+### Module responsibilities
+
+| Module | Owns | Does not own |
+| --- | --- | --- |
+| `application/roomoperations` | Room lookup, creation, participant inspection, timeout policy, LiveKit error semantics | LiveKit SDK types or HTTP status codes |
+| `application/agentsupervisor` | One agent per room/provider, asynchronous lifecycle, stale-instance protection, room cleanup, shutdown | Provider credentials or Fiber requests |
+| `application/transcriptaccess` | Feed scope validation and grants bound to room name, Room SID, generation, and provider | JWT implementation or WebSocket transport |
+| `delivery` | Request parsing, control authentication, routes, response/error mapping, WebSocket upgrade | Agent state maps or access-policy decisions |
+| `infrastructure/livekitroom` | Translation between LiveKit RoomService and Room Operations records/errors | Room policy |
+| `infrastructure/agent` | LiveKit subscription, Opus decode, PCM routing, provider lifecycle, transcript publishing | HTTP lifecycle management |
+| `infrastructure/transcript` | Signed JWT codec, room/provider subscribers, bounded fan-out, generation tracking | Route authorization policy |
+| `infrastructure/asr` | Provider-specific streaming protocols, reconnect, interim/final parsing | Browser capture or HTTP endpoints |
+| `domain` | Provider-independent ASR contract and Thai spacing normalization | SDK-specific protocol details |
+
+Request/response DTOs live in `models`.
+
+### Control request flow
+
+```text
+HTTP request
+  → Fiber route and control authentication
+  → delivery handler validates the request shape
+  → application module applies operational policy
+  → infrastructure adapter calls LiveKit or signs/verifies a token
+  → handler maps the result to an HTTP response
+```
+
+Room behavior is explicit:
+
+- Control Room creates rooms through `Room Operations`.
+- Participant-token requests first verify the room exists; LiveKit cannot implicitly create a room from an unknown Audio Source or Transcript link.
+- Room detail lookup verifies room identity before loading participants, so a missing room is not reported as an empty room.
+- Deleting a room stops its supervised agents and invalidates active and previously generated transcript-feed grants.
+
+### Audio and transcript flow
+
+```text
+Browser WebRTC audio
+  → LiveKit room
+  → supervised room/provider agent
+  → Opus decode at 48 kHz mono
+  → 40 ms PCM batching and provider-rate resampling
+  → Google / Gemini / Azure / GPT Realtime Whisper
+  → Thai spacing normalization at the agent output boundary
+  ├── reliable LiveKit data packet → Audio Source / Transcript UI
+  └── bounded transcript hub → signed external WebSocket feed
+```
+
+The backend never accepts browser audio through its public WebSocket endpoints.
+
+### Transcript-feed authorization
+
+The `Transcript Feed Access Policy` is the single module used by both token-generation handlers and WebSocket authorization middleware:
+
+1. Validate the room and optional provider scope.
+2. Confirm that the LiveKit room exists and read its Room SID.
+3. Issue or verify a signed grant against the current transcript generation.
+4. Reject a grant when its room, Room SID, provider, generation, signature, or expiry differs.
+
+Provider-specific and room-wide WebSocket endpoints remain separate because their payload contracts differ, but they share the same authorization policy and token codec.
 
 ## Provider behavior
 
@@ -164,6 +244,8 @@ curl -X POST http://localhost:3000/livekit/agent/start \
 ```
 
 There are no public `/google`, `/azure`, or `/gemini` audio WebSocket routes.
+
+`POST /livekit/token` returns `404` with code `room_not_found` when the requested room has not been provisioned. `GET /livekit/rooms/:name` also returns `404` for a missing room rather than representing it as an empty participant list.
 
 Provider transcript WebSockets are text-frame feeds and are separate from the upstream Azure provider WebSocket. They authenticate with a signed HS256 JWT containing the room, provider, current LiveKit room SID, generation, issuer and subject `transcript:subscribe`, and an expiry 24 hours from issuance. Deleting a room invalidates active subscribers and prevents an old link from attaching to a recreated room with the same name. Provider feeds have no history/replay, ready event, audio input, or commands.
 

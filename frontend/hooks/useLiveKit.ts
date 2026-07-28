@@ -168,20 +168,21 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
             const connectedRoom = await roomLifecycle.connect({
                 serverUrl,
                 prepare: async () => {
-                    if (audioSource !== 'chrome-tab') return null;
+                    const token = await fetchToken();
+                    console.log('[LiveKit] 🎫 Token received');
+                    if (audioSource !== 'chrome-tab') {
+                        return { token, capturedTab: null };
+                    }
                     const capturedTab = await captureChromeTabAudio();
                     displayStreamRef.current = capturedTab.stream;
-                    return capturedTab;
+                    return { token, capturedTab };
                 },
-                disposePreparation: capturedTab => {
+                disposePreparation: preparation => {
+                    const capturedTab = preparation.capturedTab;
                     capturedTab?.stream.getTracks().forEach(track => track.stop());
                     if (displayStreamRef.current === capturedTab?.stream) displayStreamRef.current = null;
                 },
-                getToken: async () => {
-                    const token = await fetchToken();
-                    console.log('[LiveKit] 🎫 Token received');
-                    return token;
-                },
+                getToken: async preparation => preparation.token,
                 roomOptions: {
                     adaptiveStream: true,
                     dynacast: true,
@@ -220,7 +221,8 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
                         cleanupTabCapture(endedRoom);
                     },
                 },
-                afterConnect: async (lifecycleRoom, capturedTab) => {
+                afterConnect: async (lifecycleRoom, preparation) => {
+                    const capturedTab = preparation.capturedTab;
                     if (audioSource === 'chrome-tab') {
                         if (!capturedTab) throw new Error('Chrome Tab audio capture was not available.');
                         if (capturedTab.audioTrack.readyState === 'ended') {

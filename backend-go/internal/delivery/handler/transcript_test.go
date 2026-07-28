@@ -5,17 +5,27 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
-	"thai-transcriber-backend/config"
+	"thai-transcriber-backend/internal/application/roomoperations"
+	"thai-transcriber-backend/internal/application/transcriptaccess"
+	"thai-transcriber-backend/internal/infrastructure/transcript"
 
 	"github.com/gofiber/fiber/v2"
 )
 
 func TestHandleCreateTranscriptTokenRequiresSecret(t *testing.T) {
 	app := fiber.New()
-	cfg := &config.Config{}
+	rooms := roomoperations.New(&roomHandlerAdapter{
+		rooms: []roomoperations.RoomRecord{{Name: "demo", SID: "RM_demo"}},
+	})
+	access := transcriptaccess.New(
+		rooms,
+		transcript.NewTokenService("", 24*time.Hour),
+		TranscriptHub(),
+	)
 	app.Post("/livekit/rooms/:room/transcript-token", func(c *fiber.Ctx) error {
-		return HandleCreateTranscriptToken(c, cfg)
+		return HandleCreateTranscriptToken(c, access)
 	})
 
 	request := httptest.NewRequest(http.MethodPost, "/livekit/rooms/demo/transcript-token", nil)
@@ -79,19 +89,5 @@ func TestBuildProviderTranscriptWebSocketURLUsesProviderAndRoom(t *testing.T) {
 	want := "wss://transcriber.example:8443/ws/transcript/gpt-realtime-whisper/daily-briefing?token=signed+token"
 	if string(body) != want {
 		t.Fatalf("URL = %q, want %q", body, want)
-	}
-}
-
-func TestValidTranscriptProvider(t *testing.T) {
-	for _, provider := range []string{"google", "gemini", "azure", "gpt-realtime-whisper"} {
-		got, ok := validTranscriptProvider(provider)
-		if !ok || got != provider {
-			t.Fatalf("validTranscriptProvider(%q) = %q, %t", provider, got, ok)
-		}
-	}
-	for _, provider := range []string{"", "openai", "unknown", "google/other"} {
-		if got, ok := validTranscriptProvider(provider); ok || got != "" {
-			t.Fatalf("validTranscriptProvider(%q) = %q, %t", provider, got, ok)
-		}
 	}
 }

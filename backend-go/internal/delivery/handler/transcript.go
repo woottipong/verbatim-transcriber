@@ -1,22 +1,19 @@
 package handler
 
 import (
-	"context"
+	"errors"
 	"net/url"
 	"strings"
 	"time"
 
-	"thai-transcriber-backend/config"
+	"thai-transcriber-backend/internal/application/roomoperations"
+	"thai-transcriber-backend/internal/application/transcriptaccess"
 	"thai-transcriber-backend/internal/infrastructure/transcript"
 	"thai-transcriber-backend/models"
 
 	"github.com/gofiber/fiber/v2"
 	websocket "github.com/gofiber/websocket/v2"
-	"github.com/livekit/protocol/livekit"
-	lksdk "github.com/livekit/server-sdk-go/v2"
 )
-
-const transcriptTokenTTL = 24 * time.Hour
 
 var liveTranscriptHub = transcript.NewHub()
 
@@ -25,102 +22,44 @@ func TranscriptHub() *transcript.Hub {
 }
 
 // HandleCreateTranscriptToken issues a short-lived, room-bound read-only URL.
-func HandleCreateTranscriptToken(c *fiber.Ctx, cfg *config.Config) error {
-	if strings.TrimSpace(cfg.TranscriptWSSecret) == "" {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": "Transcript WebSocket links are not configured",
-		})
-	}
-
+func HandleCreateTranscriptToken(
+	c *fiber.Ctx,
+	access *transcriptaccess.Policy,
+) error {
 	roomName := c.Params("room")
-	if err := validateRoomName(roomName); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
-	}
-
-	room, err := liveKitRoom(c.UserContext(), cfg, roomName)
+	grant, err := access.Issue(c.UserContext(), transcriptaccess.Scope{Room: roomName})
 	if err != nil {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Failed to check room"})
-	}
-	if room == nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Room not found"})
-	}
-
-	tokenService := transcript.NewTokenService(cfg.TranscriptWSSecret, transcriptTokenTTL)
-	token, expiresAt, err := tokenService.IssueForRoom(roomName, room.Sid, liveTranscriptHub.Generation(roomName))
-	if err != nil {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "Transcript WebSocket links are not configured"})
+		return writeTranscriptAccessIssueError(c, err)
 	}
 
 	return c.JSON(models.TranscriptTokenResponse{
-		Token:        token,
-		ExpiresAt:    expiresAt.UTC().Format(time.RFC3339),
-		WebSocketURL: buildTranscriptWebSocketURL(c, roomName, token),
+		Token:        grant.Token,
+		ExpiresAt:    grant.ExpiresAt.UTC().Format(time.RFC3339),
+		WebSocketURL: buildTranscriptWebSocketURL(c, grant.Scope.Room, grant.Token),
 	})
 }
 
 // HandleCreateProviderTranscriptToken issues a provider-bound read-only URL
 // whose frames contain only text and finality.
-func HandleCreateProviderTranscriptToken(c *fiber.Ctx, cfg *config.Config) error {
-	if strings.TrimSpace(cfg.TranscriptWSSecret) == "" {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": "Transcript WebSocket links are not configured",
-		})
-	}
-
+func HandleCreateProviderTranscriptToken(
+	c *fiber.Ctx,
+	access *transcriptaccess.Policy,
+) error {
 	roomName := c.Params("room")
-	if err := validateRoomName(roomName); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
-	}
-	provider, ok := validTranscriptProvider(c.Params("provider"))
-	if !ok {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"error": "provider must be google, gemini, azure, or gpt-realtime-whisper",
-		})
-	}
-
-	room, err := liveKitRoom(c.UserContext(), cfg, roomName)
+	grant, err := access.Issue(c.UserContext(), transcriptaccess.Scope{
+		Room:     roomName,
+		Provider: c.Params("provider"),
+	})
 	if err != nil {
-		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Failed to check room"})
-	}
-	if room == nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Room not found"})
-	}
-
-	tokenService := transcript.NewTokenService(cfg.TranscriptWSSecret, transcriptTokenTTL)
-	token, expiresAt, err := tokenService.IssueForProviderRoom(
-		roomName,
-		provider,
-		room.Sid,
-		liveTranscriptHub.Generation(roomName),
-	)
-	if err != nil {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-			"error": "Transcript WebSocket links are not configured",
-		})
+		return writeTranscriptAccessIssueError(c, err)
 	}
 
 	return c.JSON(models.TranscriptTokenResponse{
-		Token:        token,
-		ExpiresAt:    expiresAt.UTC().Format(time.RFC3339),
-		WebSocketURL: buildProviderTranscriptWebSocketURL(c, roomName, provider, token),
-		Provider:     provider,
+		Token:        grant.Token,
+		ExpiresAt:    grant.ExpiresAt.UTC().Format(time.RFC3339),
+		WebSocketURL: buildProviderTranscriptWebSocketURL(c, grant.Scope.Room, grant.Scope.Provider, grant.Token),
+		Provider:     grant.Scope.Provider,
 	})
-}
-
-func liveKitRoom(parent context.Context, cfg *config.Config, roomName string) (*livekit.Room, error) {
-	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
-	defer cancel()
-	roomClient := lksdk.NewRoomServiceClient(cfg.LiveKitURL, cfg.LiveKitAPIKey, cfg.LiveKitAPISecret)
-	rooms, err := roomClient.ListRooms(ctx, &livekit.ListRoomsRequest{})
-	if err != nil {
-		return nil, err
-	}
-	for _, room := range rooms.Rooms {
-		if room.Name == roomName {
-			return room, nil
-		}
-	}
-	return nil, nil
 }
 
 func buildTranscriptWebSocketURL(c *fiber.Ctx, roomName, token string) string {
@@ -170,35 +109,16 @@ func websocketScheme(c *fiber.Ctx) string {
 	return "ws"
 }
 
-func validTranscriptProvider(value string) (string, bool) {
-	provider := strings.ToLower(strings.TrimSpace(value))
-	switch provider {
-	case "google", "gemini", "azure", "gpt-realtime-whisper":
-		return provider, true
-	default:
-		return "", false
-	}
-}
-
 // TranscriptWebSocketMiddleware authenticates before Fiber upgrades the socket.
-func TranscriptWebSocketMiddleware(cfg *config.Config) fiber.Handler {
+func TranscriptWebSocketMiddleware(access *transcriptaccess.Policy) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		if strings.TrimSpace(cfg.TranscriptWSSecret) == "" {
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-				"error": "Transcript WebSocket links are not configured",
-			})
-		}
 		roomName := c.Params("room")
-		service := transcript.NewTokenService(cfg.TranscriptWSSecret, transcriptTokenTTL)
-		room, err := liveKitRoom(c.UserContext(), cfg, roomName)
-		if err != nil {
-			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Failed to check room"})
-		}
-		if room == nil {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Room not found"})
-		}
-		if _, err := service.VerifyForRoom(c.Query("token"), roomName, room.Sid, liveTranscriptHub.Generation(roomName)); err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid transcript token"})
+		if err := access.Authorize(
+			c.UserContext(),
+			transcriptaccess.Scope{Room: roomName},
+			c.Query("token"),
+		); err != nil {
+			return writeTranscriptAccessAuthorizationError(c, err)
 		}
 		if !websocket.IsWebSocketUpgrade(c) {
 			return fiber.ErrUpgradeRequired
@@ -209,44 +129,58 @@ func TranscriptWebSocketMiddleware(cfg *config.Config) fiber.Handler {
 
 // ProviderTranscriptWebSocketMiddleware authenticates a room/provider-bound
 // token before Fiber upgrades the provider-specific socket.
-func ProviderTranscriptWebSocketMiddleware(cfg *config.Config) fiber.Handler {
+func ProviderTranscriptWebSocketMiddleware(access *transcriptaccess.Policy) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		if strings.TrimSpace(cfg.TranscriptWSSecret) == "" {
-			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
-				"error": "Transcript WebSocket links are not configured",
-			})
-		}
-		provider, ok := validTranscriptProvider(c.Params("provider"))
-		if !ok {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-				"error": "provider must be google, gemini, azure, or gpt-realtime-whisper",
-			})
-		}
 		roomName := c.Params("room")
-		if err := validateRoomName(roomName); err != nil {
-			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
-		}
-		service := transcript.NewTokenService(cfg.TranscriptWSSecret, transcriptTokenTTL)
-		room, err := liveKitRoom(c.UserContext(), cfg, roomName)
-		if err != nil {
-			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Failed to check room"})
-		}
-		if room == nil {
-			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Room not found"})
-		}
-		if _, err := service.VerifyForProviderRoom(
+		if err := access.Authorize(
+			c.UserContext(),
+			transcriptaccess.Scope{Room: roomName, Provider: c.Params("provider")},
 			c.Query("token"),
-			roomName,
-			provider,
-			room.Sid,
-			liveTranscriptHub.Generation(roomName),
 		); err != nil {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid transcript token"})
+			return writeTranscriptAccessAuthorizationError(c, err)
 		}
 		if !websocket.IsWebSocketUpgrade(c) {
 			return fiber.ErrUpgradeRequired
 		}
 		return c.Next()
+	}
+}
+
+func writeTranscriptAccessIssueError(c *fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, transcriptaccess.ErrInvalidRoom):
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "room name must be 1-128 characters using letters, numbers, hyphens, or underscores",
+		})
+	case errors.Is(err, transcriptaccess.ErrInvalidProvider):
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "provider must be google, gemini, azure, or gpt-realtime-whisper",
+		})
+	case errors.Is(err, roomoperations.ErrRoomNotFound):
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Room not found"})
+	case errors.Is(err, transcript.ErrTokenServiceDisabled):
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "Transcript WebSocket links are not configured",
+		})
+	default:
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Failed to issue transcript access"})
+	}
+}
+
+func writeTranscriptAccessAuthorizationError(c *fiber.Ctx, err error) error {
+	switch {
+	case errors.Is(err, transcriptaccess.ErrInvalidRoom), errors.Is(err, transcriptaccess.ErrInvalidProvider):
+		return writeTranscriptAccessIssueError(c, err)
+	case errors.Is(err, roomoperations.ErrRoomNotFound):
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "Room not found"})
+	case errors.Is(err, transcript.ErrTokenServiceDisabled):
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"error": "Transcript WebSocket links are not configured",
+		})
+	case errors.Is(err, transcript.ErrInvalidTranscriptToken):
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "Invalid transcript token"})
+	default:
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Failed to authorize transcript access"})
 	}
 }
 

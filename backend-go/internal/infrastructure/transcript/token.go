@@ -44,6 +44,16 @@ func NewTokenService(secret string, ttl time.Duration) *TokenService {
 	}
 }
 
+func (s *TokenService) Ready() error {
+	if s == nil || len(s.secret) < MinimumSecretLength {
+		return ErrTokenServiceDisabled
+	}
+	if s.ttl <= 0 {
+		return errors.New("transcript token ttl must be positive")
+	}
+	return nil
+}
+
 func (s *TokenService) Issue(room string) (string, time.Time, error) {
 	return s.IssueForGeneration(room, 0)
 }
@@ -64,18 +74,21 @@ func (s *TokenService) IssueForProviderRoom(room, provider, roomSID string, gene
 	return s.issue(room, provider, roomSID, generation)
 }
 
+func (s *TokenService) IssueScoped(room, provider, roomSID string, generation uint64) (string, time.Time, error) {
+	if strings.TrimSpace(provider) == "" {
+		return s.IssueForRoom(room, roomSID, generation)
+	}
+	return s.IssueForProviderRoom(room, provider, roomSID, generation)
+}
+
 func (s *TokenService) issue(room, provider, roomSID string, generation uint64) (string, time.Time, error) {
-	if s == nil || len(s.secret) < MinimumSecretLength {
-		return "", time.Time{}, ErrTokenServiceDisabled
+	if err := s.Ready(); err != nil {
+		return "", time.Time{}, err
 	}
 	room = strings.TrimSpace(room)
 	if room == "" {
 		return "", time.Time{}, ErrInvalidTranscriptRoom
 	}
-	if s.ttl <= 0 {
-		return "", time.Time{}, errors.New("transcript token ttl must be positive")
-	}
-
 	now := s.now()
 	expiresAt := now.Add(s.ttl)
 	claims := Claims{
@@ -125,9 +138,18 @@ func (s *TokenService) VerifyForProviderRoom(rawToken, expectedRoom, expectedPro
 	return s.verify(rawToken, expectedRoom, expectedProvider, expectedRoomSID, expectedGeneration)
 }
 
+func (s *TokenService) VerifyScoped(rawToken, room, provider, roomSID string, generation uint64) error {
+	if strings.TrimSpace(provider) == "" {
+		_, err := s.VerifyForRoom(rawToken, room, roomSID, generation)
+		return err
+	}
+	_, err := s.VerifyForProviderRoom(rawToken, room, provider, roomSID, generation)
+	return err
+}
+
 func (s *TokenService) verify(rawToken, expectedRoom, expectedProvider, expectedRoomSID string, expectedGeneration uint64) (*Claims, error) {
-	if s == nil || len(s.secret) < MinimumSecretLength {
-		return nil, ErrTokenServiceDisabled
+	if err := s.Ready(); err != nil {
+		return nil, err
 	}
 	if strings.TrimSpace(rawToken) == "" {
 		return nil, ErrInvalidTranscriptToken

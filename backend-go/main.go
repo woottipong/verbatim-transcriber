@@ -11,7 +11,14 @@ import (
 	"time"
 
 	"thai-transcriber-backend/config"
+	"thai-transcriber-backend/internal/application/agentsupervisor"
+	"thai-transcriber-backend/internal/application/roomoperations"
+	"thai-transcriber-backend/internal/application/transcriptaccess"
 	"thai-transcriber-backend/internal/delivery"
+	"thai-transcriber-backend/internal/delivery/handler"
+	agentinfra "thai-transcriber-backend/internal/infrastructure/agent"
+	"thai-transcriber-backend/internal/infrastructure/livekitroom"
+	"thai-transcriber-backend/internal/infrastructure/transcript"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -27,6 +34,19 @@ func main() {
 
 	// Load configuration
 	cfg := config.Load()
+	agentSupervisor := agentsupervisor.New(func(provider string) agentsupervisor.Agent {
+		return agentinfra.New(cfg, provider, handler.TranscriptHub())
+	})
+	roomOperations := roomoperations.New(livekitroom.New(
+		cfg.LiveKitURL,
+		cfg.LiveKitAPIKey,
+		cfg.LiveKitAPISecret,
+	))
+	transcriptAccess := transcriptaccess.New(
+		roomOperations,
+		transcript.NewTokenService(cfg.TranscriptWSSecret, 24*time.Hour),
+		handler.TranscriptHub(),
+	)
 
 	// Initialize Fiber app
 	app := fiber.New(fiber.Config{
@@ -44,7 +64,7 @@ func main() {
 	app.Use(logger.New())
 
 	// Routes
-	delivery.SetupRoutes(app, cfg)
+	delivery.SetupRoutes(app, cfg, agentSupervisor, roomOperations, transcriptAccess)
 
 	// Print startup info
 	printStartupInfo(cfg)
@@ -71,6 +91,9 @@ func main() {
 
 	if err := app.ShutdownWithContext(ctx); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)
+	}
+	if err := agentSupervisor.Shutdown(ctx); err != nil {
+		log.Printf("Agent shutdown incomplete: %v", err)
 	}
 
 	log.Println("✅ Server exited gracefully")
