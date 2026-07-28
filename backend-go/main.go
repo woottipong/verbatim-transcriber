@@ -23,7 +23,9 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/helmet"
 	"github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/joho/godotenv"
 )
 
@@ -54,7 +56,9 @@ func main() {
 		DisableStartupMessage: true,
 	})
 
-	// Middleware - CORS with restricted origins
+	// Middlewares — Recover from panics, Security Headers (Helmet), CORS, and Logger
+	app.Use(recover.New())
+	app.Use(helmet.New())
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AllowedOrigins,
 		AllowMethods:     "GET,POST,HEAD,PUT,DELETE,PATCH,OPTIONS",
@@ -102,7 +106,7 @@ func main() {
 
 func printStartupInfo(cfg *config.Config) {
 	fmt.Println("\n╔════════════════════════════════════════════════════════════════╗")
-	fmt.Println("║  🎙️  Real-time Thai Transcription - Go Backend             ║")
+	fmt.Println("║  🎙️  CaptionLive — Real-time Transcription Backend            ║")
 	fmt.Println("╚════════════════════════════════════════════════════════════════╝")
 	fmt.Println()
 
@@ -114,8 +118,8 @@ func printStartupInfo(cfg *config.Config) {
 	}
 	providers := []providerInfo{
 		{"Google Cloud STT", cfg.HasGoogleKey(), "🌐"},
-		{"Gemini Live STT", cfg.HasGeminiKey(), "✨"},
-		{"OpenAI Realtime Whisper", cfg.HasOpenAITranscriptionKey(), "🤖"},
+		{"Gemini Live", cfg.HasGeminiKey(), "✨"},
+		{"GPT Realtime Whisper", cfg.HasOpenAITranscriptionKey(), "🤖"},
 		{"Azure Speech", cfg.HasAzureKey(), "☁️"},
 	}
 
@@ -133,20 +137,22 @@ func printStartupInfo(cfg *config.Config) {
 		if p.enabled {
 			status = "✅ Ready"
 		}
-		fmt.Printf(" %s %-20s %s\n", p.icon, p.name, status)
+		fmt.Printf(" %s %-22s %s\n", p.icon, p.name, status)
 	}
 	fmt.Println()
 	fmt.Println("─────────────────────────────────────────────────────────────────")
-	fmt.Printf("🌐 Server:    http://%s:%s\n", cfg.Host, cfg.Port)
-	fmt.Printf("💚 Health:    http://%s:%s/health\n", cfg.Host, cfg.Port)
-	fmt.Printf("📊 Providers: http://%s:%s/providers\n", cfg.Host, cfg.Port)
+	fmt.Printf("🌐 Server:       http://%s:%s\n", cfg.Host, cfg.Port)
+	fmt.Printf("💚 Health:       http://%s:%s/health\n", cfg.Host, cfg.Port)
+	fmt.Printf("📊 Providers:    http://%s:%s/providers\n", cfg.Host, cfg.Port)
+	fmt.Printf("💬 Captions WS:  ws://%s:%s/ws/caption/:room\n", cfg.Host, cfg.Port)
+	fmt.Printf("📻 Raw Feeds WS: ws://%s:%s/ws/transcript/:provider/:room\n", cfg.Host, cfg.Port)
 	fmt.Println("─────────────────────────────────────────────────────────────────")
 
 	if enabledCount == 0 {
 		fmt.Println("\n⚠️  WARNING: No ASR providers configured!")
 		fmt.Println("   Please set API keys in .env file")
 	} else {
-		fmt.Printf("\n🎉 Ready to transcribe! (%d provider%s available)\n", enabledCount, pluralize(enabledCount))
+		fmt.Printf("\n🎉 CaptionLive Backend Ready! (%d provider%s available)\n", enabledCount, pluralize(enabledCount))
 	}
 	fmt.Println()
 }
