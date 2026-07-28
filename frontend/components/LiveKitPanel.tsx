@@ -113,13 +113,6 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
     audioSource,
     isAudioInputStopped,
   );
-  const sessionToneDot = session.tone === 'ready'
-    ? 'status-dot--live'
-    : session.tone === 'pending'
-      ? 'status-dot--pending'
-      : session.tone === 'error'
-        ? 'status-dot--error'
-        : '';
 
   return (
     <article className="livekit-panel app-panel flex min-h-[500px] h-[calc(100vh-12rem)] flex-col" aria-label="LiveKit transcription workspace">
@@ -152,13 +145,6 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
           </div>
 
           <div className="session-readiness">
-            <div className="min-w-0" role="status" aria-live="polite">
-              <p className="flex items-center gap-2 text-sm font-semibold text-slate-100">
-                <span className={`status-dot ${sessionToneDot}`} aria-hidden="true" />
-                {session.headline}
-                <span className="sr-only">. {session.detail}</span>
-              </p>
-            </div>
             <dl className="session-health" aria-label="Session health">
               {session.health.map(item => (
                 <div key={item.label} className={`session-health__item session-health__item--${item.state}`}>
@@ -204,7 +190,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
               </>
             )}
             {isConnected && (
-              <div className="flex items-center rounded-lg border border-slate-700 bg-slate-950/45 p-0.5 select-none shrink-0" role="group" aria-label="View mode">
+              <div className="view-toggle" role="group" aria-label="View mode">
                 <button
                   type="button"
                   onClick={() => setViewMode('timeline')}
@@ -223,7 +209,7 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
                 </button>
               </div>
             )}
-            <button onClick={onClear} className="control-button control-button--quiet !px-2.5 sm:!px-3" aria-label="Clear text" title="Clear text">
+            <button onClick={onClear} className="control-button control-button--quiet" aria-label="Clear text" title="Clear text">
               <Eraser size={14} aria-hidden="true" />
               <span className="hidden sm:inline">Clear Text</span>
             </button>

@@ -194,7 +194,7 @@ select:focus-visible {
 
 .session-toolbar {
   display: grid;
-  grid-template-columns: minmax(12rem, auto) minmax(31rem, 1fr) auto;
+  grid-template-columns: minmax(12rem, auto) minmax(20rem, 1fr) auto;
   align-items: center;
   gap: 1.5rem;
 }
@@ -215,25 +215,32 @@ select:focus-visible {
   gap: 0.5rem;
 }
 
+.session-toolbar__actions .control-button {
+  height: 44px;
+  min-height: 44px;
+  padding-inline: 0.875rem;
+  white-space: nowrap;
+}
+
 .session-readiness {
   display: grid;
   min-width: 0;
-  grid-template-columns: minmax(10rem, 1fr) minmax(22rem, 26rem);
+  grid-template-columns: minmax(20rem, 23rem);
+  justify-content: start;
   align-items: center;
-  gap: 1rem;
 }
 
 .session-health {
   display: grid;
-  width: min(100%, 29rem);
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  width: min(100%, 23rem);
+  grid-template-columns: minmax(5.75rem, 0.9fr) minmax(6.75rem, 1fr) minmax(7.5rem, 1.15fr);
   margin: 0;
   padding: 0;
 }
 
 .session-health__item {
   min-width: 0;
-  padding-inline: 0.9rem;
+  padding-inline: 0.7rem;
 }
 
 .session-health__item:first-child {
@@ -333,13 +340,28 @@ select:focus-visible {
 .control-button--danger { color: oklch(82% 0.1 25); background: oklch(31% 0.07 25 / 0.5); border-color: oklch(54% 0.13 25 / 0.45); }
 .control-button--danger:not(:disabled):hover { color: white; background: oklch(40% 0.12 25 / 0.65); }
 
+.view-toggle {
+  display: flex;
+  height: 44px;
+  flex: 0 0 auto;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 2px;
+  background: oklch(18% 0.025 274 / 0.55);
+  user-select: none;
+}
+
 .view-toggle-button {
-  height: 2.75rem;
+  min-width: 3.25rem;
+  height: 38px;
   border-radius: 6px;
   padding-inline: 0.75rem;
   color: var(--muted);
-  font-size: 0.75rem;
+  font-size: 0.8125rem;
   font-weight: 600;
+  line-height: 1.25rem;
   cursor: pointer;
   transition: background-color 160ms ease, color 160ms ease;
 }
