@@ -8,10 +8,12 @@ function payload(message: Record<string, unknown>): Uint8Array {
 
 function createSession(idPrefix = 'test') {
     const scheduled = new Map<number, () => void>();
+    const delays: number[] = [];
     let timerId = 0;
     const session = new TranscriptSession({
         idPrefix,
-        schedule: callback => {
+        schedule: (callback, delayMs) => {
+            delays.push(delayMs);
             scheduled.set(++timerId, callback);
             return timerId;
         },
@@ -23,19 +25,26 @@ function createSession(idPrefix = 'test') {
         scheduled.delete(next[0]);
         next[1]();
     };
-    return { session, flushNext };
+    return { session, flushNext, delays };
 }
 
-test('coalesces viewer interim updates through the shared session', () => {
-    const { session, flushNext } = createSession();
+test('coalesces Google interim revisions at 80 ms through the shared session', () => {
+    const { session, flushNext, delays } = createSession();
     let notifications = 0;
     session.subscribe(() => notifications++);
 
-    session.ingest(payload({ text: 'ผู้ป่วย', isFinal: false, provider: 'google' }), 'agent-google');
-    session.ingest(payload({ text: 'ผู้ป่วยมีอาการ', isFinal: false, provider: 'google' }), 'agent-google');
-    session.ingest(payload({ text: 'ผู้ป่วยมีอาการเจ็บหน้าอก', isFinal: false, provider: 'google' }), 'agent-google');
+    session.ingest(payload({
+        text: 'ผู้ป่วย', isFinal: false, provider: 'google', segmentId: 'google-1',
+    }), 'agent-google');
+    session.ingest(payload({
+        text: 'ผู้ป่วยมีอาการ', isFinal: false, provider: 'google', segmentId: 'google-1',
+    }), 'agent-google');
+    session.ingest(payload({
+        text: 'ผู้ป่วยมีอาการเจ็บหน้าอก', isFinal: false, provider: 'google', segmentId: 'google-1',
+    }), 'agent-google');
 
     assert.equal(notifications, 1);
+    assert.deepEqual(delays, [80]);
     assert.equal(session.getSnapshot().interimTranscripts.values().next().value?.text, 'ผู้ป่วย');
     flushNext();
     assert.equal(notifications, 2);

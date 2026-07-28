@@ -65,3 +65,71 @@ func TestNormalizeThaiSpacingCompatibility(t *testing.T) {
 		t.Fatalf("NormalizeThaiSpacing(%q) = %q, want %q", input, got, want)
 	}
 }
+
+func TestNormalizeProviderTranscriptSpacing(t *testing.T) {
+	tests := []struct {
+		name         string
+		provider     string
+		languageCode string
+		input        string
+		want         string
+	}{
+		{
+			name:         "compacts Google Thai word spacing",
+			provider:     "google",
+			languageCode: "th-TH",
+			input:        "ความ ชอบ ของ แต่ ละ คน คือ อย่าง ผม",
+			want:         "ความชอบของแต่ละคนคืออย่างผม",
+		},
+		{
+			name:         "preserves Google Thai boundaries around Latin text",
+			provider:     "google",
+			languageCode: "th",
+			input:        "ไม่ ได้ มี วัน นึง ที่ จะ ขาย เรือ แล้ว ซื้อ private jet มั้ย",
+			want:         "ไม่ได้มีวันนึงที่จะขายเรือแล้วซื้อ private jet มั้ย",
+		},
+		{
+			name:         "preserves Google Thai boundaries around numbers",
+			provider:     "google",
+			languageCode: "th_TH",
+			input:        "พระราม 9 และ 10 ชิ้น",
+			want:         "พระราม 9 และ 10 ชิ้น",
+		},
+		{
+			name:         "preserves Google Thai punctuation boundaries",
+			provider:     "google",
+			languageCode: "th-TH",
+			input:        "สวัสดี ครับ, วัน นี้ เป็น อย่าง ไร บ้าง?",
+			want:         "สวัสดีครับ, วันนี้เป็นอย่างไรบ้าง?",
+		},
+		{
+			name:         "does not change Gemini spacing policy",
+			provider:     "gemini",
+			languageCode: "th",
+			input:        "ความ ชอบ ของ แต่ ละ คน",
+			want:         "ความ ชอบ ของ แต่ ละ คน",
+		},
+		{
+			name:         "does not change GPT spacing policy",
+			provider:     "gpt-realtime-whisper",
+			languageCode: "th",
+			input:        "ความ ชอบ ของ แต่ ละ คน",
+			want:         "ความ ชอบ ของ แต่ ละ คน",
+		},
+		{
+			name:         "does not compact non-Thai Google transcripts",
+			provider:     "google",
+			languageCode: "en-US",
+			input:        "hello world",
+			want:         "hello world",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := NormalizeProviderTranscriptSpacing(tt.provider, tt.languageCode, tt.input); got != tt.want {
+				t.Fatalf("NormalizeProviderTranscriptSpacing() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

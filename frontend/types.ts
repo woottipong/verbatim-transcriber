@@ -18,6 +18,7 @@ export interface TranscriptSegment {
   role?: 'source' | 'translation';
   languageCode?: string;
   turnId?: string;
+  segmentId?: string;
   translation?: TranscriptTranslation;
 }
 

@@ -39,6 +39,7 @@ type TranscriptMessage struct {
 	Role         domain.TranscriptRole `json:"role,omitempty"`
 	LanguageCode string                `json:"languageCode,omitempty"`
 	TurnID       string                `json:"turnId,omitempty"`
+	SegmentID    string                `json:"segmentId,omitempty"`
 }
 
 type dataChannelTranscript struct {
@@ -51,6 +52,7 @@ type dataChannelTranscript struct {
 	Role         domain.TranscriptRole `json:"role,omitempty"`
 	LanguageCode string                `json:"languageCode,omitempty"`
 	TurnID       string                `json:"turnId,omitempty"`
+	SegmentID    string                `json:"segmentId,omitempty"`
 }
 
 // TranscriptSink receives the complete normalized transcript used by
@@ -60,6 +62,7 @@ type TranscriptSink interface {
 }
 
 const liveAudioBatchDuration = 40 * time.Millisecond
+const maxLoggedTranscriptRunes = 160
 
 func audioBatchTargetBytes(sampleRate int, duration time.Duration) int {
 	return sampleRate * 2 * int(duration) / int(time.Second)
@@ -131,16 +134,22 @@ func formatTranscriptLog(message TranscriptMessage) string {
 	}
 	textRunes := []rune(message.Text)
 	line := fmt.Sprintf(
-		"%s [Transcript] state=%s provider=%s role=%s turn=%s lang=%s chars=%d",
+		"%s [Transcript] state=%s provider=%s role=%s turn=%s lang=%s speaker=%s chars=%d",
 		marker,
 		state,
 		transcriptLogValue(message.Provider),
 		role,
 		transcriptLogValue(message.TurnID),
 		transcriptLogValue(message.LanguageCode),
+		transcriptLogValue(message.Speaker),
 		len(textRunes),
 	)
-	return line
+
+	logText := message.Text
+	if len(textRunes) > maxLoggedTranscriptRunes {
+		logText = string(textRunes[:maxLoggedTranscriptRunes]) + "…"
+	}
+	return fmt.Sprintf("%s text=%q", line, logText)
 }
 
 // Agent handles audio transcription in a LiveKit room
@@ -684,9 +693,7 @@ func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, speaker 
 			continue
 		}
 
-		if msg.IsFinal {
-			log.Print(formatTranscriptLog(msg))
-		}
+		log.Print(formatTranscriptLog(msg))
 
 		// Publish via Data Channel to all participants
 		if err := a.publishTranscript(data, result.IsFinal); err != nil {
@@ -741,7 +748,7 @@ func newTranscriptMessage(result domain.TranscriptResult, provider, speaker stri
 	}
 	return TranscriptMessage{
 		Type:         "transcript",
-		Text:         domain.NormalizeTranscriptSpacing(result.Text),
+		Text:         domain.NormalizeProviderTranscriptSpacing(provider, result.LanguageCode, result.Text),
 		IsFinal:      result.IsFinal,
 		Confidence:   result.Confidence,
 		Provider:     provider,
@@ -750,6 +757,7 @@ func newTranscriptMessage(result domain.TranscriptResult, provider, speaker stri
 		Role:         role,
 		LanguageCode: result.LanguageCode,
 		TurnID:       result.TurnID,
+		SegmentID:    result.SegmentID,
 	}
 }
 
@@ -771,6 +779,7 @@ func newDataChannelTranscript(message TranscriptMessage, sequence uint64) dataCh
 		Role:         message.Role,
 		LanguageCode: message.LanguageCode,
 		TurnID:       message.TurnID,
+		SegmentID:    message.SegmentID,
 	}
 }
 

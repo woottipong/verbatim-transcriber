@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -241,19 +242,27 @@ func TestHandleTranscriptionResultsIgnoresFailureFromReplacedProvider(t *testing
 
 func TestNewTranscriptMessageNormalizesThaiSpacing(t *testing.T) {
 	message := newTranscriptMessage(
-		domain.TranscriptResult{Text: "ทด สอบ ถอด ความ 1 2 3 4", IsFinal: true},
+		domain.TranscriptResult{
+			Text:         "ทด สอบ ถอด ความ 1 2 3 4",
+			IsFinal:      true,
+			LanguageCode: "th-TH",
+		},
 		"google",
 		"speaker-1",
 	)
 
-	if got, want := message.Text, "ทด สอบ ถอด ความ 1 2 3 4"; got != want {
+	if got, want := message.Text, "ทดสอบถอดความ 1 2 3 4"; got != want {
 		t.Fatalf("message text = %q, want %q", got, want)
 	}
 }
 
 func TestNewInterimTranscriptMessageKeepsNormalizedThaiText(t *testing.T) {
 	message := newTranscriptMessage(
-		domain.TranscriptResult{Text: "กำ ลัง ทด สอบ", IsFinal: false},
+		domain.TranscriptResult{
+			Text:         "กำ ลัง ทด สอบ",
+			IsFinal:      false,
+			LanguageCode: "th",
+		},
 		"google",
 		"speaker-1",
 	)
@@ -261,7 +270,7 @@ func TestNewInterimTranscriptMessageKeepsNormalizedThaiText(t *testing.T) {
 	if message.IsFinal {
 		t.Fatal("interim message was marked final")
 	}
-	if got, want := message.Text, "กำ ลัง ทด สอบ"; got != want {
+	if got, want := message.Text, "กำลังทดสอบ"; got != want {
 		t.Fatalf("interim message text = %q, want %q", got, want)
 	}
 }
@@ -310,6 +319,7 @@ func TestDataChannelTranscriptOmitsInternalSpeakerAndConfidence(t *testing.T) {
 		Speaker:      "audio-source-1",
 		Role:         domain.TranscriptRoleSource,
 		LanguageCode: "th",
+		SegmentID:    "google-7",
 	}
 
 	data, err := json.Marshal(newDataChannelTranscript(message, 7))
@@ -332,6 +342,9 @@ func TestDataChannelTranscriptOmitsInternalSpeakerAndConfidence(t *testing.T) {
 	}
 	if got, want := payload["sequence"], float64(7); got != want {
 		t.Fatalf("sequence = %v, want %v", got, want)
+	}
+	if got, want := payload["segmentId"], "google-7"; got != want {
+		t.Fatalf("segmentId = %v, want %q", got, want)
 	}
 }
 
@@ -376,26 +389,27 @@ func TestResamplePCM16FiltersFrequenciesAboveTargetNyquist(t *testing.T) {
 }
 
 func TestFormatTranscriptLog(t *testing.T) {
+	longText := strings.Repeat("a", 170)
 	tests := []struct {
 		name    string
 		message TranscriptMessage
 		want    string
 	}{
 		{
-			name: "interim formats metadata without transcript content",
+			name: "interim logs metadata and text",
 			message: TranscriptMessage{
 				Text: "growing interim text", Provider: "gemini", Speaker: "user-1",
 				Role: domain.TranscriptRoleSource, LanguageCode: "th", TurnID: "gemini-12",
 			},
-			want: "🟡 [Transcript] state=interim provider=gemini role=source turn=gemini-12 lang=th chars=20",
+			want: "🟡 [Transcript] state=interim provider=gemini role=source turn=gemini-12 lang=th speaker=user-1 chars=20 text=\"growing interim text\"",
 		},
 		{
-			name: "final formats paired translation metadata",
+			name: "final logs paired translation metadata and text",
 			message: TranscriptMessage{
 				Text: "hello", IsFinal: true, Provider: "gemini", Speaker: "user-1",
 				Role: domain.TranscriptRoleTranslation, LanguageCode: "en", TurnID: "gemini-12",
 			},
-			want: "🟢 [Transcript] state=final provider=gemini role=translation turn=gemini-12 lang=en chars=5",
+			want: "🟢 [Transcript] state=final provider=gemini role=translation turn=gemini-12 lang=en speaker=user-1 chars=5 text=\"hello\"",
 		},
 		{
 			name: "missing optional metadata uses visible placeholders",
@@ -403,7 +417,15 @@ func TestFormatTranscriptLog(t *testing.T) {
 				Text: "done", IsFinal: true, Provider: "google", Speaker: "user-2",
 				Role: domain.TranscriptRoleSource,
 			},
-			want: "🟢 [Transcript] state=final provider=google role=source turn=- lang=- chars=4",
+			want: "🟢 [Transcript] state=final provider=google role=source turn=- lang=- speaker=user-2 chars=4 text=\"done\"",
+		},
+		{
+			name: "long final text is truncated",
+			message: TranscriptMessage{
+				Text: longText, IsFinal: true, Provider: "gemini", Speaker: "user-1",
+				Role: domain.TranscriptRoleSource, LanguageCode: "en", TurnID: "gemini-13",
+			},
+			want: "🟢 [Transcript] state=final provider=gemini role=source turn=gemini-13 lang=en speaker=user-1 chars=170 text=\"" + strings.Repeat("a", 160) + "…\"",
 		},
 		{
 			name: "metadata control characters stay on one log line",
@@ -411,7 +433,7 @@ func TestFormatTranscriptLog(t *testing.T) {
 				Text: "done", IsFinal: true, Provider: "gemini\nforged=true", Speaker: "user-1\tadmin=true",
 				Role: domain.TranscriptRoleSource, LanguageCode: "th\rEN", TurnID: "gemini-1\nstate=final",
 			},
-			want: "🟢 [Transcript] state=final provider=gemini\\nforged=true role=source turn=gemini-1\\nstate=final lang=th\\rEN chars=4",
+			want: "🟢 [Transcript] state=final provider=gemini\\nforged=true role=source turn=gemini-1\\nstate=final lang=th\\rEN speaker=user-1\\tadmin=true chars=4 text=\"done\"",
 		},
 	}
 

@@ -1,6 +1,7 @@
 import type { TranscriptSegment } from '../types';
 import {
     GEMINI_TRANSCRIPT_UPDATE_INTERVAL_MS,
+    GOOGLE_TRANSCRIPT_UPDATE_INTERVAL_MS,
     INTERIM_TRANSCRIPT_UPDATE_INTERVAL_MS,
     TranscriptUpdateBuffer,
 } from './transcriptUpdates.ts';
@@ -64,8 +65,9 @@ export class TranscriptSession {
     private latestPacketByKey = new Map<string, PacketOrder>();
     private readonly listeners = new Set<() => void>();
     private readonly transcriptUpdates: TranscriptUpdateBuffer<BufferedTranscriptMessage>;
+    private readonly googleUpdates: TranscriptUpdateBuffer<BufferedTranscriptMessage>;
     private readonly geminiUpdates: TranscriptUpdateBuffer<BufferedTranscriptMessage>;
-    private segmentId = 0;
+    private committedSequence = 0;
 
     constructor(options: TranscriptSessionOptions) {
         this.options = options;
@@ -76,6 +78,15 @@ export class TranscriptSession {
             options.cancel,
             message => message.isFinal,
             message => message.key,
+        );
+        this.googleUpdates = new TranscriptUpdateBuffer(
+            message => this.applySource(message),
+            GOOGLE_TRANSCRIPT_UPDATE_INTERVAL_MS,
+            options.schedule,
+            options.cancel,
+            message => message.isFinal,
+            message => message.key,
+            'immediate',
         );
         this.geminiUpdates = new TranscriptUpdateBuffer(
             message => this.applyGemini(message),
@@ -116,7 +127,9 @@ export class TranscriptSession {
             sourceIdentity,
         };
         if (!this.acceptPacket(bufferedMessage)) return true;
-        if (isAppendOnlyInterimProvider(provider)) {
+        if (provider === 'google') {
+            this.googleUpdates.push(bufferedMessage);
+        } else if (isAppendOnlyInterimProvider(provider)) {
             this.geminiUpdates.push(bufferedMessage);
         } else if (message.role === 'translation') {
             this.applyTranslation(bufferedMessage);
@@ -128,6 +141,7 @@ export class TranscriptSession {
 
     removeSource(sourceIdentity: string): void {
         this.transcriptUpdates.removeWhere(message => message.sourceIdentity === sourceIdentity);
+        this.googleUpdates.removeWhere(message => message.sourceIdentity === sourceIdentity);
         this.geminiUpdates.removeWhere(message => message.sourceIdentity === sourceIdentity);
         this.translationsByTurn = clearPendingTranslationsBySource(this.translationsByTurn, sourceIdentity);
         this.latestPacketByKey = new Map(
@@ -141,10 +155,11 @@ export class TranscriptSession {
 
     reset(clearCommitted = false): void {
         this.transcriptUpdates.clear();
+        this.googleUpdates.clear();
         this.geminiUpdates.clear();
         this.translationsByTurn.clear();
         this.latestPacketByKey.clear();
-        if (clearCommitted) this.segmentId = 0;
+        if (clearCommitted) this.committedSequence = 0;
 
         const transcripts = clearCommitted ? [] : this.snapshot.transcripts;
         if (transcripts.length === this.snapshot.transcripts.length && this.snapshot.interimTranscripts.size === 0) {
@@ -182,7 +197,7 @@ export class TranscriptSession {
         const provider = message.provider || 'unknown';
         if (message.isFinal) {
             const segment = createCommittedTranscript(
-                `${this.options.idPrefix}-${++this.segmentId}`,
+                `${this.options.idPrefix}-${++this.committedSequence}`,
                 message,
                 provider,
             );

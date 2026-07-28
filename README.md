@@ -88,7 +88,7 @@ The lean external WebSocket uses one JSON object per text frame:
 {"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":true}
 ```
 
-Interim and final text originates from the selected ASR provider. CaptionLive routes provider results, accumulates provider deltas into full snapshots where required, and applies shared Thai spacing normalization; it does not invent interim wording.
+Interim and final text originates from the selected ASR provider. CaptionLive routes provider results, accumulates provider deltas into full snapshots where required, and applies deterministic spacing normalization. Google Thai additionally removes provider-added spaces between Thai words; other providers retain the shared policy. CaptionLive does not invent interim wording.
 
 Important output rules:
 

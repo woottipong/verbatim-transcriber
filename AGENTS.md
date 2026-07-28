@@ -60,7 +60,7 @@ External system ◄── signed provider WebSocket ── transcript hub
 
 Preserve these provider-specific semantics:
 
-- Google uses Speech-to-Text V2 streaming at 48 kHz, defaults to `chirp_2` in `asia-southeast1`, requests interim results, enables automatic punctuation, and reconnects before the five-minute stream limit.
+- Google uses Speech-to-Text V2 streaming at 48 kHz, defaults to `chirp_2` in `asia-southeast1`, requests interim results, enables automatic punctuation, and reconnects before the five-minute stream limit. Interim revisions and their final share an application `segmentId`.
 - Azure receives 16 kHz PCM after the agent resamples 48 kHz WebRTC audio. The provider uses Azure's upstream WebSocket protocol; this is not a public application WebSocket endpoint.
 - Gemini uses `gemini-3.5-live-translate-preview` at 16 kHz. The model requires an audio response modality, but model audio is discarded. Source and configured-target text are exposed and paired with application `turnId` values.
 - Gemini requests an application turn boundary after the shared 650 ms low-energy window or a 30-second hard duration, then allows a fixed 500 ms translation grace period. Alignment is best-effort.
@@ -74,7 +74,7 @@ Preserve these provider-specific semantics:
 - External interim frames replace the client's active Draft. A final frame is appended to committed output and clears that Draft.
 - Provider-specific feeds are signed, read-only, source-transcript-only, and have no audio input, commands, ready event, history, or replay.
 - Keep provider identity in the URL/token scope; do not combine providers into an unlabelled payload.
-- Text originates from upstream provider results. The gateway may accumulate provider deltas into full snapshots and apply shared Thai spacing normalization, but must not invent transcript wording.
+- Text originates from upstream provider results. The gateway may accumulate provider deltas into full snapshots and apply deterministic spacing normalization, but must not invent transcript wording.
 - The legacy room-wide versioned WebSocket remains a separate compatibility contract. Do not silently change one contract into the other.
 
 ## Backend conventions
@@ -85,7 +85,7 @@ Preserve these provider-specific semantics:
 - Provider `Stop` methods must be idempotent. Close result channels exactly once and avoid sending after closure.
 - Guard shared agent/provider lifecycle state with the existing mutex patterns.
 - Normal audio-track/provider closure must release the track-scoped provider while keeping the room agent connected. Unexpected provider errors stop the agent. Keep stale providers from stopping or clearing a replacement provider.
-- Normalize Thai spacing at the agent output boundary with `domain.NormalizeThaiSpacing`; do not add browser-side spacing transformations that destroy interim behavior.
+- Normalize spacing at the agent output boundary with `domain.NormalizeProviderTranscriptSpacing`. Only Google Thai removes spaces between adjacent Thai characters; do not add browser-side spacing transformations that destroy interim behavior.
 - Never log credentials, tokens, API keys, service-account contents, or complete `.env` values.
 - The LiveKit agent uses `hraban/opus` and requires CGO plus a system Opus library.
 

@@ -295,7 +295,7 @@ The agent publishes interim packets with lossy delivery and final packets with r
 }
 ```
 
-`sequence` is monotonic for the room agent and lets clients discard a delayed lossy Draft after a newer final packet. `role`, `languageCode`, and `turnId` are additive metadata used by Gemini source/translation pairs. GPT Realtime Whisper publishes `role: "source"` with the configured `OPENAI_LANGUAGE_CODE`; it does not emit translation packets. Thai spacing is normalized once at the agent output boundary.
+`sequence` is monotonic for the room agent and lets clients discard a delayed lossy Draft after a newer final packet. Google interim revisions and their final share a `segmentId`; `role`, `languageCode`, and `turnId` are additive metadata used by Gemini source/translation pairs. GPT Realtime Whisper publishes `role: "source"` with the configured `OPENAI_LANGUAGE_CODE`; it does not emit translation packets. Spacing is normalized once at the agent output boundary; only Google Thai removes spaces between adjacent Thai characters.
 
 Gemini `turnId` values are application-level pseudo-turns rather than deterministic model turns. The provider observes the unchanged PCM stream and requests a turn boundary after 650 ms of low-energy audio, then allows a fixed 500 ms translation grace period. This keeps delayed translated output with the preceding source in typical pauses, but alignment remains best-effort rather than sentence-perfect.
 

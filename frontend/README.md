@@ -96,7 +96,7 @@ Keep provider-independent room and transcript behavior in the shared lifecycle/s
 - Every packet is validated with `parseTranscriptMessage`.
 - `TranscriptSession` owns decoding, provider resolution, interim buffering, Gemini source/translation pairing, committed rows, and source cleanup.
 - Non-final source values are replaceable Draft entries keyed by provider. Gemini keys Drafts by provider, `turnId`, and role, and pairs source/translation by provider plus `turnId`.
-- Draft rendering is coalesced at 33 ms for general interim traffic and 50 ms for Gemini, with the first update and final result applied immediately.
+- Draft rendering is coalesced at 33 ms for general interim traffic, 80 ms for Google STT snapshots, and 50 ms for Gemini, with the first update and final result applied immediately.
 - Final values become bounded committed rows. At most 500 final rows, 64 active Draft entries, and 256 packet-order watermarks are retained.
 - Lines view can show a Gemini translation beneath its source. Text view deliberately shows source text only and marks active Draft text inline.
 - Per-provider `.txt` export includes finalized source text only; it excludes Draft and translation text.

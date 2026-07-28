@@ -31,6 +31,7 @@ type TranscriptResult struct {
 	Role         TranscriptRole // Source transcript or translated output
 	LanguageCode string         // BCP-47 language code when provided
 	TurnID       string         // Provider-scoped turn identifier
+	SegmentID    string         // Stable identifier for interim revisions and their final result
 }
 
 // ASRProvider is the interface that all ASR providers must implement.

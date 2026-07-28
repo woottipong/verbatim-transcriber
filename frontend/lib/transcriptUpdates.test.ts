@@ -191,6 +191,21 @@ test('validates translation packets and separates their turn key', async () => {
     }), undefined);
 });
 
+test('keys STT revisions by provider segment and role', async () => {
+    const module = await import('./transcriptMessages.ts');
+    const interim = module.parseTranscriptMessage({
+        type: 'transcript',
+        text: 'ผู้ป่วยมีอาการ',
+        isFinal: false,
+        provider: 'google',
+        role: 'source',
+        segmentId: 'google-12',
+    });
+
+    assert.ok(interim);
+    assert.equal(module.getTranscriptKey(interim), 'google:google-12:source');
+});
+
 test('attaches translation to the latest source row in the same turn', async () => {
     const module = await import('./transcriptMessages.ts');
     const rows = [

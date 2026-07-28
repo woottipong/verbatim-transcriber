@@ -12,6 +12,7 @@ export interface TranscriptMessage {
     role: TranscriptRole;
     languageCode?: string;
     turnId?: string;
+    segmentId?: string;
 }
 
 export interface InterimTranscript {
@@ -21,6 +22,7 @@ export interface InterimTranscript {
     sourceIdentity: string;
     languageCode?: string;
     turnId?: string;
+    segmentId?: string;
     translation?: TranscriptTranslation;
 }
 
@@ -109,7 +111,8 @@ export function appendTranscriptIfNew(
             if (
                 segment.provider === next.provider &&
                 segment.role === next.role &&
-                segment.turnId === next.turnId
+                segment.turnId === next.turnId &&
+                segment.segmentId === next.segmentId
             ) {
                 turnIndex = index;
                 break;
@@ -137,7 +140,8 @@ export function appendTranscriptIfNew(
         previous.text === next.text &&
         previous.provider === next.provider &&
         previous.role === next.role &&
-        previous.turnId === next.turnId
+        previous.turnId === next.turnId &&
+        previous.segmentId === next.segmentId
     ) {
         return current;
     }
@@ -185,6 +189,7 @@ export function createCommittedTranscript(
         role: message.role,
         ...(message.languageCode ? { languageCode: message.languageCode } : {}),
         ...(message.turnId ? { turnId: message.turnId } : {}),
+        ...(message.segmentId ? { segmentId: message.segmentId } : {}),
     };
 }
 
@@ -206,6 +211,7 @@ export function parseTranscriptMessage(value: unknown): TranscriptMessage | unde
             ? 'translation'
             : undefined;
     const turnId = typeof candidate.turnId === 'string' ? candidate.turnId.trim() : undefined;
+    const segmentId = typeof candidate.segmentId === 'string' ? candidate.segmentId.trim() : undefined;
     if (!role || (role === 'translation' && !turnId)) return undefined;
 
     const text = candidate.text.replace(/\s+/g, ' ').trim();
@@ -223,12 +229,15 @@ export function parseTranscriptMessage(value: unknown): TranscriptMessage | unde
         ...(typeof candidate.provider === 'string' ? { provider: candidate.provider } : {}),
         ...(typeof candidate.languageCode === 'string' ? { languageCode: candidate.languageCode } : {}),
         ...(turnId ? { turnId } : {}),
+        ...(segmentId ? { segmentId } : {}),
     };
 }
 
 export function getTranscriptKey(message: TranscriptMessage): string {
     const provider = message.provider || 'unknown';
-    return message.turnId
+    return message.segmentId
+        ? `${provider}:${message.segmentId}:${message.role}`
+        : message.turnId
         ? `${provider}:${message.turnId}:${message.role}`
         : provider;
 }
@@ -323,6 +332,7 @@ export function createInterimTranscript(
         sourceIdentity,
         ...(message.languageCode ? { languageCode: message.languageCode } : {}),
         ...(message.turnId ? { turnId: message.turnId } : {}),
+        ...(message.segmentId ? { segmentId: message.segmentId } : {}),
     };
 }
 

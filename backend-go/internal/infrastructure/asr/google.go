@@ -95,6 +95,7 @@ type GoogleProvider struct {
 	languageCode    string
 	autoPunctuation bool
 	lastErr         error
+	segmentSequence uint64
 
 	// Auto-reconnect fields
 	streamStartTime time.Time     // เวลาที่เริ่ม stream ปัจจุบัน
@@ -167,6 +168,7 @@ func NewGoogleProvider(ctx context.Context, cfg GoogleConfig) (*GoogleProvider, 
 		languageCode:    langCode,
 		autoPunctuation: cfg.EnableAutoPunctuation,
 		audioBuf:        newRingBuffer(bufSize),
+		segmentSequence: 1,
 	}, nil
 }
 
@@ -317,28 +319,34 @@ func (g *GoogleProvider) receiveResponses() {
 			return
 		}
 
+		var interimOffset uint64
 		for _, result := range resp.Results {
 			if len(result.Alternatives) == 0 {
 				continue
 			}
 
 			alt := result.Alternatives[0]
+			segmentID := g.segmentIDForResult(result.IsFinal, interimOffset)
+			if !result.IsFinal {
+				interimOffset++
+			}
 			transcript := domain.TranscriptResult{
-				Text:       alt.Transcript,
-				IsFinal:    result.IsFinal,
-				Confidence: float64(alt.Confidence),
+				Text:         alt.Transcript,
+				IsFinal:      result.IsFinal,
+				Confidence:   float64(alt.Confidence),
+				LanguageCode: g.languageCode,
+				SegmentID:    segmentID,
 			}
 			if result.IsFinal {
 				log.Printf("📊 [Google] Utterance finalized (interim_updates=%d, model=%s, language=%s)", interimCount, g.model, g.languageCode)
 				interimCount = 0
 			} else {
 				interimCount++
-				log.Printf("🟡 [Google] INTERIM #%d (elapsed=%s, stability=%.2f, model=%s): %q",
+				log.Printf("🟡 [Google] Interim #%d (elapsed=%s, stability=%.2f, model=%s)",
 					interimCount,
 					time.Since(g.streamStartTime).Round(10*time.Millisecond),
 					result.GetStability(),
 					g.model,
-					alt.Transcript,
 				)
 			}
 
@@ -360,6 +368,23 @@ func (g *GoogleProvider) receiveResponses() {
 			}
 		}
 	}
+}
+
+func (g *GoogleProvider) segmentIDForResult(final bool, interimOffset uint64) string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.segmentSequence == 0 {
+		g.segmentSequence = 1
+	}
+	sequence := g.segmentSequence
+	if !final {
+		sequence += interimOffset
+	}
+	segmentID := fmt.Sprintf("google-%d", sequence)
+	if final {
+		g.segmentSequence++
+	}
+	return segmentID
 }
 
 func (g *GoogleProvider) finishWithError(err error) {

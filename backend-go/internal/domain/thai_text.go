@@ -67,6 +67,50 @@ func NormalizeTranscriptSpacing(text string) string {
 	return normalized.String()
 }
 
+// NormalizeProviderTranscriptSpacing applies provider-specific cleanup after
+// the shared whitespace normalization. Google Thai transcripts may contain
+// spaces between every recognized word; those Thai-to-Thai spaces are not
+// useful in standard Thai display text.
+func NormalizeProviderTranscriptSpacing(provider, languageCode, text string) string {
+	normalized := NormalizeTranscriptSpacing(text)
+	if !strings.EqualFold(strings.TrimSpace(provider), "google") || !isThaiLanguage(languageCode) {
+		return normalized
+	}
+	return removeSpacesBetweenThai(normalized)
+}
+
+func isThaiLanguage(languageCode string) bool {
+	language := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(languageCode), "_", "-"))
+	return language == "th" || strings.HasPrefix(language, "th-")
+}
+
+func removeSpacesBetweenThai(text string) string {
+	runes := []rune(text)
+	var normalized strings.Builder
+	normalized.Grow(len(text))
+
+	for index, current := range runes {
+		if current != ' ' {
+			normalized.WriteRune(current)
+			continue
+		}
+
+		var previous, next rune
+		if index > 0 {
+			previous = runes[index-1]
+		}
+		if index+1 < len(runes) {
+			next = runes[index+1]
+		}
+		if isThai(previous) && isThai(next) {
+			continue
+		}
+		normalized.WriteRune(current)
+	}
+
+	return normalized.String()
+}
+
 // NormalizeThaiSpacing is retained for callers using the original API name.
 func NormalizeThaiSpacing(text string) string {
 	return NormalizeTranscriptSpacing(text)

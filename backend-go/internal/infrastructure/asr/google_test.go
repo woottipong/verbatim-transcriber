@@ -79,6 +79,59 @@ func TestGoogleProviderDoesNotEmitWhenStopped(t *testing.T) {
 	}
 }
 
+func TestGoogleProviderKeepsSegmentAcrossInterimsAndAdvancesAfterFinal(t *testing.T) {
+	provider := &GoogleProvider{segmentSequence: 1}
+
+	if got, want := provider.segmentIDForResult(false, 0), "google-1"; got != want {
+		t.Fatalf("first interim segment = %q, want %q", got, want)
+	}
+	if got, want := provider.segmentIDForResult(false, 0), "google-1"; got != want {
+		t.Fatalf("revised interim segment = %q, want %q", got, want)
+	}
+	if got, want := provider.segmentIDForResult(true, 0), "google-1"; got != want {
+		t.Fatalf("final segment = %q, want %q", got, want)
+	}
+	if got, want := provider.segmentIDForResult(false, 0), "google-2"; got != want {
+		t.Fatalf("next interim segment = %q, want %q", got, want)
+	}
+}
+
+func TestGoogleProviderAssignsDistinctIDsToConsecutiveInterims(t *testing.T) {
+	provider := &GoogleProvider{segmentSequence: 1}
+
+	if got, want := provider.segmentIDForResult(false, 0), "google-1"; got != want {
+		t.Fatalf("first interim segment = %q, want %q", got, want)
+	}
+	if got, want := provider.segmentIDForResult(false, 1), "google-2"; got != want {
+		t.Fatalf("second interim segment = %q, want %q", got, want)
+	}
+
+	// A later response revises the same two unfinalized portions.
+	if got, want := provider.segmentIDForResult(false, 0), "google-1"; got != want {
+		t.Fatalf("revised first interim segment = %q, want %q", got, want)
+	}
+	if got, want := provider.segmentIDForResult(false, 1), "google-2"; got != want {
+		t.Fatalf("revised second interim segment = %q, want %q", got, want)
+	}
+}
+
+func TestGoogleProviderAdvancesPastFinalsBeforeInterims(t *testing.T) {
+	provider := &GoogleProvider{segmentSequence: 1}
+
+	if got, want := provider.segmentIDForResult(true, 0), "google-1"; got != want {
+		t.Fatalf("first final segment = %q, want %q", got, want)
+	}
+	if got, want := provider.segmentIDForResult(true, 0), "google-2"; got != want {
+		t.Fatalf("second final segment = %q, want %q", got, want)
+	}
+	if got, want := provider.segmentIDForResult(false, 0), "google-3"; got != want {
+		t.Fatalf("first remaining interim segment = %q, want %q", got, want)
+	}
+	if got, want := provider.segmentIDForResult(false, 1), "google-4"; got != want {
+		t.Fatalf("second remaining interim segment = %q, want %q", got, want)
+	}
+}
+
 func TestGoogleProviderStopClosesResultsBeforeStart(t *testing.T) {
 	provider := &GoogleProvider{results: make(chan domain.TranscriptResult)}
 
