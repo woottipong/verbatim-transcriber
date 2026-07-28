@@ -11,6 +11,10 @@ export function formatProviderName(provider: string): string {
     return providerLabels[provider as AgentProvider] || provider;
 }
 
+export function isAgentProvider(value: string): value is AgentProvider {
+    return ['google', 'gemini', 'azure', 'gpt-realtime-whisper'].includes(value);
+}
+
 export function hasSourceLanguageLabel(provider: string | undefined, languageCode: string | undefined): boolean {
     return Boolean(languageCode && (provider === 'gemini' || provider === 'gpt-realtime-whisper'));
 }
