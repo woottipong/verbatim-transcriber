@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"thai-transcriber-backend/internal/application/agentsupervisor"
 	"thai-transcriber-backend/internal/application/roomoperations"
 	"thai-transcriber-backend/internal/application/transcriptaccess"
 	"thai-transcriber-backend/internal/infrastructure/transcript"
@@ -62,6 +63,42 @@ func HandleCreateProviderTranscriptToken(
 	})
 }
 
+func HandleCreateCaptionToken(
+	c *fiber.Ctx,
+	access *transcriptaccess.Policy,
+	supervisor *agentsupervisor.Supervisor,
+) error {
+	grant, err := access.Issue(c.UserContext(), transcriptaccess.Scope{
+		Room: c.Params("room"), Provider: c.Params("provider"), Purpose: transcriptaccess.FeedCaption,
+	})
+	if err != nil {
+		return writeTranscriptAccessIssueError(c, err)
+	}
+	if !hasConnectedAgent(supervisor, grant.Scope.Room, grant.Scope.Provider) {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"code":  "provider_not_active",
+			"error": "Approved caption feeds require an active provider",
+		})
+	}
+	return c.JSON(models.TranscriptTokenResponse{
+		Token: grant.Token, ExpiresAt: grant.ExpiresAt.UTC().Format(time.RFC3339),
+		WebSocketURL: buildCaptionWebSocketURL(c, grant.Scope.Room, grant.Scope.Provider, grant.Token),
+		Provider:     grant.Scope.Provider,
+	})
+}
+
+func hasConnectedAgent(supervisor *agentsupervisor.Supervisor, room, provider string) bool {
+	if supervisor == nil {
+		return false
+	}
+	for _, status := range supervisor.Status() {
+		if status.Room == room && status.Provider == provider && status.Running && status.Connected {
+			return true
+		}
+	}
+	return false
+}
+
 func buildTranscriptWebSocketURL(c *fiber.Ctx, roomName, token string) string {
 	scheme := strings.ToLower(strings.TrimSpace(strings.Split(c.Get("X-Forwarded-Proto"), ",")[0]))
 	if scheme == "" {
@@ -91,6 +128,17 @@ func buildProviderTranscriptWebSocketURL(c *fiber.Ctx, roomName, provider, token
 		Host:   c.Get("Host"),
 		Path: "/ws/transcript/" + url.PathEscape(provider) +
 			"/" + url.PathEscape(roomName),
+	}
+	query := websocketURL.Query()
+	query.Set("token", token)
+	websocketURL.RawQuery = query.Encode()
+	return websocketURL.String()
+}
+
+func buildCaptionWebSocketURL(c *fiber.Ctx, roomName, provider, token string) string {
+	websocketURL := url.URL{
+		Scheme: websocketScheme(c), Host: c.Get("Host"),
+		Path: "/ws/caption/" + url.PathEscape(provider) + "/" + url.PathEscape(roomName),
 	}
 	query := websocketURL.Query()
 	query.Set("token", token)
@@ -137,6 +185,21 @@ func ProviderTranscriptWebSocketMiddleware(access *transcriptaccess.Policy) fibe
 			transcriptaccess.Scope{Room: roomName, Provider: c.Params("provider")},
 			c.Query("token"),
 		); err != nil {
+			return writeTranscriptAccessAuthorizationError(c, err)
+		}
+		if !websocket.IsWebSocketUpgrade(c) {
+			return fiber.ErrUpgradeRequired
+		}
+		return c.Next()
+	}
+}
+
+func CaptionWebSocketMiddleware(access *transcriptaccess.Policy) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		err := access.Authorize(c.UserContext(), transcriptaccess.Scope{
+			Room: c.Params("room"), Provider: c.Params("provider"), Purpose: transcriptaccess.FeedCaption,
+		}, c.Query("token"))
+		if err != nil {
 			return writeTranscriptAccessAuthorizationError(c, err)
 		}
 		if !websocket.IsWebSocketUpgrade(c) {
@@ -272,6 +335,54 @@ func HandleProviderTranscriptWebSocket(hub *transcript.Hub) func(*websocket.Conn
 			}
 		}()
 
+		ticker := time.NewTicker(pingEvery)
+		defer ticker.Stop()
+		for {
+			select {
+			case payload, ok := <-subscription.Events():
+				if !ok {
+					_ = conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "subscriber too slow"), time.Now().Add(writeWait))
+					return
+				}
+				if err := writeTranscriptMessage(conn, payload, writeWait); err != nil {
+					return
+				}
+			case <-subscription.Done():
+				return
+			case <-readerDone:
+				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeWait)); err != nil {
+					return
+				}
+			}
+		}
+	}
+}
+
+func HandleCaptionWebSocket(hub *transcript.Hub) func(*websocket.Conn) {
+	return func(conn *websocket.Conn) {
+		roomName, provider := conn.Params("room"), conn.Params("provider")
+		subscription := hub.SubscribeCaption(roomName, provider)
+		defer hub.UnsubscribeCaption(roomName, provider, subscription)
+		defer conn.Close()
+
+		const (
+			pongWait  = 60 * time.Second
+			pingEvery = 30 * time.Second
+			writeWait = 10 * time.Second
+		)
+		_ = conn.SetReadDeadline(time.Now().Add(pongWait))
+		conn.SetPongHandler(func(string) error { return conn.SetReadDeadline(time.Now().Add(pongWait)) })
+		readerDone := make(chan struct{})
+		go func() {
+			defer close(readerDone)
+			for {
+				if _, _, err := conn.ReadMessage(); err != nil {
+					return
+				}
+			}
+		}()
 		ticker := time.NewTicker(pingEvery)
 		defer ticker.Stop()
 		for {

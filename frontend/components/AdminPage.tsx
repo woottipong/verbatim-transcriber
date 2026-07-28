@@ -8,6 +8,7 @@ import {
     ExternalLink,
     Eye,
     LoaderCircle,
+    PencilLine,
     Plus,
     Radio,
     RefreshCw,
@@ -19,7 +20,7 @@ import {
 } from 'lucide-react';
 import ToastViewport from './ToastViewport';
 import type { ParticipantInfo, RunningAgent } from '../lib/api';
-import { buildStreamUrl, buildViewerUrl } from '../lib/appRoutes';
+import { buildCaptionDeskUrl, buildStreamUrl, buildViewerUrl } from '../lib/appRoutes';
 import {
     canRemoveParticipant,
     deriveAdminReadiness,
@@ -103,6 +104,8 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         isDeletingRoom,
         generatingTranscriptProviders,
         transcriptFeedErrors,
+        captionFeedErrors,
+        generatingCaptionProviders,
         refreshRooms,
         refreshAgentStatus,
         createRoom,
@@ -112,6 +115,8 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         deleteRoom: deleteRoomOperation,
         generateTranscriptLink,
         activeTranscriptLink: getActiveTranscriptLink,
+        generateCaptionLink,
+        activeCaptionLink,
     } = useControlRoomOperations({
         backendUrl,
         onRoomsError: handleRoomsError,
@@ -143,6 +148,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         return rooms.filter(room => room.name.toLowerCase().includes(query));
     }, [rooms, searchQuery]);
     const activeTranscriptLink = (provider: AgentProvider) => getActiveTranscriptLink(selectedRoomName, provider);
+    const activeApprovedLink = (provider: AgentProvider) => activeCaptionLink(selectedRoomName, provider);
     const readiness = deriveAdminReadiness(selectedRoom?.participants ?? [], selectedAgents.length);
 
     const rememberDialogTrigger = (trigger: HTMLElement) => {
@@ -210,7 +216,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         if (!selectedRoom) return;
         setNotice(null);
         try {
-            await startAgentOperation(selectedRoom.name, agentProvider);
+            await startAgentOperation(selectedRoom.name, agentProvider, 'live');
             showNotice({ tone: 'success', message: `${providerLabels[agentProvider]} is connecting to “${selectedRoom.name}”.` });
         } catch (err) {
             showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to start agent' });
@@ -282,6 +288,25 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
             return;
         }
         await copyText(response.websocketUrl, `${providerLabels[provider]} WebSocket link`);
+    };
+
+    const copyApprovedLink = async (provider: AgentProvider) => {
+        const response = activeApprovedLink(provider);
+        if (!response) {
+            showNotice({ tone: 'error', message: `Generate the ${providerLabels[provider]} approved caption link first.` });
+            return;
+        }
+        await copyText(response.websocketUrl, `${providerLabels[provider]} approved caption link`);
+    };
+
+    const getApprovedLink = async (provider: AgentProvider) => {
+        if (!selectedRoom) return;
+        try {
+            await generateCaptionLink(selectedRoom.name, provider);
+            showNotice({ tone: 'success', message: `${providerLabels[provider]} approved caption link is ready.` });
+        } catch (err) {
+            showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to generate approved caption link' });
+        }
     };
 
     const openLink = (url: string) => {
@@ -422,6 +447,15 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                         <div className="mt-2">
                                             <ShareRow icon={<Eye size={16} />} label="Transcript" description="Open the read-only live transcript" onOpen={() => openLink(viewerUrl)} onCopy={() => void copyText(viewerUrl, 'Transcript link')} />
                                         </div>
+                                        <div className="mt-2">
+                                            <ShareRow
+                                                icon={<PencilLine size={16} />}
+                                                label="Caption Desk"
+                                                description="Choose a room and provider to review captions"
+                                                onOpen={() => openLink(buildCaptionDeskUrl(appBaseUrl, '', ''))}
+                                                onCopy={() => void copyText(buildCaptionDeskUrl(appBaseUrl, '', ''), 'Caption Desk link')}
+                                            />
+                                        </div>
                                     </section>
 
                                     <section className="admin-section order-2" aria-labelledby="agent-control-heading">
@@ -452,20 +486,24 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                             {selectedAgents.length > 0 && (
                                                 <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-700/60 pt-3">
                                                     {selectedAgents.map(agent => (
-                                                        <button
-                                                            key={agent.key}
-                                                            onClick={() => void stopAgent(agent)}
-                                                            disabled={stoppingAgentKey === agent.key}
-                                                            className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-full border border-slate-700 bg-slate-900/40 px-3 text-sm font-medium text-slate-200 transition-colors hover:border-red-400/35 hover:bg-slate-800 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
-                                                            aria-label={`Stop ${providerLabels[agent.provider as AgentProvider] || agent.provider}`}
-                                                            title={`Stop ${providerLabels[agent.provider as AgentProvider] || agent.provider}`}
-                                                        >
-                                                            <span className="status-dot status-dot--live" aria-hidden="true" />
-                                                            <span className="truncate">{providerLabels[agent.provider as AgentProvider] || agent.provider}</span>
-                                                            {stoppingAgentKey === agent.key
-                                                                ? <LoaderCircle size={14} className="shrink-0 animate-spin" aria-hidden="true" />
-                                                                : <X size={14} className="shrink-0 text-slate-500" aria-hidden="true" />}
-                                                        </button>
+                                                        <div key={agent.key} className="inline-flex min-h-11 max-w-full items-center overflow-hidden rounded-full border border-slate-700 bg-slate-900/40 text-sm font-medium text-slate-200">
+                                                            <span className="flex min-w-0 items-center gap-2 px-3">
+                                                                <span className="status-dot status-dot--live" aria-hidden="true" />
+                                                                <span className="truncate">{providerLabels[agent.provider as AgentProvider] || agent.provider}</span>
+                                                                <span className="text-xs text-slate-400">{agent.mode === 'moderated' ? 'Moderated' : 'Live'}</span>
+                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => void stopAgent(agent)}
+                                                                disabled={stoppingAgentKey === agent.key}
+                                                                className="flex min-h-11 items-center border-l border-slate-700 px-3 hover:bg-slate-800 hover:text-red-200 disabled:opacity-50"
+                                                                aria-label={`Stop ${providerLabels[agent.provider as AgentProvider] || agent.provider}`}
+                                                            >
+                                                                {stoppingAgentKey === agent.key
+                                                                    ? <LoaderCircle size={14} className="animate-spin" />
+                                                                    : <X size={14} />}
+                                                            </button>
+                                                        </div>
                                                     ))}
                                                 </div>
                                             )}
@@ -490,7 +528,13 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                             </div>
                                         ) : runningTranscriptProviders.map(provider => {
                                             const link = activeTranscriptLink(provider);
+                                            const approvedLink = activeApprovedLink(provider);
                                             const isGenerating = generatingTranscriptProviders.has(provider);
+                                            const isGeneratingApproved = generatingCaptionProviders.has(provider);
+                                            const isModerated = selectedAgents.some(agent => agent.provider === provider && agent.mode === 'moderated');
+                                            const approvedError = captionFeedErrors[provider]?.roomName === selectedRoomName
+                                                ? captionFeedErrors[provider]?.message
+                                                : null;
                                             const error = transcriptFeedErrors[provider]?.roomName === selectedRoomName
                                                 ? transcriptFeedErrors[provider]?.message
                                                 : null;
@@ -529,6 +573,31 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                                         <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs leading-5">
                                                             <span className="text-emerald-200">Ready · expires {formatExpiry(link.expiresAt)}</span>
                                                             <span className="text-slate-500">New links do not revoke existing links.</span>
+                                                        </div>
+                                                    )}
+                                                    {isModerated && (
+                                                        <div className="mt-3 border-t border-slate-700/60 pt-3">
+                                                            <div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+                                                                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Approved captions</p>
+                                                                {approvedLink && (
+                                                                    <div className="min-w-0 rounded-md border border-slate-700 bg-slate-950/45 px-3 py-2">
+                                                                        <code className="block truncate text-xs text-slate-300">{maskTranscriptWebSocketUrl(approvedLink.websocketUrl)}</code>
+                                                                    </div>
+                                                                )}
+                                                                <div className="flex gap-2">
+                                                                    <button onClick={() => void getApprovedLink(provider)} disabled={isGeneratingApproved} className="control-button control-button--inline">
+                                                                        {isGeneratingApproved ? <LoaderCircle size={15} className="animate-spin" /> : <RefreshCw size={15} />}
+                                                                        {approvedError ? 'Retry' : approvedLink ? 'Generate new' : 'Generate link'}
+                                                                    </button>
+                                                                    <button onClick={() => void copyApprovedLink(provider)} disabled={!approvedLink || isGeneratingApproved || Boolean(approvedError)} className="control-button control-button--inline control-button--inline-accent">
+                                                                        <Copy size={15} /> Copy URL
+                                                                    </button>
+                                                                </div>
+                                                            </div>
+                                                            {approvedLink && !approvedError && (
+                                                                <p className="mt-2 text-xs text-emerald-200">Ready · expires {formatExpiry(approvedLink.expiresAt)}</p>
+                                                            )}
+                                                            {approvedError && <p className="mt-2 text-xs text-red-200" role="alert">{approvedError}</p>}
                                                         </div>
                                                     )}
                                                     {error && (

@@ -18,9 +18,17 @@ var (
 	ErrInvalidProvider = errors.New("invalid transcript provider")
 )
 
+type FeedPurpose string
+
+const (
+	FeedTranscript FeedPurpose = "transcript"
+	FeedCaption    FeedPurpose = "caption"
+)
+
 type Scope struct {
 	Room     string
 	Provider string
+	Purpose  FeedPurpose
 }
 
 type Grant struct {
@@ -35,8 +43,8 @@ type RoomFinder interface {
 
 type TokenCodec interface {
 	Ready() error
-	IssueScoped(room, provider, roomSID string, generation uint64) (string, time.Time, error)
-	VerifyScoped(rawToken, room, provider, roomSID string, generation uint64) error
+	IssueScoped(room, provider, purpose, roomSID string, generation uint64) (string, time.Time, error)
+	VerifyScoped(rawToken, room, provider, purpose, roomSID string, generation uint64) error
 }
 
 type GenerationSource interface {
@@ -71,6 +79,7 @@ func (p *Policy) Issue(ctx context.Context, requested Scope) (Grant, error) {
 	token, expiresAt, err := p.tokens.IssueScoped(
 		scope.Room,
 		scope.Provider,
+		string(scope.Purpose),
 		room.SID,
 		p.generations.Generation(scope.Room),
 	)
@@ -96,6 +105,7 @@ func (p *Policy) Authorize(ctx context.Context, requested Scope, rawToken string
 		rawToken,
 		scope.Room,
 		scope.Provider,
+		string(scope.Purpose),
 		room.SID,
 		p.generations.Generation(scope.Room),
 	)
@@ -107,6 +117,15 @@ func normalizeScope(scope Scope) (Scope, error) {
 		return Scope{}, ErrInvalidRoom
 	}
 	scope.Provider = strings.ToLower(strings.TrimSpace(scope.Provider))
+	if scope.Purpose == "" {
+		scope.Purpose = FeedTranscript
+	}
+	if scope.Purpose != FeedTranscript && scope.Purpose != FeedCaption {
+		return Scope{}, ErrInvalidProvider
+	}
+	if scope.Purpose == FeedCaption && scope.Provider == "" {
+		return Scope{}, ErrInvalidProvider
+	}
 	if scope.Provider == "" {
 		return scope, nil
 	}

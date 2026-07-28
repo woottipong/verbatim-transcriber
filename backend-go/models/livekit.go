@@ -29,6 +29,14 @@ type TokenResponse struct {
 	WsURL string `json:"wsUrl"`
 }
 
+type CaptionDeskTokenResponse struct {
+	Token    string `json:"token"`
+	WsURL    string `json:"wsUrl"`
+	Identity string `json:"identity"`
+	Room     string `json:"room"`
+	Provider string `json:"provider"`
+}
+
 // RoomInfo represents LiveKit room information.
 type RoomInfo struct {
 	Name            string            `json:"name"`

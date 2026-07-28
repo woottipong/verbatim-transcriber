@@ -26,6 +26,7 @@ export interface RunningAgent {
     running: boolean;
     provider: string;
     room: string;
+    mode?: 'live' | 'moderated';
 }
 
 export interface AgentStatus {
@@ -37,6 +38,14 @@ export interface TranscriptTokenResponse {
     token: string;
     expiresAt: string;
     websocketUrl: string;
+    provider: AgentProvider;
+}
+
+export interface CaptionDeskTokenResponse {
+    token: string;
+    wsUrl: string;
+    identity: string;
+    room: string;
     provider: AgentProvider;
 }
 
@@ -126,13 +135,38 @@ export async function startRoomAgent(
     backendUrl: string,
     roomName: string,
     provider: AgentProvider,
+    mode: 'live' | 'moderated' = 'live',
 ): Promise<void> {
     const response = await fetch(`${toHttpUrl(backendUrl)}/livekit/agent/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
-        body: JSON.stringify({ roomName, provider }),
+        body: JSON.stringify({ roomName, provider, mode }),
     });
     await parseApiResponse(response, 'Failed to start agent');
+}
+
+export async function createCaptionDeskToken(
+    backendUrl: string,
+    roomName: string,
+    provider: AgentProvider,
+): Promise<CaptionDeskTokenResponse> {
+    const response = await fetch(
+        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/caption-token/${encodeURIComponent(provider)}`,
+        { method: 'POST', headers: getControlAuthHeaders() },
+    );
+    return parseApiResponse<CaptionDeskTokenResponse>(response, 'Failed to open Caption Desk');
+}
+
+export async function createApprovedCaptionToken(
+    backendUrl: string,
+    roomName: string,
+    provider: AgentProvider,
+): Promise<TranscriptTokenResponse> {
+    const response = await fetch(
+        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/caption-token/${encodeURIComponent(provider)}/ws`,
+        { method: 'POST', headers: getControlAuthHeaders() },
+    );
+    return parseApiResponse<TranscriptTokenResponse>(response, 'Failed to generate approved caption link');
 }
 
 export async function stopRoomAgent(

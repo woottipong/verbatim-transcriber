@@ -197,8 +197,10 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     const handleDataReceived = useCallback((
         payload: Uint8Array,
         participant?: RemoteParticipant,
-        _kind?: DataPacket_Kind
+        _kind?: DataPacket_Kind,
+        topic?: string,
     ) => {
+        if (topic && topic !== 'caption.public') return;
         const agentIdentity = participant?.identity || 'unknown';
         transcriptSession.ingest(payload, agentIdentity, {
             resolveProvider: getProviderFromIdentity,

@@ -75,7 +75,8 @@ flowchart TB
 | --- | --- | --- |
 | `application/roomoperations` | Room lookup, creation, participant inspection, timeout policy, LiveKit error semantics | LiveKit SDK types or HTTP status codes |
 | `application/agentsupervisor` | One agent per room/provider, asynchronous lifecycle, stale-instance protection, room cleanup, shutdown | Provider credentials or Fiber requests |
-| `application/transcriptaccess` | Feed scope validation and grants bound to room name, Room SID, generation, and provider | JWT implementation or WebSocket transport |
+| `application/captionmoderation` | Bounded pending segments, ordered publish validation, idempotent requests, rollback | LiveKit or HTTP transport |
+| `application/transcriptaccess` | Feed scope validation and grants bound to room, Room SID, generation, provider, and feed purpose | JWT implementation or WebSocket transport |
 | `delivery` | Request parsing, control authentication, routes, response/error mapping, WebSocket upgrade | Agent state maps or access-policy decisions |
 | `infrastructure/livekitroom` | Translation between LiveKit RoomService and Room Operations records/errors | Room policy |
 | `infrastructure/agent` | LiveKit subscription, Opus decode, PCM routing, provider lifecycle, transcript publishing | HTTP lifecycle management |
@@ -113,8 +114,9 @@ Browser WebRTC audio
   → 40 ms PCM batching and provider-rate resampling
   → Google / Gemini / Azure / GPT Realtime Whisper
   → Thai spacing normalization at the agent output boundary
-  ├── reliable LiveKit data packet → Audio Source / Transcript UI
-  └── bounded transcript hub → signed external WebSocket feed
+  ├── raw transcript data packet → Audio Source / Transcript UI
+  └── optional targeted Caption Desk Draft/final queue → approved `caption.public`
+      └── bounded caption hub → signed plain-text approved WebSocket
 ```
 
 The backend never accepts browser audio through its public WebSocket endpoints.
@@ -125,8 +127,9 @@ The `Transcript Feed Access Policy` is the single module used by both token-gene
 
 1. Validate the room and optional provider scope.
 2. Confirm that the LiveKit room exists and read its Room SID.
-3. Issue or verify a signed grant against the current transcript generation.
-4. Reject a grant when its room, Room SID, provider, generation, signature, or expiry differs.
+3. Bind the grant to `transcript` or `caption` purpose.
+4. Issue or verify it against the current transcript generation.
+5. Reject a grant when its room, Room SID, provider, purpose, generation, signature, or expiry differs.
 
 Provider-specific and room-wide WebSocket endpoints remain separate because their payload contracts differ, but they share the same authorization policy and token codec.
 
@@ -228,6 +231,9 @@ public frontend build.
 | `GET` | `/livekit/rooms/:room/transcripts/ws?token=...` | Read-only transcript WebSocket |
 | `POST` | `/livekit/rooms/:room/transcript-token/:provider` | Issue a 24-hour room/provider-bound WebSocket URL |
 | `GET` | `/ws/transcript/:provider/:room?token=...` | Read-only lean provider transcript WebSocket |
+| `POST` | `/livekit/rooms/:room/caption-token/:provider` | Issue a LiveKit token for a Caption Desk operator attached to an active provider |
+| `POST` | `/livekit/rooms/:room/caption-token/:provider/ws` | Issue a purpose-bound approved-caption WebSocket URL |
+| `GET` | `/ws/caption/:provider/:room?token=...` | Approved captions as one plain UTF-8 text frame per publication |
 | `GET` | `/livekit/rooms/:name` | Room participants |
 | `DELETE` | `/livekit/rooms/:name` | Delete room |
 | `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove participant |
@@ -248,6 +254,8 @@ There are no public `/google`, `/azure`, or `/gemini` audio WebSocket routes.
 `POST /livekit/token` returns `404` with code `room_not_found` when the requested room has not been provisioned. `GET /livekit/rooms/:name` also returns `404` for a missing room rather than representing it as an empty participant list.
 
 Provider transcript WebSockets are text-frame feeds and are separate from the upstream Azure provider WebSocket. They authenticate with a signed HS256 JWT containing the room, provider, current LiveKit room SID, generation, issuer and subject `transcript:subscribe`, and an expiry 24 hours from issuance. Deleting a room invalidates active subscribers and prevents an old link from attaching to a recreated room with the same name. Provider feeds have no history/replay, ready event, audio input, or commands.
+
+Approved caption sockets use the same expiry and room-generation invalidation but a distinct signed `caption` purpose. They send only approved source text, with no JSON, Draft, ready event, replay, audio, or commands. Caption moderation state is in memory; agent restart clears pending segments and processed request history.
 
 ```json
 {"text":"ผู้ป่วยมีอาการ","isFinal":false}

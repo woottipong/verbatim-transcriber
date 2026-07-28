@@ -13,6 +13,7 @@ export interface TranscriptMessage {
     languageCode?: string;
     turnId?: string;
     segmentId?: string;
+    publicationId?: string;
 }
 
 export interface InterimTranscript {
@@ -212,6 +213,7 @@ export function parseTranscriptMessage(value: unknown): TranscriptMessage | unde
             : undefined;
     const turnId = typeof candidate.turnId === 'string' ? candidate.turnId.trim() : undefined;
     const segmentId = typeof candidate.segmentId === 'string' ? candidate.segmentId.trim() : undefined;
+    const publicationId = typeof candidate.publicationId === 'string' ? candidate.publicationId.trim() : undefined;
     if (!role || (role === 'translation' && !turnId)) return undefined;
 
     const text = candidate.text.replace(/\s+/g, ' ').trim();
@@ -230,6 +232,7 @@ export function parseTranscriptMessage(value: unknown): TranscriptMessage | unde
         ...(typeof candidate.languageCode === 'string' ? { languageCode: candidate.languageCode } : {}),
         ...(turnId ? { turnId } : {}),
         ...(segmentId ? { segmentId } : {}),
+        ...(publicationId ? { publicationId } : {}),
     };
 }
 

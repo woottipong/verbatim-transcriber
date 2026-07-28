@@ -8,6 +8,8 @@ import (
 	"log"
 	"sort"
 	"sync"
+
+	"thai-transcriber-backend/internal/application/captionmoderation"
 )
 
 var (
@@ -23,21 +25,24 @@ type Agent interface {
 	IsRunning() bool
 }
 
-// Factory creates an agent for one provider.
-type Factory func(provider string) Agent
+// Factory creates an agent for one provider and delivery mode.
+type Factory func(provider string, mode captionmoderation.Mode) Agent
 
 // Status describes a supervised room/provider agent.
 type Status struct {
-	Key      string
-	Room     string
-	Provider string
-	Running  bool
+	Key       string
+	Room      string
+	Provider  string
+	Mode      captionmoderation.Mode
+	Running   bool
+	Connected bool
 }
 
 type entry struct {
 	key       string
 	room      string
 	provider  string
+	mode      captionmoderation.Mode
 	agent     Agent
 	cancel    context.CancelFunc
 	startDone chan struct{}
@@ -63,8 +68,12 @@ func New(factory Factory) *Supervisor {
 }
 
 // Start reserves the room/provider pair and starts its agent asynchronously.
-func (s *Supervisor) Start(parent context.Context, room, provider string) error {
+func (s *Supervisor) Start(parent context.Context, room, provider string, requestedMode ...captionmoderation.Mode) error {
 	key := agentKey(room, provider)
+	mode := captionmoderation.ModeLive
+	if len(requestedMode) > 0 {
+		mode = requestedMode[0]
+	}
 
 	s.mu.Lock()
 	if s.closed {
@@ -79,7 +88,7 @@ func (s *Supervisor) Start(parent context.Context, room, provider string) error 
 		delete(s.agents, key)
 	}
 
-	agent := s.factory(provider)
+	agent := s.factory(provider, mode)
 	if agent == nil {
 		s.mu.Unlock()
 		return errors.New("agent factory returned nil")
@@ -89,6 +98,7 @@ func (s *Supervisor) Start(parent context.Context, room, provider string) error 
 		key:       key,
 		room:      room,
 		provider:  provider,
+		mode:      mode,
 		agent:     agent,
 		cancel:    cancel,
 		startDone: make(chan struct{}),
@@ -138,10 +148,12 @@ func (s *Supervisor) Status() []Status {
 			continue
 		}
 		status = append(status, Status{
-			Key:      current.key,
-			Room:     current.room,
-			Provider: current.provider,
-			Running:  true,
+			Key:       current.key,
+			Room:      current.room,
+			Provider:  current.provider,
+			Mode:      current.mode,
+			Running:   true,
+			Connected: current.connected && current.agent.IsRunning(),
 		})
 	}
 	s.mu.Unlock()

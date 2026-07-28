@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"regexp"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"thai-transcriber-backend/models"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"github.com/livekit/protocol/auth"
 )
 
@@ -89,6 +91,70 @@ func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config, rooms *roomoperations.
 	}
 
 	return c.JSON(models.TokenResponse{Token: token, WsURL: cfg.LiveKitURL})
+}
+
+func HandleCaptionDeskToken(
+	c *fiber.Ctx,
+	cfg *config.Config,
+	rooms *roomoperations.Operations,
+	supervisor *agentsupervisor.Supervisor,
+) error {
+	roomName := c.Params("room")
+	if err := validateRoomName(roomName); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	provider, err := validateAgentProvider(cfg, c.Params("provider"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	if _, err := rooms.Find(c.UserContext(), roomName); err != nil {
+		if errors.Is(err, roomoperations.ErrRoomNotFound) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"code": "room_not_found", "error": "Room does not exist or is no longer available",
+			})
+		}
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "Failed to verify room availability"})
+	}
+
+	if !hasConnectedAgent(supervisor, roomName, provider) {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"code":  "provider_not_active",
+			"error": "The provider is not active in this room",
+		})
+	}
+
+	identity := "caption-operator-" + uuid.NewString()
+	canPublish := false
+	canSubscribe := true
+	canPublishData := true
+	grant := &auth.VideoGrant{
+		RoomJoin:       true,
+		Room:           roomName,
+		CanPublish:     &canPublish,
+		CanSubscribe:   &canSubscribe,
+		CanPublishData: &canPublishData,
+	}
+	metadata, err := json.Marshal(captionOperatorMetadata{Role: "caption-operator", Provider: provider})
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create operator metadata"})
+	}
+	token, err := auth.NewAccessToken(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret).
+		SetVideoGrant(grant).
+		SetIdentity(identity).
+		SetMetadata(string(metadata)).
+		SetValidFor(time.Duration(cfg.LiveKitConfig.TokenExpiry) * time.Second).
+		ToJWT()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create Caption Desk token"})
+	}
+	return c.JSON(models.CaptionDeskTokenResponse{
+		Token: token, WsURL: cfg.LiveKitURL, Identity: identity, Room: roomName, Provider: provider,
+	})
+}
+
+type captionOperatorMetadata struct {
+	Role     string `json:"role"`
+	Provider string `json:"provider"`
 }
 
 // HandleCreateRoom creates an empty room. Starting an agent remains a separate

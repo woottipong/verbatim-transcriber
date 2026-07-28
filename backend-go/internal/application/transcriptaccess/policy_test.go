@@ -68,6 +68,7 @@ func (f fakeGenerations) Generation(string) uint64 {
 type fakeCodec struct {
 	readyErr   error
 	provider   string
+	purpose    string
 	roomSID    string
 	generation uint64
 }
@@ -76,8 +77,9 @@ func (f *fakeCodec) Ready() error {
 	return f.readyErr
 }
 
-func (f *fakeCodec) IssueScoped(room, provider, roomSID string, generation uint64) (string, time.Time, error) {
+func (f *fakeCodec) IssueScoped(room, provider, purpose, roomSID string, generation uint64) (string, time.Time, error) {
 	f.provider = provider
+	f.purpose = purpose
 	f.roomSID = roomSID
 	f.generation = generation
 	return "token", time.Now().Add(time.Hour), nil
@@ -96,8 +98,9 @@ func TestPolicyChecksCodecReadinessBeforeRoomLookup(t *testing.T) {
 	}
 }
 
-func (f *fakeCodec) VerifyScoped(_ string, _, provider, roomSID string, generation uint64) error {
+func (f *fakeCodec) VerifyScoped(_ string, _, provider, purpose, roomSID string, generation uint64) error {
 	f.provider = provider
+	f.purpose = purpose
 	f.roomSID = roomSID
 	f.generation = generation
 	return nil

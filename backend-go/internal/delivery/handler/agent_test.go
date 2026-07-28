@@ -10,6 +10,7 @@ import (
 
 	"thai-transcriber-backend/config"
 	"thai-transcriber-backend/internal/application/agentsupervisor"
+	"thai-transcriber-backend/internal/application/captionmoderation"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -63,7 +64,7 @@ func TestAgentHandlersPreserveAsyncLifecycleContract(t *testing.T) {
 		GoogleApplicationCredentials: "credentials.json",
 	}
 	created := make(chan *handlerFakeAgent, 1)
-	supervisor := agentsupervisor.New(func(string) agentsupervisor.Agent {
+	supervisor := agentsupervisor.New(func(string, captionmoderation.Mode) agentsupervisor.Agent {
 		agent := newHandlerFakeAgent()
 		created <- agent
 		return agent
@@ -88,6 +89,29 @@ func TestAgentHandlersPreserveAsyncLifecycleContract(t *testing.T) {
 	assertAgentRequestStatus(t, app, http.MethodPost, "/stop", `{"roomName":"room-a","provider":"google"}`, http.StatusOK)
 	agent.waitFinished(t)
 	assertAgentRequestStatus(t, app, http.MethodPost, "/stop", `{"roomName":"room-a","provider":"google"}`, http.StatusNotFound)
+}
+
+func TestHandleAgentStartRejectsInvalidMode(t *testing.T) {
+	cfg := &config.Config{
+		GoogleCloudProject:           "project",
+		GoogleApplicationCredentials: "credentials.json",
+	}
+	supervisor := agentsupervisor.New(func(string, captionmoderation.Mode) agentsupervisor.Agent {
+		return newHandlerFakeAgent()
+	})
+	app := fiber.New()
+	app.Post("/start", func(c *fiber.Ctx) error {
+		return HandleAgentStart(c, cfg, supervisor)
+	})
+
+	assertAgentRequestStatus(
+		t,
+		app,
+		http.MethodPost,
+		"/start",
+		`{"roomName":"room-a","provider":"google","mode":"automatic"}`,
+		http.StatusBadRequest,
+	)
 }
 
 type handlerFakeAgent struct {

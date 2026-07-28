@@ -49,6 +49,23 @@ Audio source changes are allowed only while disconnected. Selecting Chrome Tab o
 3. It tracks connected agents and derives provider names from packets/identities.
 4. It can filter transcript rows by provider.
 
+## Moderated caption flow
+
+```text
+ASR source Draft/final
+  → active room/provider agent
+  ├── raw transcript continues to normal viewers and feeds
+  └── targeted `caption.operator` packet
+      → Caption Desk queues finals by default or selects latest-only Interim review
+      → reliable `caption.publish` command
+      → agent validates ordered source IDs and request idempotency
+      → a published Draft consumes its segment and suppresses the later final
+      ├── reliable `caption.public` → Transcript viewers
+      └── plain UTF-8 frame → `/ws/caption/:provider/:room`
+```
+
+Only one primary Caption Desk operator owns a room/provider queue. Unapproved text remains in the operator queue and is never auto-published to the approved-caption channel; the provider's raw transcript remains available normally. Gemini translation continues through the existing live path and is not editable in version 1.
+
 ## HTTP routes
 
 | Method | Path | Purpose |
@@ -60,6 +77,9 @@ Audio source changes are allowed only while disconnected. Selecting Chrome Tab o
 | `GET` | `/livekit/rooms/:room/transcripts/ws?token=...` | Read-only source transcript stream |
 | `POST` | `/livekit/rooms/:room/transcript-token/:provider` | Signed room/provider-bound transcript URL |
 | `GET` | `/ws/transcript/:provider/:room?token=...` | Lean provider source transcript stream |
+| `POST` | `/livekit/rooms/:room/caption-token/:provider` | Dedicated Caption Desk participant token |
+| `POST` | `/livekit/rooms/:room/caption-token/:provider/ws` | Signed approved-caption URL |
+| `GET` | `/ws/caption/:provider/:room?token=...` | Approved source text only |
 | `GET` / `DELETE` | `/livekit/rooms/:name` | Inspect/delete room |
 | `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove participant |
 | `POST` | `/livekit/agent/start` | Start provider agent |
@@ -73,6 +93,8 @@ The provider-specific socket sends one full provider-derived source snapshot per
 ```
 
 Clients replace the current Draft for interim frames and commit then clear it for final frames. Gemini translation stays on the LiveKit data channel. The provider socket has no ready event or replay; the legacy room-wide socket retains its versioned event contract.
+
+The approved-caption socket is separate and emits exactly one plain UTF-8 frame per accepted publication. It has no JSON envelope, Drafts, ready event, replay, or application commands. Signed grants include a feed purpose so raw and approved URLs cannot cross-authorize.
 
 ## Transcript packet
 

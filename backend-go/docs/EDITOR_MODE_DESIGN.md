@@ -1,6 +1,6 @@
 # Editor Mode Design: Transcript Review Before Broadcast
 
-> Status: design proposal, not implemented in the current LiveKit transcription flow. Validate this document against current packet/state helpers before implementation.
+> Status: historical design proposal. Moderated Caption Desk is now implemented; use `LIVEKIT_FLOW.md` and the code contracts as the current source of truth.
 
 **Status**: Design Phase (Not Implemented)
 **Updated**: February 7, 2026

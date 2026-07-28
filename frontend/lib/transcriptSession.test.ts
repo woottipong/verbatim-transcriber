@@ -70,6 +70,17 @@ test('ignores a delayed lossy interim after a reliable final', () => {
     assert.equal(snapshot.interimTranscripts.size, 0);
 });
 
+test('deduplicates approved publications while keeping legacy live packets', () => {
+    const { session } = createSession();
+    const approved = payload({
+        text: 'ตรวจแล้ว', isFinal: true, provider: 'google', publicationId: 'publication-1',
+    });
+    session.ingest(approved, 'agent-google');
+    session.ingest(approved, 'agent-google');
+    session.ingest(payload({ text: 'สดเดิม', isFinal: true, provider: 'google' }), 'agent-google');
+    assert.deepEqual(session.getSnapshot().transcripts.map(item => item.text), ['ตรวจแล้ว', 'สดเดิม']);
+});
+
 test('ignores a delayed Gemini translation draft after its final translation', () => {
     const { session } = createSession();
 

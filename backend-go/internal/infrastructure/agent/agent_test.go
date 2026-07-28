@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"thai-transcriber-backend/config"
+	"thai-transcriber-backend/internal/application/captionmoderation"
 	"thai-transcriber-backend/internal/domain"
 )
 
@@ -17,6 +19,251 @@ type lifecycleProvider struct {
 	err       error
 	stopCalls int
 	results   chan domain.TranscriptResult
+}
+
+type publishedData struct {
+	payload      []byte
+	topic        string
+	reliable     bool
+	destinations []string
+}
+
+type collectingTranscriptSink struct {
+	messages []TranscriptMessage
+}
+
+func (s *collectingTranscriptSink) Publish(_ string, message TranscriptMessage) {
+	s.messages = append(s.messages, message)
+}
+
+func TestLiveModeStillBroadcastsProviderTranscript(t *testing.T) {
+	sink := &collectingTranscriptSink{}
+	var packets []publishedData
+	agent := &Agent{
+		mode:              captionmoderation.ModeLive,
+		moderator:         captionmoderation.New("google", captionmoderation.ModeModerated, time.Now),
+		preferredProvider: "google",
+		transcriptSink:    sink,
+		dataPublisher: func(payload []byte, topic string, reliable bool, destinations []string) error {
+			packets = append(packets, publishedData{
+				payload: append([]byte(nil), payload...), topic: topic, reliable: reliable,
+				destinations: append([]string(nil), destinations...),
+			})
+			return nil
+		},
+	}
+
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ข้อความสด", IsFinal: true, Provider: "google",
+		Role: domain.TranscriptRoleSource,
+	})
+
+	if len(packets) != 1 || packets[0].topic != "" || !packets[0].reliable || len(packets[0].destinations) != 0 {
+		t.Fatalf("live packets = %#v", packets)
+	}
+	if len(sink.messages) != 1 || sink.messages[0].Text != "ข้อความสด" {
+		t.Fatalf("raw sink messages = %#v", sink.messages)
+	}
+}
+
+func TestActiveProviderTargetsDraftToOperatorAndKeepsRawLive(t *testing.T) {
+	var packets []publishedData
+	agent := newModeratedTestAgent("google", &packets)
+	agent.captionOperatorID = "caption-operator-1"
+
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ผู้ป่วย", Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+
+	if len(packets) != 2 {
+		t.Fatalf("packets = %#v, want raw live and operator Draft", packets)
+	}
+	if packets[0].topic != "" || packets[1].topic != CaptionOperatorTopic || packets[1].reliable {
+		t.Fatalf("packets = %#v", packets)
+	}
+	if got, want := packets[1].destinations, []string{"caption-operator-1"}; !equalStringSlices(got, want) {
+		t.Fatalf("destinations = %v, want %v", got, want)
+	}
+}
+
+func TestModerationFallbackKeepsDraftAndFinalOnSameSegment(t *testing.T) {
+	agent := New(&config.Config{}, "azure", captionmoderation.ModeLive)
+	draftID := agent.moderationSegmentID(TranscriptMessage{
+		Provider: "azure", Text: "กำลังถอด",
+	}, 10)
+	revisedID := agent.moderationSegmentID(TranscriptMessage{
+		Provider: "azure", Text: "กำลังถอดข้อความ",
+	}, 11)
+	finalID := agent.moderationSegmentID(TranscriptMessage{
+		Provider: "azure", Text: "ถอดเสร็จ", IsFinal: true,
+	}, 12)
+	nextDraftID := agent.moderationSegmentID(TranscriptMessage{
+		Provider: "azure", Text: "ข้อความใหม่",
+	}, 13)
+
+	if draftID != revisedID || finalID != draftID {
+		t.Fatalf("segment IDs = draft %q, revised %q, final %q", draftID, revisedID, finalID)
+	}
+	if nextDraftID == draftID {
+		t.Fatalf("next draft reused consumed segment ID %q", nextDraftID)
+	}
+}
+
+func TestActiveProviderSendsRawFinalAndQueuesOperatorPending(t *testing.T) {
+	var packets []publishedData
+	agent := newModeratedTestAgent("google", &packets)
+	agent.captionOperatorID = "caption-operator-1"
+
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ผู้ป่วยมีอาการ", IsFinal: true, Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+
+	if len(packets) != 2 || packets[0].topic != "" ||
+		packets[1].topic != CaptionOperatorTopic || !packets[1].reliable {
+		t.Fatalf("packets = %#v, want raw final and reliable operator pending", packets)
+	}
+	if snapshot := agent.moderator.Snapshot(); len(snapshot.Pending) != 1 {
+		t.Fatalf("moderator snapshot = %#v", snapshot)
+	}
+}
+
+func TestModeratedPublishBroadcastsExactlyOnceAndAcknowledgesOperator(t *testing.T) {
+	var packets []publishedData
+	agent := newModeratedTestAgent("google", &packets)
+	agent.captionOperatorID = "caption-operator-1"
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ผู้ป่วยมีอาการ", IsFinal: true, Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+	packets = nil
+
+	command := captionCommandEnvelope{
+		Type: captionPublishType, RequestID: "publish-1", Provider: "google",
+		SourceSegmentIDs: []string{"google-1"}, Text: "ผู้ป่วยมีอาการเจ็บหน้าอก",
+	}
+	agent.publishCaptionCommand("caption-operator-1", command)
+	agent.publishCaptionCommand("caption-operator-1", command)
+
+	var publicCount, ackCount int
+	for _, packet := range packets {
+		switch packet.topic {
+		case CaptionPublicTopic:
+			publicCount++
+			if !packet.reliable || len(packet.destinations) != 0 {
+				t.Fatalf("public packet = %#v", packet)
+			}
+		case CaptionOperatorTopic:
+			ackCount++
+		}
+	}
+	if publicCount != 1 || ackCount != 2 {
+		t.Fatalf("public packets = %d, acknowledgements = %d, all = %#v", publicCount, ackCount, packets)
+	}
+}
+
+func TestModeratedPublishRestoresPendingWhenPublicTransportFails(t *testing.T) {
+	var packets []publishedData
+	agent := newModeratedTestAgent("google", &packets)
+	agent.captionOperatorID = "caption-operator-1"
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ผู้ป่วยมีอาการ", IsFinal: true, Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+	agent.dataPublisher = func(payload []byte, topic string, reliable bool, destinations []string) error {
+		packets = append(packets, publishedData{
+			payload: append([]byte(nil), payload...), topic: topic, reliable: reliable,
+			destinations: append([]string(nil), destinations...),
+		})
+		if topic == CaptionPublicTopic {
+			return errors.New("data channel unavailable")
+		}
+		return nil
+	}
+	packets = nil
+
+	agent.publishCaptionCommand("caption-operator-1", captionCommandEnvelope{
+		Type: captionPublishType, RequestID: "publish-1", Provider: "google",
+		SourceSegmentIDs: []string{"google-1"}, Text: "ผู้ป่วยมีอาการเจ็บหน้าอก",
+	})
+
+	if got := len(agent.moderator.Snapshot().Pending); got != 1 {
+		t.Fatalf("pending count after failed publish = %d, want 1", got)
+	}
+	if len(packets) != 2 || packets[0].topic != CaptionPublicTopic || packets[1].topic != CaptionOperatorTopic {
+		t.Fatalf("failed publish packets = %#v", packets)
+	}
+}
+
+func TestModeratedPublishRejectsNonOperatorAndWrongProvider(t *testing.T) {
+	var packets []publishedData
+	agent := newModeratedTestAgent("google", &packets)
+	agent.captionOperatorID = "caption-operator-1"
+
+	agent.publishCaptionCommand("caption-operator-2", captionCommandEnvelope{
+		Type: captionPublishType, RequestID: "publish-1", Provider: "google",
+		SourceSegmentIDs: []string{"google-1"}, Text: "ข้อความ",
+	})
+	agent.handleCaptionPacket(
+		[]byte(`{"type":"caption.subscribe","requestId":"subscribe-1","provider":"gemini"}`),
+		"caption-operator-1",
+		`{"role":"caption-operator","provider":"gemini"}`,
+	)
+
+	if len(packets) != 2 {
+		t.Fatalf("rejection packets = %#v", packets)
+	}
+	for _, packet := range packets {
+		if packet.topic != CaptionOperatorTopic || !packet.reliable {
+			t.Fatalf("rejection packet = %#v", packet)
+		}
+	}
+}
+
+func TestModeratedOperatorDisconnectKeepsPendingState(t *testing.T) {
+	var packets []publishedData
+	agent := newModeratedTestAgent("google", &packets)
+	agent.captionOperatorID = "caption-operator-1"
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ข้อความรอตรวจ", IsFinal: true, Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+
+	agent.clearCaptionOperator("caption-operator-1")
+	if got := agent.captionOperator(); got != "" {
+		t.Fatalf("caption operator = %q, want empty", got)
+	}
+	if got := len(agent.moderator.Snapshot().Pending); got != 1 {
+		t.Fatalf("pending count = %d, want 1", got)
+	}
+}
+
+func newModeratedTestAgent(provider string, packets *[]publishedData) *Agent {
+	return &Agent{
+		preferredProvider: provider,
+		mode:              captionmoderation.ModeModerated,
+		moderator:         captionmoderation.New(provider, captionmoderation.ModeModerated, time.Now),
+		dataPublisher: func(payload []byte, topic string, reliable bool, destinations []string) error {
+			*packets = append(*packets, publishedData{
+				payload: append([]byte(nil), payload...), topic: topic, reliable: reliable,
+				destinations: append([]string(nil), destinations...),
+			})
+			return nil
+		},
+	}
+}
+
+func equalStringSlices(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func (p *lifecycleProvider) Start(context.Context) error             { return p.startErr }

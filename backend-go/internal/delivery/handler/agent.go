@@ -7,6 +7,7 @@ import (
 
 	"thai-transcriber-backend/config"
 	"thai-transcriber-backend/internal/application/agentsupervisor"
+	"thai-transcriber-backend/internal/application/captionmoderation"
 	"thai-transcriber-backend/models"
 
 	"github.com/gofiber/fiber/v2"
@@ -33,8 +34,14 @@ func HandleAgentStart(c *fiber.Ctx, cfg *config.Config, supervisor *agentsupervi
 		})
 	}
 	req.Provider = provider
+	mode, err := captionmoderation.NormalizeMode(req.Mode)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "mode must be live or moderated",
+		})
+	}
 
-	if err := supervisor.Start(c.UserContext(), req.RoomName, req.Provider); err != nil {
+	if err := supervisor.Start(c.UserContext(), req.RoomName, req.Provider, mode); err != nil {
 		if errors.Is(err, agentsupervisor.ErrAgentAlreadyExists) {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 				"error":   "Agent already running",
@@ -50,6 +57,7 @@ func HandleAgentStart(c *fiber.Ctx, cfg *config.Config, supervisor *agentsupervi
 		"status":   "starting",
 		"roomName": req.RoomName,
 		"provider": req.Provider,
+		"mode":     mode,
 		"message":  "Agent is connecting to room",
 	})
 }
@@ -106,6 +114,7 @@ func HandleAgentStatus(c *fiber.Ctx, supervisor *agentsupervisor.Supervisor) err
 			"running":  current.Running,
 			"provider": current.Provider,
 			"room":     current.Room,
+			"mode":     current.Mode,
 		})
 	}
 

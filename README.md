@@ -14,7 +14,8 @@ The system is designed for operators who need explicit room, audio, provider, an
 - Independent Google, Gemini, Azure, and GPT Realtime Whisper provider agents.
 - Replaceable interim Draft text and committed final transcript rows.
 - Read-only live Transcript view with provider filtering and final-only text export.
-- Signed provider-specific WebSocket feeds for external systems.
+- Live or moderated publishing per room/provider, with a keyboard-first Caption Desk for human review.
+- Separate signed WebSocket feeds for raw provider output and approved plain-text captions.
 - Room, participant, provider, and link management from one Control Room.
 
 ## Product surfaces
@@ -24,6 +25,7 @@ The system is designed for operators who need explicit room, audio, provider, an
 | **Control Room** | `#admin` or `/` | Create rooms, share links, run providers, monitor participants, and generate external feeds |
 | **Audio Source** | `#stream?room=<room>` | Select microphone or Chrome Tab audio and publish it to the room |
 | **Transcript** | `#viewer?room=<room>&autoconnect=1` | Subscribe to room audio and follow live transcript output without publishing |
+| **Caption Desk** | `#caption-desk?room=<room>&provider=<provider>` | Review final text—or opt into interim review—and publish approved captions with Enter |
 
 The normal operating sequence is:
 
@@ -73,6 +75,13 @@ Audio never travels through the public backend WebSocket API. The browser publis
 
 ## Transcript lifecycle
 
+Each room/provider agent runs in one of two modes:
+
+- `live`: existing interim and final transcript packets go directly to viewers.
+- `moderated`: source Draft and final segments go only to the active Caption Desk operator. Final review queues every segment by default; Interim review is an explicit latest-only mode that clears the moderation backlog and lets the operator publish the current Draft before final. Viewers receive approved results on `caption.public`.
+
+Caption Desk uses `Enter` to publish and `Shift+Enter` for a newline. It permits one in-flight publication per source segment; later segments may continue to queue. Publishing an interim consumes that provider segment, so its later final is suppressed from the moderation queue. Pending moderation state is bounded and held in agent memory; restarting the agent clears it.
+
 Provider output stays identifiable and replaceable while it is still changing:
 
 ```text
@@ -87,6 +96,14 @@ The lean external WebSocket uses one JSON object per text frame:
 {"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":false}
 {"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":true}
 ```
+
+Moderated agents additionally expose an approved-caption feed. It emits one plain UTF-8 text frame per approved publication:
+
+```text
+ผู้ป่วยมีอาการเจ็บหน้าอก
+```
+
+It emits no JSON, Drafts, ready event, replay, or client commands. Raw and approved tokens carry different signed feed purposes and cannot be used interchangeably.
 
 Interim and final text originates from the selected ASR provider. CaptionLive routes provider results, accumulates provider deltas into full snapshots where required, and applies deterministic spacing normalization. Google Thai additionally removes provider-added spaces between Thai words; other providers retain the shared policy. CaptionLive does not invent interim wording.
 
@@ -308,7 +325,7 @@ Start here, then move to the document that owns the detail:
 | [Product principles](PRODUCT.md) | Product and interface decisions |
 | [Repository agent guide](AGENTS.md) | Development constraints and verification rules |
 
-`backend-go/docs/EDITOR_MODE_DESIGN.md` is a design proposal, not implemented behavior.
+`backend-go/docs/EDITOR_MODE_DESIGN.md` is the earlier design proposal. Use the implemented flow documented above and in `backend-go/docs/LIVEKIT_FLOW.md` as the current contract.
 
 ## License
 

@@ -1,0 +1,406 @@
+package captionmoderation
+
+import (
+	"errors"
+	"fmt"
+	"testing"
+	"time"
+)
+
+func TestNormalizeModeDefaultsEmptyToLive(t *testing.T) {
+	tests := []struct {
+		input string
+		want  Mode
+	}{
+		{input: "", want: ModeLive},
+		{input: " live ", want: ModeLive},
+		{input: "MODERATED", want: ModeModerated},
+	}
+
+	for _, tt := range tests {
+		got, err := NormalizeMode(tt.input)
+		if err != nil {
+			t.Fatalf("NormalizeMode(%q) error = %v", tt.input, err)
+		}
+		if got != tt.want {
+			t.Fatalf("NormalizeMode(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+
+	if _, err := NormalizeMode("automatic"); !errors.Is(err, ErrInvalidMode) {
+		t.Fatalf("NormalizeMode(automatic) error = %v, want ErrInvalidMode", err)
+	}
+}
+
+func TestModeratorReplacesDraftAndKeepsFinalsInOrder(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+
+	snapshot := moderator.Ingest(SourceSegment{
+		ID: "google-1", Provider: "google", Text: "ผู้ป่วย", Sequence: 1,
+	})
+	if snapshot.Draft == nil || snapshot.Draft.Text != "ผู้ป่วย" {
+		t.Fatalf("first Draft = %#v", snapshot.Draft)
+	}
+
+	snapshot = moderator.Ingest(SourceSegment{
+		ID: "google-1", Provider: "google", Text: "ผู้ป่วยมีอาการ", Sequence: 2,
+	})
+	if snapshot.Draft == nil || snapshot.Draft.Text != "ผู้ป่วยมีอาการ" {
+		t.Fatalf("revised Draft = %#v", snapshot.Draft)
+	}
+
+	snapshot = moderator.Ingest(SourceSegment{
+		ID: "google-1", Provider: "google", Text: "ผู้ป่วยมีอาการ", IsFinal: true, Sequence: 3,
+	})
+	snapshot = moderator.Ingest(SourceSegment{
+		ID: "google-2", Provider: "google", Text: "เจ็บหน้าอก", IsFinal: true, Sequence: 4,
+	})
+
+	if snapshot.Draft != nil {
+		t.Fatalf("Draft remained after matching final: %#v", snapshot.Draft)
+	}
+	if got, want := pendingIDs(snapshot), []string{"google-1", "google-2"}; !equalStrings(got, want) {
+		t.Fatalf("pending IDs = %v, want %v", got, want)
+	}
+}
+
+func TestModeratorInterimModeClearsBacklogAndKeepsOnlyLatestSegment(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	ingestFinals(moderator, "google-1", "google-2", "google-3")
+
+	snapshot := moderator.SetUseInterim(true)
+	if len(snapshot.Pending) != 0 {
+		t.Fatalf("pending after interim mode = %#v, want empty", snapshot.Pending)
+	}
+	moderator.Ingest(SourceSegment{
+		ID: "google-4", Provider: "google", Text: "ข้อความสด", Sequence: 4,
+	})
+	moderator.Ingest(SourceSegment{
+		ID: "google-4", Provider: "google", Text: "ข้อความ final", IsFinal: true, Sequence: 5,
+	})
+	snapshot = moderator.Ingest(SourceSegment{
+		ID: "google-5", Provider: "google", Text: "ข้อความสดใหม่", Sequence: 6,
+	})
+	if len(snapshot.Pending) != 0 || snapshot.Draft == nil || snapshot.Draft.ID != "google-5" {
+		t.Fatalf("latest-only snapshot = %#v", snapshot)
+	}
+}
+
+func TestModeratorIgnoresOtherProvider(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	snapshot := moderator.Ingest(SourceSegment{
+		ID: "gemini-1", Provider: "gemini", Text: "ไม่ควรเข้า", IsFinal: true, Sequence: 1,
+	})
+
+	if snapshot.Draft != nil || len(snapshot.Pending) != 0 {
+		t.Fatalf("other provider changed snapshot: %#v", snapshot)
+	}
+}
+
+func TestModeratorBoundsPendingSegmentsAtFiveHundred(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	for index := 1; index <= 501; index++ {
+		moderator.Ingest(SourceSegment{
+			ID:       fmt.Sprintf("google-%d", index),
+			Provider: "google",
+			Text:     fmt.Sprintf("ข้อความ %d", index),
+			IsFinal:  true,
+			Sequence: uint64(index),
+		})
+	}
+
+	snapshot := moderator.Snapshot()
+	if got, want := len(snapshot.Pending), 500; got != want {
+		t.Fatalf("pending length = %d, want %d", got, want)
+	}
+	if got, want := snapshot.Pending[0].ID, "google-2"; got != want {
+		t.Fatalf("oldest pending ID = %q, want %q", got, want)
+	}
+}
+
+func TestModeratorPublishesPendingPrefix(t *testing.T) {
+	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
+	moderator := New("google", ModeModerated, func() time.Time { return now })
+	ingestFinals(moderator, "google-1", "google-2", "google-3")
+
+	publication, replayed, err := moderator.Publish(PublishCommand{
+		RequestID:        "request-1",
+		Provider:         "google",
+		SourceSegmentIDs: []string{"google-1", "google-2"},
+		Text:             "ข้อความที่ตรวจแล้ว",
+	})
+	if err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if replayed {
+		t.Fatal("first Publish() reported replay")
+	}
+	if publication.ID == "" || publication.PublishedAt != now {
+		t.Fatalf("publication metadata = %#v", publication)
+	}
+	if got, want := publication.SourceSegmentIDs, []string{"google-1", "google-2"}; !equalStrings(got, want) {
+		t.Fatalf("publication source IDs = %v, want %v", got, want)
+	}
+	if got, want := pendingIDs(moderator.Snapshot()), []string{"google-3"}; !equalStrings(got, want) {
+		t.Fatalf("remaining pending IDs = %v, want %v", got, want)
+	}
+}
+
+func TestModeratorPublishesDraftAndSuppressesItsFinal(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	moderator.Ingest(SourceSegment{
+		ID: "google-1", Provider: "google", Text: "ข้อความระหว่างถอด", Sequence: 1,
+	})
+
+	publication, replayed, err := moderator.Publish(PublishCommand{
+		RequestID: "request-draft", Provider: "google",
+		SourceSegmentIDs: []string{"google-1"}, Text: "ข้อความที่ตรวจแล้ว",
+	})
+	if err != nil || replayed {
+		t.Fatalf("Publish(draft) = (%#v, %v, %v)", publication, replayed, err)
+	}
+	snapshot := moderator.Ingest(SourceSegment{
+		ID: "google-1", Provider: "google", Text: "ข้อความ final", IsFinal: true, Sequence: 2,
+	})
+	if snapshot.Draft != nil || len(snapshot.Pending) != 0 {
+		t.Fatalf("consumed draft final was not suppressed: %#v", snapshot)
+	}
+}
+
+func TestModeratorDraftRemainderStaysPendingAndFinalDoesNotReplaceIt(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	moderator.Ingest(SourceSegment{
+		ID: "google-1", Provider: "google", Text: "ส่วนแรก ส่วนที่เหลือ", Sequence: 1,
+	})
+	if _, _, err := moderator.Publish(PublishCommand{
+		RequestID: "request-draft", Provider: "google",
+		SourceSegmentIDs: []string{"google-1"},
+		Text:             "ส่วนแรก",
+		RemainingText:    "ส่วนที่เหลือ",
+	}); err != nil {
+		t.Fatalf("Publish(draft remainder) error = %v", err)
+	}
+	snapshot := moderator.Ingest(SourceSegment{
+		ID: "google-1", Provider: "google", Text: "provider final", IsFinal: true, Sequence: 2,
+	})
+	if len(snapshot.Pending) != 1 || snapshot.Pending[0].Text != "ส่วนที่เหลือ" {
+		t.Fatalf("pending remainder = %#v", snapshot.Pending)
+	}
+}
+
+func TestModeratorRollbackDraftPublicationRestoresDraft(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	moderator.Ingest(SourceSegment{
+		ID: "google-1", Provider: "google", Text: "ข้อความระหว่างถอด", Sequence: 1,
+	})
+	if _, _, err := moderator.Publish(PublishCommand{
+		RequestID: "request-draft", Provider: "google",
+		SourceSegmentIDs: []string{"google-1"}, Text: "ข้อความที่ตรวจแล้ว",
+	}); err != nil {
+		t.Fatalf("Publish(draft) error = %v", err)
+	}
+	if !moderator.Rollback("request-draft") {
+		t.Fatal("Rollback(draft) = false")
+	}
+	snapshot := moderator.Snapshot()
+	if snapshot.Draft == nil || snapshot.Draft.ID != "google-1" || len(snapshot.Pending) != 0 {
+		t.Fatalf("snapshot after draft rollback = %#v", snapshot)
+	}
+}
+
+func TestModeratorRejectsUnknownNonPrefixAndCrossProviderIDs(t *testing.T) {
+	tests := []struct {
+		name    string
+		command PublishCommand
+		wantErr error
+	}{
+		{
+			name: "unknown ID",
+			command: PublishCommand{
+				RequestID: "unknown", Provider: "google",
+				SourceSegmentIDs: []string{"google-9"}, Text: "ข้อความ",
+			},
+			wantErr: ErrSourceMismatch,
+		},
+		{
+			name: "skips oldest pending",
+			command: PublishCommand{
+				RequestID: "non-prefix", Provider: "google",
+				SourceSegmentIDs: []string{"google-2"}, Text: "ข้อความ",
+			},
+			wantErr: ErrSourceMismatch,
+		},
+		{
+			name: "cross provider",
+			command: PublishCommand{
+				RequestID: "cross-provider", Provider: "gemini",
+				SourceSegmentIDs: []string{"google-1"}, Text: "ข้อความ",
+			},
+			wantErr: ErrProviderMismatch,
+		},
+		{
+			name: "empty text",
+			command: PublishCommand{
+				RequestID: "empty", Provider: "google",
+				SourceSegmentIDs: []string{"google-1"}, Text: "  ",
+			},
+			wantErr: ErrInvalidCommand,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			moderator := New("google", ModeModerated, time.Now)
+			ingestFinals(moderator, "google-1", "google-2", "google-3")
+			if _, _, err := moderator.Publish(tt.command); !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Publish() error = %v, want %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestModeratorReplaysRequestIDWithoutPublishingTwice(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	ingestFinals(moderator, "google-1", "google-2")
+	command := PublishCommand{
+		RequestID: "request-1", Provider: "google",
+		SourceSegmentIDs: []string{"google-1"}, Text: "ข้อความแรก",
+	}
+
+	first, replayed, err := moderator.Publish(command)
+	if err != nil || replayed {
+		t.Fatalf("first Publish() = (%#v, %v, %v)", first, replayed, err)
+	}
+	second, replayed, err := moderator.Publish(command)
+	if err != nil || !replayed {
+		t.Fatalf("second Publish() = (%#v, %v, %v)", second, replayed, err)
+	}
+	if second.ID != first.ID || second.Text != first.Text {
+		t.Fatalf("replayed publication = %#v, want %#v", second, first)
+	}
+	if got, want := pendingIDs(moderator.Snapshot()), []string{"google-2"}; !equalStrings(got, want) {
+		t.Fatalf("remaining pending IDs = %v, want %v", got, want)
+	}
+}
+
+func TestModeratorRollbackRestoresPublishedPrefix(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	ingestFinals(moderator, "google-1", "google-2", "google-3")
+	if _, _, err := moderator.Publish(PublishCommand{
+		RequestID: "request-1", Provider: "google",
+		SourceSegmentIDs: []string{"google-1", "google-2"}, Text: "ข้อความ",
+	}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+
+	if !moderator.Rollback("request-1") {
+		t.Fatal("Rollback() = false, want true")
+	}
+	if got, want := pendingIDs(moderator.Snapshot()), []string{"google-1", "google-2", "google-3"}; !equalStrings(got, want) {
+		t.Fatalf("pending IDs after rollback = %v, want %v", got, want)
+	}
+	if moderator.Rollback("request-1") {
+		t.Fatal("second Rollback() = true, want false")
+	}
+}
+
+func TestModeratorPublishesPartAndRetainsRemainderOnSameSource(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	moderator.Ingest(SourceSegment{
+		ID: "google-1", Provider: "google", Text: "ประโยคแรก ประโยคถัดไป", IsFinal: true, Sequence: 1,
+	})
+
+	if _, _, err := moderator.Publish(PublishCommand{
+		RequestID: "request-1", Provider: "google",
+		SourceSegmentIDs: []string{"google-1"},
+		Text:             "ประโยคแรก",
+		RemainingText:    "ประโยคถัดไป",
+	}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	snapshot := moderator.Snapshot()
+	if len(snapshot.Pending) != 1 || snapshot.Pending[0].ID != "google-1" ||
+		snapshot.Pending[0].Text != "ประโยคถัดไป" {
+		t.Fatalf("remaining pending = %#v", snapshot.Pending)
+	}
+
+	if _, _, err := moderator.Publish(PublishCommand{
+		RequestID: "request-2", Provider: "google",
+		SourceSegmentIDs: []string{"google-1"}, Text: "ประโยคถัดไป",
+	}); err != nil {
+		t.Fatalf("Publish(remainder) error = %v", err)
+	}
+	if len(moderator.Snapshot().Pending) != 0 {
+		t.Fatalf("pending after remainder = %#v, want empty", moderator.Snapshot().Pending)
+	}
+}
+
+func TestModeratorRollbackRestoresSourceBeforePartialPublish(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	moderator.Ingest(SourceSegment{
+		ID: "google-1", Provider: "google", Text: "ประโยคแรก ประโยคถัดไป", IsFinal: true, Sequence: 1,
+	})
+	if _, _, err := moderator.Publish(PublishCommand{
+		RequestID: "request-1", Provider: "google",
+		SourceSegmentIDs: []string{"google-1"},
+		Text:             "ประโยคแรก",
+		RemainingText:    "ประโยคถัดไป",
+	}); err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if !moderator.Rollback("request-1") {
+		t.Fatal("Rollback() = false, want true")
+	}
+	snapshot := moderator.Snapshot()
+	if len(snapshot.Pending) != 1 || snapshot.Pending[0].Text != "ประโยคแรก ประโยคถัดไป" {
+		t.Fatalf("pending after rollback = %#v", snapshot.Pending)
+	}
+}
+
+func TestModeratorBoundsProcessedRequestsAtTwoHundredFiftySix(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	for index := 1; index <= 257; index++ {
+		id := fmt.Sprintf("google-%d", index)
+		moderator.Ingest(SourceSegment{
+			ID: id, Provider: "google", Text: id, IsFinal: true, Sequence: uint64(index),
+		})
+		if _, _, err := moderator.Publish(PublishCommand{
+			RequestID: fmt.Sprintf("request-%d", index),
+			Provider:  "google", SourceSegmentIDs: []string{id}, Text: id,
+		}); err != nil {
+			t.Fatalf("Publish(%d) error = %v", index, err)
+		}
+	}
+
+	if got, want := moderator.processedCount(), 256; got != want {
+		t.Fatalf("processed request count = %d, want %d", got, want)
+	}
+}
+
+func ingestFinals(moderator *Moderator, ids ...string) {
+	for index, id := range ids {
+		moderator.Ingest(SourceSegment{
+			ID: id, Provider: "google", Text: id, IsFinal: true, Sequence: uint64(index + 1),
+		})
+	}
+}
+
+func pendingIDs(snapshot Snapshot) []string {
+	ids := make([]string, 0, len(snapshot.Pending))
+	for _, segment := range snapshot.Pending {
+		ids = append(ids, segment.ID)
+	}
+	return ids
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}

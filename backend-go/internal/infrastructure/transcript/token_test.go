@@ -8,6 +8,24 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
+func TestTokenPurposeCannotCrossTranscriptAndCaptionFeeds(t *testing.T) {
+	service := NewTokenService("01234567890123456789012345678901", time.Hour)
+	transcriptToken, _, err := service.IssueScoped("room-a", "google", "transcript", "RM_1", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	captionToken, _, err := service.IssueScoped("room-a", "google", "caption", "RM_1", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.VerifyScoped(transcriptToken, "room-a", "google", "caption", "RM_1", 2); !errors.Is(err, ErrInvalidTranscriptToken) {
+		t.Fatalf("transcript token authorized caption feed: %v", err)
+	}
+	if err := service.VerifyScoped(captionToken, "room-a", "google", "transcript", "RM_1", 2); !errors.Is(err, ErrInvalidTranscriptToken) {
+		t.Fatalf("caption token authorized transcript feed: %v", err)
+	}
+}
+
 func TestTokenServiceIssueAndVerify(t *testing.T) {
 	fixedNow := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
 	service := NewTokenService("test-secret-at-least-32-bytes-long", 24*time.Hour)
