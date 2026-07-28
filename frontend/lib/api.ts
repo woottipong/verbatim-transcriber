@@ -38,7 +38,7 @@ export interface TranscriptTokenResponse {
     token: string;
     expiresAt: string;
     websocketUrl: string;
-    provider: AgentProvider;
+    provider?: AgentProvider;
 }
 
 export interface CaptionDeskTokenResponse {
@@ -160,10 +160,9 @@ export async function createCaptionDeskToken(
 export async function createApprovedCaptionToken(
     backendUrl: string,
     roomName: string,
-    provider: AgentProvider,
 ): Promise<TranscriptTokenResponse> {
     const response = await fetch(
-        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/caption-token/${encodeURIComponent(provider)}/ws`,
+        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/caption-token/ws`,
         { method: 'POST', headers: getControlAuthHeaders() },
     );
     return parseApiResponse<TranscriptTokenResponse>(response, 'Failed to generate approved caption link');

@@ -63,7 +63,7 @@ type TranscriptSink interface {
 }
 
 type CaptionSink interface {
-	PublishCaption(room, provider, text string)
+	PublishCaption(room, text string)
 }
 
 type dataPublishFunc func(payload []byte, topic string, reliable bool, destinations []string) error

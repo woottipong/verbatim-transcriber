@@ -8,11 +8,14 @@ import {
   CAPTION_COMMAND_TOPIC,
   CAPTION_OPERATOR_TOPIC,
   isCaptionAgentIdentity,
+  parseCaptionOperatorPacket,
   type CaptionPublishCommand,
 } from '../lib/captionDeskMessages';
 import { CaptionDeskSession } from '../lib/captionDeskSession';
 import type { AgentProvider } from '../lib/providers';
 import { ConnectionState } from '../types';
+
+const CAPTION_SUBSCRIBE_RETRY_MS = 1_500;
 
 export function useCaptionDesk(backendUrl: string, roomName: string, provider: AgentProvider) {
   const sessionRef = useRef<CaptionDeskSession | null>(null);
@@ -25,6 +28,7 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
   const [connectionState, setConnectionState] = useState(ConnectionState.DISCONNECTED);
   const [error, setError] = useState<string | null>(null);
   const [agentConnected, setAgentConnected] = useState(false);
+  const [captionConnected, setCaptionConnected] = useState(false);
   const [reconnectNonce, setReconnectNonce] = useState(0);
 
   const sendSubscribe = useCallback(async (room: Room) => {
@@ -36,6 +40,9 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
       buildCaptionReviewModeCommand(provider, interimReviewRef.current),
       { reliable: true, topic: CAPTION_COMMAND_TOPIC },
     );
+  }, [provider]);
+
+  const replayWaiting = useCallback(async (room: Room) => {
     for (const command of session.waitingCommands(provider)) {
       await room.localParticipant.publishData(buildCaptionPublishCommand(command), {
         reliable: true,
@@ -52,14 +59,50 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
       scopeRef.current = scope;
     }
     let disposed = false;
+    let subscribed = false;
+    let subscribeInFlight = false;
+    let subscribeRetry: number | undefined;
     const room = new Room({ adaptiveStream: true, dynacast: true });
     roomRef.current = room;
 
     const matchesAgent = (participant?: RemoteParticipant) =>
       isCaptionAgentIdentity(participant?.identity, provider);
-    const refreshAgent = () => setAgentConnected(
-      Array.from(room.remoteParticipants.values()).some(participant => matchesAgent(participant)),
-    );
+    const hasAgent = () =>
+      Array.from(room.remoteParticipants.values()).some(participant => matchesAgent(participant));
+    const clearSubscribeRetry = () => {
+      if (subscribeRetry !== undefined) window.clearTimeout(subscribeRetry);
+      subscribeRetry = undefined;
+    };
+    const scheduleSubscribe = () => {
+      clearSubscribeRetry();
+      if (disposed || subscribed || !hasAgent()) return;
+      subscribeRetry = window.setTimeout(() => {
+        void requestSubscribe();
+      }, CAPTION_SUBSCRIBE_RETRY_MS);
+    };
+    const requestSubscribe = async () => {
+      if (disposed || subscribed || subscribeInFlight || !hasAgent()) return;
+      subscribeInFlight = true;
+      try {
+        await sendSubscribe(room);
+      } catch (cause) {
+        if (!disposed) setError(errorMessage(cause));
+      } finally {
+        subscribeInFlight = false;
+        scheduleSubscribe();
+      }
+    };
+    const resetSubscription = () => {
+      subscribed = false;
+      setCaptionConnected(false);
+      clearSubscribeRetry();
+    };
+    const refreshAgent = () => {
+      const next = hasAgent();
+      setAgentConnected(next);
+      if (!next) resetSubscription();
+      return next;
+    };
     const onData = (
       payload: Uint8Array,
       participant?: RemoteParticipant,
@@ -67,24 +110,39 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
       topic?: string,
     ) => {
       if (topic !== CAPTION_OPERATOR_TOPIC || !matchesAgent(participant)) return;
+      const message = parseCaptionOperatorPacket(payload);
+      if (message && message.type !== 'caption.rejected' && !subscribed) {
+        subscribed = true;
+        setCaptionConnected(true);
+        setError(null);
+        clearSubscribeRetry();
+        void replayWaiting(room).catch(cause => setError(errorMessage(cause)));
+      }
       session.ingestOperatorPacket(payload);
     };
-    const onReconnecting = () => setConnectionState(ConnectionState.CONNECTING);
+    const onReconnecting = () => {
+      resetSubscription();
+      setConnectionState(ConnectionState.CONNECTING);
+    };
     const onReconnected = () => {
       setConnectionState(ConnectionState.CONNECTED);
-      void sendSubscribe(room).catch(cause => setError(errorMessage(cause)));
+      if (refreshAgent()) void requestSubscribe();
     };
     const onDisconnected = () => {
       if (!disposed) setConnectionState(ConnectionState.DISCONNECTED);
       setAgentConnected(false);
+      resetSubscription();
     };
     const onParticipantConnected = (participant: RemoteParticipant) => {
       refreshAgent();
       if (matchesAgent(participant)) {
-        void sendSubscribe(room).catch(cause => setError(errorMessage(cause)));
+        void requestSubscribe();
       }
     };
-    const onParticipantDisconnected = () => refreshAgent();
+    const onParticipantDisconnected = (participant: RemoteParticipant) => {
+      if (matchesAgent(participant)) resetSubscription();
+      refreshAgent();
+    };
 
     room.on(RoomEvent.DataReceived, onData);
     room.on(RoomEvent.Reconnecting, onReconnecting);
@@ -102,8 +160,7 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
         await room.connect(credentials.wsUrl, credentials.token);
         if (disposed) return;
         setConnectionState(ConnectionState.CONNECTED);
-        refreshAgent();
-        await sendSubscribe(room);
+        if (refreshAgent()) void requestSubscribe();
       } catch (cause) {
         if (!disposed) {
           setError(errorMessage(cause));
@@ -115,20 +172,20 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
 
     return () => {
       disposed = true;
+      clearSubscribeRetry();
       room.removeAllListeners();
       void room.disconnect();
       roomRef.current = null;
     };
-  }, [backendUrl, provider, reconnectNonce, roomName, sendSubscribe, session]);
+  }, [backendUrl, provider, reconnectNonce, replayWaiting, roomName, sendSubscribe, session]);
 
   useEffect(() => () => session.clear(), [session]);
 
   const edit = useCallback((text: string) => session.edit(text), [session]);
   const restore = useCallback(() => session.restore(), [session]);
-  const setInterimEnabled = useCallback((enabled: boolean) => session.setInterimEnabled(enabled), [session]);
   const setInterimReviewEnabled = useCallback(async (enabled: boolean): Promise<boolean> => {
     const room = roomRef.current;
-    if (!room || connectionState !== ConnectionState.CONNECTED) return false;
+    if (!room || connectionState !== ConnectionState.CONNECTED || !captionConnected) return false;
     try {
       await room.localParticipant.publishData(buildCaptionReviewModeCommand(provider, enabled), {
         reliable: true,
@@ -141,10 +198,10 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
       setError(errorMessage(cause));
       return false;
     }
-  }, [connectionState, provider, session]);
+  }, [captionConnected, connectionState, provider, session]);
   const publish = useCallback(async (splitIndex?: number): Promise<boolean> => {
     const room = roomRef.current;
-    if (!room || connectionState !== ConnectionState.CONNECTED) return false;
+    if (!room || connectionState !== ConnectionState.CONNECTED || !captionConnected) return false;
     const command: CaptionPublishCommand | null = session.release(provider, splitIndex);
     if (!command) return false;
     try {
@@ -163,15 +220,15 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
       });
       return false;
     }
-  }, [connectionState, provider, session]);
+  }, [captionConnected, connectionState, provider, session]);
   const reconnect = useCallback(() => {
     setError(null);
     setReconnectNonce(current => current + 1);
   }, []);
 
   return {
-    snapshot, connectionState, error, agentConnected,
-    edit, restore, setInterimEnabled, setInterimReviewEnabled, publish, reconnect,
+    snapshot, connectionState, error, agentConnected, captionConnected,
+    edit, restore, setInterimReviewEnabled, publish, reconnect,
   };
 }
 

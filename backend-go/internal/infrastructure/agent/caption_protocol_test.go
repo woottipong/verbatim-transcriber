@@ -32,7 +32,7 @@ func TestParseCaptionPublishCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseCaptionCommand() error = %v", err)
 	}
-	if got, want := command.Text, "ผู้ป่วยมีอาการเจ็บหน้าอก"; got != want {
+	if got, want := command.Text, " ผู้ป่วยมีอาการเจ็บหน้าอก "; got != want {
 		t.Fatalf("Text = %q, want %q", got, want)
 	}
 	if got, want := len(command.SourceSegmentIDs), 2; got != want {
@@ -45,15 +45,18 @@ func TestParseCaptionPublishCommandWithRemainder(t *testing.T) {
 		"type":"caption.publish",
 		"requestId":"publish-1",
 		"provider":"google",
-		"sourceSegmentIds":["google-1"],
+		"sourceSegmentIds":["google-1","google-2"],
 		"text":"ประโยคแรก",
 		"remainingText":" ประโยคถัดไป "
 	}`))
 	if err != nil {
 		t.Fatalf("parseCaptionCommand() error = %v", err)
 	}
-	if command.RemainingText != "ประโยคถัดไป" {
+	if command.RemainingText != " ประโยคถัดไป " {
 		t.Fatalf("RemainingText = %q", command.RemainingText)
+	}
+	if len(command.SourceSegmentIDs) != 2 {
+		t.Fatalf("SourceSegmentIDs = %#v", command.SourceSegmentIDs)
 	}
 }
 
@@ -92,7 +95,6 @@ func TestParseCaptionCommandRejectsInvalidPayloads(t *testing.T) {
 		{name: "publish without source IDs", payload: `{"type":"caption.publish","requestId":"r","provider":"google","text":"ข้อความ"}`},
 		{name: "publish with empty source ID", payload: `{"type":"caption.publish","requestId":"r","provider":"google","sourceSegmentIds":[" "],"text":"ข้อความ"}`},
 		{name: "publish with duplicate source ID", payload: `{"type":"caption.publish","requestId":"r","provider":"google","sourceSegmentIds":["google-1","google-1"],"text":"ข้อความ"}`},
-		{name: "remainder with multiple source IDs", payload: `{"type":"caption.publish","requestId":"r","provider":"google","sourceSegmentIds":["google-1","google-2"],"text":"ข้อความ","remainingText":"ต่อ"}`},
 		{name: "publish with empty text", payload: `{"type":"caption.publish","requestId":"r","provider":"google","sourceSegmentIds":["google-1"],"text":" "}`},
 		{name: "oversized text", payload: `{"type":"caption.publish","requestId":"r","provider":"google","sourceSegmentIds":["google-1"],"text":"` + strings.Repeat("a", maxCaptionCommandTextBytes+1) + `"}`},
 		{name: "too many source IDs", payload: `{"type":"caption.publish","requestId":"r","provider":"google","sourceSegmentIds":[` + strings.Join(tooManyIDs, ",") + `],"text":"ข้อความ"}`},

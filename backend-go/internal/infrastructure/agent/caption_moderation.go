@@ -116,10 +116,14 @@ func (a *Agent) subscribeCaptionOperator(identity string, command captionCommand
 		a.rejectCaptionCommand(identity, command.RequestID, command.Provider, "operator_already_active")
 		return
 	}
+	isNewOperator := a.captionOperatorID == ""
 	a.captionOperatorID = identity
 	a.mu.Unlock()
 
 	snapshot := a.moderator.Snapshot()
+	if isNewOperator {
+		snapshot = a.moderator.StartReviewWindow()
+	}
 	envelope := captionOperatorEnvelope{
 		Type:      captionSnapshotType,
 		RequestID: command.RequestID,
@@ -172,7 +176,7 @@ func (a *Agent) publishCaptionCommand(identity string, command captionCommandEnv
 			return
 		}
 		if a.captionSink != nil {
-			a.captionSink.PublishCaption(a.GetRoom(), publication.Provider, publication.Text)
+			a.captionSink.PublishCaption(a.GetRoom(), publication.Text)
 		}
 	}
 

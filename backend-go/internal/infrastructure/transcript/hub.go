@@ -71,7 +71,7 @@ type Hub struct {
 	mu            sync.Mutex
 	rooms         map[string]*roomState
 	providerRooms map[providerKey]*roomState
-	captionRooms  map[providerKey]*roomState
+	captionRooms  map[string]*roomState
 	generations   map[string]uint64
 	queueSize     int
 	now           func() time.Time
@@ -88,7 +88,7 @@ func NewHubWithQueueSize(queueSize int) *Hub {
 	return &Hub{
 		rooms:         make(map[string]*roomState),
 		providerRooms: make(map[providerKey]*roomState),
-		captionRooms:  make(map[providerKey]*roomState),
+		captionRooms:  make(map[string]*roomState),
 		generations:   make(map[string]uint64),
 		queueSize:     queueSize,
 		now:           time.Now,
@@ -125,48 +125,43 @@ func (h *Hub) Invalidate(room string) {
 		}
 		delete(h.providerRooms, key)
 	}
-	for key, state := range h.captionRooms {
-		if key.room != room {
-			continue
-		}
+	if state := h.captionRooms[room]; state != nil {
 		for subscription := range state.subscribers {
-			h.removeCaptionSubscriptionLocked(key, subscription)
+			h.removeCaptionSubscriptionLocked(room, subscription)
 		}
-		delete(h.captionRooms, key)
+		delete(h.captionRooms, room)
 	}
 }
 
-func (h *Hub) SubscribeCaption(room, provider string) *Subscription {
+func (h *Hub) SubscribeCaption(room string) *Subscription {
 	subscription := &Subscription{events: make(chan []byte, h.queueSize), done: make(chan struct{})}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	key := providerKey{room: room, provider: provider}
-	state := h.captionRooms[key]
+	state := h.captionRooms[room]
 	if state == nil {
 		state = &roomState{subscribers: make(map[*Subscription]struct{})}
-		h.captionRooms[key] = state
+		h.captionRooms[room] = state
 	}
 	state.subscribers[subscription] = struct{}{}
 	return subscription
 }
 
-func (h *Hub) UnsubscribeCaption(room, provider string, subscription *Subscription) {
+func (h *Hub) UnsubscribeCaption(room string, subscription *Subscription) {
 	if subscription == nil {
 		return
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.removeCaptionSubscriptionLocked(providerKey{room: room, provider: provider}, subscription)
+	h.removeCaptionSubscriptionLocked(room, subscription)
 }
 
-func (h *Hub) PublishCaption(room, provider, text string) {
-	if room == "" || provider == "" || text == "" {
+func (h *Hub) PublishCaption(room, text string) {
+	if room == "" || text == "" {
 		return
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	key := providerKey{room: room, provider: provider}
-	state := h.captionRooms[key]
+	state := h.captionRooms[room]
 	if state == nil {
 		return
 	}
@@ -175,7 +170,7 @@ func (h *Hub) PublishCaption(room, provider, text string) {
 		select {
 		case subscription.events <- payload:
 		default:
-			h.removeCaptionSubscriptionLocked(key, subscription)
+			h.removeCaptionSubscriptionLocked(room, subscription)
 		}
 	}
 }
@@ -337,8 +332,8 @@ func (h *Hub) removeProviderSubscriptionLocked(key providerKey, subscription *Su
 	}
 }
 
-func (h *Hub) removeCaptionSubscriptionLocked(key providerKey, subscription *Subscription) {
-	state := h.captionRooms[key]
+func (h *Hub) removeCaptionSubscriptionLocked(room string, subscription *Subscription) {
+	state := h.captionRooms[room]
 	if state == nil {
 		return
 	}
@@ -349,6 +344,6 @@ func (h *Hub) removeCaptionSubscriptionLocked(key providerKey, subscription *Sub
 	close(subscription.done)
 	close(subscription.events)
 	if len(state.subscribers) == 0 {
-		delete(h.captionRooms, key)
+		delete(h.captionRooms, room)
 	}
 }

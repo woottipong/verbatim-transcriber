@@ -19,7 +19,8 @@ export interface CaptionDeskSnapshot {
   reviewText: string;
   rawText: string;
   sourceSegmentIds: string[];
-  incomingDraft: string;
+  isDraftActive: boolean;
+  draftPreview: string;
   queuedCount: number;
   waiting: WaitingCaption[];
   recentlyPublished: Array<{ publicationId: string; text: string; publishedAt: number }>;
@@ -27,7 +28,7 @@ export interface CaptionDeskSnapshot {
 }
 
 const EMPTY: CaptionDeskSnapshot = {
-  reviewText: '', rawText: '', sourceSegmentIds: [], incomingDraft: '',
+  reviewText: '', rawText: '', sourceSegmentIds: [], isDraftActive: false, draftPreview: '',
   queuedCount: 0, waiting: [], recentlyPublished: [], error: null,
 };
 export const MAX_WAITING_CAPTIONS = 64;
@@ -37,9 +38,10 @@ export class CaptionDeskSession {
   private listeners = new Set<() => void>();
   private edited = false;
   private queued: CaptionSource[] = [];
-  private interimEnabled = true;
   private interimReviewEnabled = false;
   private activeIsDraft = false;
+  private activeDraftID = '';
+  private activeDraftText = '';
 
   getSnapshot = (): CaptionDeskSnapshot => this.snapshot;
   subscribe = (listener: () => void): (() => void) => {
@@ -62,25 +64,20 @@ export class CaptionDeskSession {
     this.update({ ...this.snapshot, reviewText: this.snapshot.rawText, error: null });
   }
 
-  setInterimEnabled(enabled: boolean): void {
-    if (this.interimEnabled === enabled) return;
-    this.interimEnabled = enabled;
-    if (!enabled && this.snapshot.incomingDraft) {
-      this.update({ ...this.snapshot, incomingDraft: '' });
-    }
-  }
-
   setInterimReviewEnabled(enabled: boolean): void {
     this.interimReviewEnabled = enabled;
     this.edited = false;
     this.activeIsDraft = false;
+    this.activeDraftID = '';
+    this.activeDraftText = '';
     this.queued = [];
     this.update({
       ...this.snapshot,
       reviewText: '',
       rawText: '',
       sourceSegmentIds: [],
-      incomingDraft: '',
+      isDraftActive: false,
+      draftPreview: '',
       queuedCount: 0,
       error: null,
     });
@@ -107,9 +104,9 @@ export class CaptionDeskSession {
       return null;
     }
     const canSplit = splitIndex !== undefined && splitIndex > 0 && splitIndex < fullText.length;
-    const text = (canSplit ? fullText.slice(0, splitIndex) : fullText).trim();
-    const remainingText = canSplit ? fullText.slice(splitIndex).trim() : '';
-    if (!text || this.snapshot.sourceSegmentIds.length === 0) return null;
+    const text = canSplit ? fullText.slice(0, splitIndex) : fullText;
+    const remainingText = canSplit ? fullText.slice(splitIndex) : '';
+    if (!text.trim() || this.snapshot.sourceSegmentIds.length === 0) return null;
     if (new TextEncoder().encode(text).length > MAX_CAPTION_TEXT_BYTES) {
       this.update({
         ...this.snapshot,
@@ -131,14 +128,24 @@ export class CaptionDeskSession {
       ...(remainingText ? { remainingText } : {}),
     };
     this.edited = remainingText !== '';
-    this.activeIsDraft = false;
+    if (this.interimReviewEnabled) {
+      this.activeIsDraft = false;
+      this.activeDraftID = '';
+      this.activeDraftText = '';
+    }
     const next = remainingText ? undefined : this.queued.shift();
+    const remainderSourceId = this.snapshot.sourceSegmentIds.at(-1);
     this.update({
       ...this.snapshot,
       reviewText: remainingText || next?.text || '',
       rawText: remainingText || next?.text || '',
-      sourceSegmentIds: remainingText ? [...this.snapshot.sourceSegmentIds] : next ? [next.segmentId] : [],
-      incomingDraft: '',
+      sourceSegmentIds: remainingText && remainderSourceId
+        ? [remainderSourceId]
+        : next
+          ? [next.segmentId]
+          : [],
+      isDraftActive: this.interimReviewEnabled ? false : this.snapshot.isDraftActive,
+      draftPreview: this.snapshot.draftPreview,
       queuedCount: this.queued.length,
       waiting: [...this.snapshot.waiting, waiting],
       error: null,
@@ -177,8 +184,8 @@ export class CaptionDeskSession {
     this.edited = true;
     this.update({
       ...this.snapshot,
-      reviewText: failed.remainingText ? `${failed.text} ${failed.remainingText}` : failed.text,
-      rawText: failed.remainingText ? `${failed.text} ${failed.remainingText}` : failed.text,
+      reviewText: failed.remainingText ? `${failed.text}${failed.remainingText}` : failed.text,
+      rawText: failed.remainingText ? `${failed.text}${failed.remainingText}` : failed.text,
       sourceSegmentIds: [...failed.sourceSegmentIds],
       queuedCount: this.queued.length,
       waiting: this.snapshot.waiting.filter(item => item.requestId !== message.requestId),
@@ -189,6 +196,8 @@ export class CaptionDeskSession {
   clear(): void {
     this.edited = false;
     this.activeIsDraft = false;
+    this.activeDraftID = '';
+    this.activeDraftText = '';
     this.queued = [];
     this.update(EMPTY);
   }
@@ -197,31 +206,57 @@ export class CaptionDeskSession {
     if (message.type === 'caption.published') return this.acknowledge(message);
     if (message.type === 'caption.rejected') return this.reject(message);
     if (message.type === 'caption.draft') {
-      if (!this.interimEnabled && !this.interimReviewEnabled) return;
-      const incomingDraft = this.interimEnabled ? message.source.text : '';
-      if (this.interimReviewEnabled) {
-        const isActiveDraft = this.activeIsDraft &&
-          this.snapshot.sourceSegmentIds.length === 1 &&
-          this.snapshot.sourceSegmentIds[0] === message.source.segmentId;
-        if (
-          this.snapshot.sourceSegmentIds.length === 0 ||
-          !this.activeIsDraft ||
-          (isActiveDraft && !this.edited)
-        ) {
+      if (!this.interimReviewEnabled) {
+        if (!this.activeIsDraft || this.activeDraftID === message.source.segmentId) {
           this.activeIsDraft = true;
-          this.edited = false;
+          this.activeDraftID = message.source.segmentId;
+          this.activeDraftText = message.source.text;
           this.update({
             ...this.snapshot,
-            reviewText: message.source.text,
-            rawText: message.source.text,
-            sourceSegmentIds: [message.source.segmentId],
-            incomingDraft,
+            isDraftActive: true,
+            draftPreview: message.source.text,
             error: null,
           });
-          return;
         }
+        return;
       }
-      this.update({ ...this.snapshot, incomingDraft });
+      const isActiveDraft = this.activeIsDraft &&
+        this.snapshot.sourceSegmentIds.at(-1) === message.source.segmentId;
+      if (isActiveDraft) {
+        const rawText = replaceTrailingSource(
+          this.snapshot.rawText,
+          this.activeDraftText,
+          message.source.text,
+        );
+        const reviewText = this.interimReviewEnabled && this.edited
+          ? this.snapshot.reviewText
+          : replaceTrailingSource(this.snapshot.reviewText, this.activeDraftText, message.source.text);
+        this.activeDraftText = message.source.text;
+        this.update({
+          ...this.snapshot,
+          reviewText,
+          rawText,
+          isDraftActive: true,
+          draftPreview: '',
+          error: null,
+        });
+        return;
+      }
+      if (!this.activeIsDraft || this.snapshot.sourceSegmentIds.length === 0) {
+        this.activeIsDraft = true;
+        this.activeDraftID = message.source.segmentId;
+        this.activeDraftText = message.source.text;
+        this.update({
+          ...this.snapshot,
+          reviewText: appendSourceText(this.snapshot.reviewText, message.source.text),
+          rawText: appendSourceText(this.snapshot.rawText, message.source.text),
+          sourceSegmentIds: [...this.snapshot.sourceSegmentIds, message.source.segmentId],
+          isDraftActive: true,
+          draftPreview: '',
+          error: null,
+        });
+        return;
+      }
       return;
     }
     if (message.type === 'caption.snapshot') {
@@ -231,85 +266,97 @@ export class CaptionDeskSession {
           .flatMap(item => item.sourceSegmentIds),
       );
       const pending = message.pending.filter(item => !waitingIDs.has(item.segmentId));
-      if (this.edited) {
-        const pendingByID = new Map(pending.map(item => [item.segmentId, item]));
-        if (this.activeIsDraft && message.draft) {
-          pendingByID.set(message.draft.segmentId, message.draft);
-        }
-        const activeStillValid = this.snapshot.sourceSegmentIds.every(id => pendingByID.has(id));
-        const knownIDs = new Set([
-          ...this.snapshot.sourceSegmentIds,
-          ...this.queued.map(item => item.segmentId),
-        ]);
-        const incoming = pending.filter(item => !knownIDs.has(item.segmentId));
-        if (activeStillValid) {
-          this.queued.push(...incoming);
-          this.update({
-            ...this.snapshot,
-            incomingDraft: this.interimEnabled ? message.draft?.text || '' : '',
-            queuedCount: this.queued.length,
-            error: null,
-          });
-          return;
-        }
-        this.update({
-          ...this.snapshot,
-          incomingDraft: this.interimEnabled ? message.draft?.text || '' : '',
-          sourceSegmentIds: this.snapshot.sourceSegmentIds.filter(id => pendingByID.has(id)),
-          error: 'The transcriber restarted while you were editing. Your text is preserved, but it cannot be published until new source text arrives.',
-        });
-        return;
-      }
-      const current = this.interimReviewEnabled
-        ? message.draft || pending.at(-1)
-        : pending[0];
-      this.edited = false;
-      this.activeIsDraft = Boolean(current && !current.isFinal);
-      this.queued = this.interimReviewEnabled ? [] : pending.slice(1);
+      const reviewDraft = this.interimReviewEnabled &&
+        message.draft &&
+        !waitingIDs.has(message.draft.segmentId)
+        ? message.draft
+        : undefined;
+      const sources = [...pending, ...(reviewDraft ? [reviewDraft] : [])];
+      const knownIDs = new Set(this.snapshot.sourceSegmentIds);
+      const incoming = sources.filter(item => !knownIDs.has(item.segmentId));
+      const rawText = sources.map(item => item.text).join(' ');
+      this.activeIsDraft = Boolean(message.draft);
+      this.activeDraftID = message.draft?.segmentId || '';
+      this.activeDraftText = message.draft?.text || '';
+      this.queued = [];
       this.update({
-        ...EMPTY,
-        reviewText: current?.text || '',
-        rawText: current?.text || '',
-        sourceSegmentIds: current ? [current.segmentId] : [],
-        incomingDraft: this.interimEnabled ? message.draft?.text || '' : '',
-        queuedCount: this.queued.length,
-        waiting: this.snapshot.waiting,
-        recentlyPublished: this.snapshot.recentlyPublished,
+        ...this.snapshot,
+        reviewText: this.edited
+          ? incoming.reduce((text, item) => appendSourceText(text, item.text), this.snapshot.reviewText)
+          : rawText,
+        rawText,
+        sourceSegmentIds: sources.map(item => item.segmentId),
+        isDraftActive: Boolean(message.draft),
+        draftPreview: this.interimReviewEnabled ? '' : message.draft?.text || '',
+        queuedCount: 0,
+        error: null,
       });
       return;
     }
     const source = message.source;
+    if (!this.interimReviewEnabled && this.activeIsDraft && this.activeDraftID === source.segmentId) {
+      this.activeIsDraft = false;
+      this.activeDraftID = '';
+      this.activeDraftText = '';
+      this.update({
+        ...this.snapshot,
+        reviewText: appendSourceText(this.snapshot.reviewText, source.text),
+        rawText: appendSourceText(this.snapshot.rawText, source.text),
+        sourceSegmentIds: [...this.snapshot.sourceSegmentIds, source.segmentId],
+        isDraftActive: false,
+        draftPreview: '',
+        queuedCount: 0,
+      });
+      return;
+    }
     if (this.snapshot.sourceSegmentIds.includes(source.segmentId)) {
       if (this.activeIsDraft) {
         this.activeIsDraft = false;
+        this.activeDraftID = '';
+        const rawText = replaceTrailingSource(this.snapshot.rawText, this.activeDraftText, source.text);
+        const reviewText = this.edited
+          ? this.snapshot.reviewText
+          : replaceTrailingSource(this.snapshot.reviewText, this.activeDraftText, source.text);
+        this.activeDraftText = '';
         this.update({
           ...this.snapshot,
-          reviewText: this.edited ? this.snapshot.reviewText : source.text,
-          rawText: source.text,
-          incomingDraft: '',
+          reviewText,
+          rawText,
+          isDraftActive: false,
+          draftPreview: '',
         });
       }
       return;
     }
     if (this.queued.some(item => item.segmentId === source.segmentId)) return;
-    if (this.snapshot.sourceSegmentIds.length > 0) {
-      this.queued.push(source);
-      this.update({ ...this.snapshot, incomingDraft: '', queuedCount: this.queued.length });
-      return;
-    }
     this.update({
       ...this.snapshot,
-      reviewText: source.text,
-      rawText: source.text,
-      sourceSegmentIds: [source.segmentId],
-      incomingDraft: '',
-      queuedCount: this.queued.length,
+      reviewText: appendSourceText(this.snapshot.reviewText, source.text),
+      rawText: appendSourceText(this.snapshot.rawText, source.text),
+      sourceSegmentIds: [...this.snapshot.sourceSegmentIds, source.segmentId],
+      isDraftActive: this.snapshot.isDraftActive,
+      draftPreview: this.snapshot.draftPreview,
+      queuedCount: 0,
     });
-    this.activeIsDraft = false;
   }
 
   private update(next: CaptionDeskSnapshot): void {
     this.snapshot = next;
     this.listeners.forEach(listener => listener());
   }
+}
+
+function appendSourceText(current: string, incoming: string): string {
+  const left = current.trimEnd();
+  const right = incoming.trim();
+  if (!left) return right;
+  if (!right) return left;
+  return `${left} ${right}`;
+}
+
+function replaceTrailingSource(current: string, previous: string, incoming: string): string {
+  const text = current.trimEnd();
+  const suffix = previous.trim();
+  if (!suffix || !text.endsWith(suffix)) return text;
+  return appendSourceText(text.slice(0, -suffix.length), incoming);
 }

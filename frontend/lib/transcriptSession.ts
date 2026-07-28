@@ -56,7 +56,6 @@ const EMPTY_SNAPSHOT: TranscriptSessionSnapshot = {
     interimTranscripts: new Map(),
 };
 const MAX_PACKET_ORDER_ENTRIES = 256;
-const MAX_PUBLICATION_IDS = 256;
 const decoder = new TextDecoder();
 
 export class TranscriptSession {
@@ -69,7 +68,6 @@ export class TranscriptSession {
     private readonly googleUpdates: TranscriptUpdateBuffer<BufferedTranscriptMessage>;
     private readonly geminiUpdates: TranscriptUpdateBuffer<BufferedTranscriptMessage>;
     private committedSequence = 0;
-    private publicationIDs = new Set<string>();
 
     constructor(options: TranscriptSessionOptions) {
         this.options = options;
@@ -122,13 +120,10 @@ export class TranscriptSession {
         const provider = parsed.provider || options.resolveProvider?.(sourceIdentity) || 'unknown';
         const message = { ...parsed, provider };
         if (message.publicationId) {
-            if (this.publicationIDs.has(message.publicationId)) return true;
-            this.publicationIDs.add(message.publicationId);
-            while (this.publicationIDs.size > MAX_PUBLICATION_IDS) {
-                const oldest = this.publicationIDs.values().next().value;
-                if (oldest === undefined) break;
-                this.publicationIDs.delete(oldest);
-            }
+            // Approved captions belong to caption.public / approved WS feeds.
+            // Raw Stream and Viewer sessions must never merge them into the
+            // provider transcript, even if a transport omits the topic.
+            return true;
         }
         if (parsed.provider) options.onProviderObserved?.(sourceIdentity, parsed.provider);
 
@@ -170,7 +165,6 @@ export class TranscriptSession {
         this.geminiUpdates.clear();
         this.translationsByTurn.clear();
         this.latestPacketByKey.clear();
-        if (clearCommitted) this.publicationIDs.clear();
         if (clearCommitted) this.committedSequence = 0;
 
         const transcripts = clearCommitted ? [] : this.snapshot.transcripts;

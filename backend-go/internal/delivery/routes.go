@@ -81,11 +81,11 @@ func setupLiveKitRoutes(
 	roomRoutes.Post("/:room/transcript-token/:provider", controlAuth, func(c *fiber.Ctx) error {
 		return handler.HandleCreateProviderTranscriptToken(c, transcriptAccess)
 	})
+	roomRoutes.Post("/:room/caption-token/ws", controlAuth, func(c *fiber.Ctx) error {
+		return handler.HandleCreateCaptionToken(c, transcriptAccess, supervisor)
+	})
 	roomRoutes.Post("/:room/caption-token/:provider", controlAuth, func(c *fiber.Ctx) error {
 		return handler.HandleCaptionDeskToken(c, cfg, rooms, supervisor)
-	})
-	roomRoutes.Post("/:room/caption-token/:provider/ws", controlAuth, func(c *fiber.Ctx) error {
-		return handler.HandleCreateCaptionToken(c, transcriptAccess, supervisor)
 	})
 	roomRoutes.Get(
 		"/:room/transcripts/ws",
@@ -98,7 +98,7 @@ func setupLiveKitRoutes(
 		websocket.New(handler.HandleProviderTranscriptWebSocket(handler.TranscriptHub())),
 	)
 	app.Get(
-		"/ws/caption/:provider/:room",
+		"/ws/caption/:room",
 		handler.CaptionWebSocketMiddleware(transcriptAccess),
 		websocket.New(handler.HandleCaptionWebSocket(handler.TranscriptHub())),
 	)

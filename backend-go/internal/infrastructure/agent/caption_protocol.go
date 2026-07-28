@@ -77,8 +77,6 @@ func parseCaptionCommand(payload []byte) (captionCommandEnvelope, error) {
 	command.Type = strings.TrimSpace(command.Type)
 	command.RequestID = strings.TrimSpace(command.RequestID)
 	command.Provider = strings.ToLower(strings.TrimSpace(command.Provider))
-	command.Text = strings.TrimSpace(command.Text)
-	command.RemainingText = strings.TrimSpace(command.RemainingText)
 	if command.RequestID == "" || len(command.RequestID) > maxCaptionCommandRequestLen || !isCaptionProvider(command.Provider) {
 		return captionCommandEnvelope{}, errInvalidCaptionCommand
 	}
@@ -89,15 +87,12 @@ func parseCaptionCommand(payload []byte) (captionCommandEnvelope, error) {
 			return captionCommandEnvelope{}, errInvalidCaptionCommand
 		}
 	case captionPublishType:
-		if command.Text == "" || len(command.Text) > maxCaptionCommandTextBytes ||
+		if strings.TrimSpace(command.Text) == "" || len(command.Text) > maxCaptionCommandTextBytes ||
 			len(command.RemainingText) > maxCaptionCommandTextBytes ||
 			len(command.SourceSegmentIDs) == 0 || len(command.SourceSegmentIDs) > maxCaptionCommandSourceIDs {
 			return captionCommandEnvelope{}, errInvalidCaptionCommand
 		}
 		if command.UseInterim != nil {
-			return captionCommandEnvelope{}, errInvalidCaptionCommand
-		}
-		if command.RemainingText != "" && len(command.SourceSegmentIDs) != 1 {
 			return captionCommandEnvelope{}, errInvalidCaptionCommand
 		}
 		seen := make(map[string]struct{}, len(command.SourceSegmentIDs))

@@ -34,7 +34,7 @@ test('control room adapter owns agent endpoint details', async () => {
     assert.equal(requests[1].url, 'http://localhost:3000/livekit/agent/stop');
 });
 
-test('approved caption adapter uses its distinct provider feed route', async () => {
+test('approved caption adapter uses its distinct room feed route', async () => {
     const urls: string[] = [];
     const originalFetch = globalThis.fetch;
     globalThis.fetch = async input => {
@@ -42,16 +42,15 @@ test('approved caption adapter uses its distinct provider feed route', async () 
         return new Response(JSON.stringify({
             token: 'signed',
             expiresAt: '2026-07-29T00:00:00Z',
-            websocketUrl: 'ws://localhost:3000/ws/caption/google/room-a?token=signed',
-            provider: 'google',
+            websocketUrl: 'ws://localhost:3000/ws/caption/room-a?token=signed',
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
     };
     try {
-        await createApprovedCaptionToken('http://localhost:3000', 'room-a', 'google');
+        await createApprovedCaptionToken('http://localhost:3000', 'room-a');
     } finally {
         globalThis.fetch = originalFetch;
     }
-    assert.deepEqual(urls, ['http://localhost:3000/livekit/rooms/room-a/caption-token/google/ws']);
+    assert.deepEqual(urls, ['http://localhost:3000/livekit/rooms/room-a/caption-token/ws']);
 });
 
 test('Caption Desk adapter encodes room and provider targets', async () => {

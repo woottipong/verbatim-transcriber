@@ -239,6 +239,34 @@ func TestModeratedOperatorDisconnectKeepsPendingState(t *testing.T) {
 	}
 }
 
+func TestNewModeratedOperatorStartsWithAnEmptyReviewWindow(t *testing.T) {
+	var packets []publishedData
+	agent := newModeratedTestAgent("google", &packets)
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ข้อความก่อนเข้าห้อง", IsFinal: true, Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-before",
+	})
+
+	agent.subscribeCaptionOperator("caption-operator-1", captionCommandEnvelope{
+		Type: captionSubscribeType, RequestID: "subscribe-1", Provider: "google",
+	})
+	snapshot := agent.moderator.Snapshot()
+	if snapshot.Draft != nil || len(snapshot.Pending) != 0 {
+		t.Fatalf("new operator snapshot = %#v, want empty", snapshot)
+	}
+
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ข้อความหลังเข้าห้อง", IsFinal: true, Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-after",
+	})
+	agent.subscribeCaptionOperator("caption-operator-1", captionCommandEnvelope{
+		Type: captionSubscribeType, RequestID: "subscribe-2", Provider: "google",
+	})
+	if got := len(agent.moderator.Snapshot().Pending); got != 1 {
+		t.Fatalf("same operator reconnect pending count = %d, want 1", got)
+	}
+}
+
 func newModeratedTestAgent(provider string, packets *[]publishedData) *Agent {
 	return &Agent{
 		preferredProvider: provider,

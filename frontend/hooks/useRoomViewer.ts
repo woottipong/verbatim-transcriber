@@ -200,7 +200,9 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         _kind?: DataPacket_Kind,
         topic?: string,
     ) => {
-        if (topic && topic !== 'caption.public') return;
+        // Raw transcript surfaces must not mix operator-approved captions into
+        // the provider feed. Approved captions have their own topic and WS feed.
+        if (topic) return;
         const agentIdentity = participant?.identity || 'unknown';
         transcriptSession.ingest(payload, agentIdentity, {
             resolveProvider: getProviderFromIdentity,

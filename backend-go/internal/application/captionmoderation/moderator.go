@@ -123,10 +123,6 @@ func (m *Moderator) Ingest(segment SourceSegment) Snapshot {
 	}
 
 	if !segment.IsFinal {
-		if m.useInterim && (m.draft == nil || m.draft.ID != segment.ID) {
-			m.pending = nil
-			m.rebuildPendingIndexLocked()
-		}
 		if m.draft == nil || segment.Sequence >= m.draft.Sequence {
 			copy := segment
 			m.draft = &copy
@@ -136,11 +132,6 @@ func (m *Moderator) Ingest(segment SourceSegment) Snapshot {
 
 	if m.draft != nil && m.draft.ID == segment.ID {
 		m.draft = nil
-	}
-	if m.useInterim {
-		m.pending = []SourceSegment{segment}
-		m.rebuildPendingIndexLocked()
-		return m.snapshotLocked()
 	}
 	if _, exists := m.pendingIndex[segment.ID]; exists {
 		return m.snapshotLocked()
@@ -161,10 +152,6 @@ func (m *Moderator) SetUseInterim(enabled bool) Snapshot {
 		return m.snapshotLocked()
 	}
 	m.useInterim = enabled
-	if enabled {
-		m.pending = nil
-		m.rebuildPendingIndexLocked()
-	}
 	return m.snapshotLocked()
 }
 
@@ -174,32 +161,42 @@ func (m *Moderator) Snapshot() Snapshot {
 	return m.snapshotLocked()
 }
 
+// StartReviewWindow discards transcript state created before a new operator
+// joined. Publications and request replay records remain intact.
+func (m *Moderator) StartReviewWindow() Snapshot {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.draft = nil
+	m.pending = nil
+	m.rebuildPendingIndexLocked()
+	return m.snapshotLocked()
+}
+
 func (m *Moderator) Publish(command PublishCommand) (Publication, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	command.RequestID = strings.TrimSpace(command.RequestID)
 	command.Provider = strings.ToLower(strings.TrimSpace(command.Provider))
-	command.Text = strings.TrimSpace(command.Text)
-	command.RemainingText = strings.TrimSpace(command.RemainingText)
 	if existing, ok := m.processed[command.RequestID]; command.RequestID != "" && ok {
 		return clonePublication(existing.publication), true, nil
 	}
-	if command.RequestID == "" || command.Text == "" || len(command.SourceSegmentIDs) == 0 {
-		return Publication{}, false, ErrInvalidCommand
-	}
-	if command.RemainingText != "" && len(command.SourceSegmentIDs) != 1 {
+	if command.RequestID == "" || strings.TrimSpace(command.Text) == "" || len(command.SourceSegmentIDs) == 0 {
 		return Publication{}, false, ErrInvalidCommand
 	}
 	if command.Provider != m.provider {
 		return Publication{}, false, ErrProviderMismatch
 	}
 	sourceIDs := make([]string, len(command.SourceSegmentIDs))
-	fromDraft := len(command.SourceSegmentIDs) == 1 &&
-		m.draft != nil &&
-		strings.TrimSpace(command.SourceSegmentIDs[0]) == m.draft.ID &&
+	fromDraft := m.draft != nil &&
+		len(command.SourceSegmentIDs) > 0 &&
+		strings.TrimSpace(command.SourceSegmentIDs[len(command.SourceSegmentIDs)-1]) == m.draft.ID &&
 		m.draft.Provider == command.Provider
-	if !fromDraft && len(command.SourceSegmentIDs) > len(m.pending) {
+	pendingCount := len(command.SourceSegmentIDs)
+	if fromDraft {
+		pendingCount--
+	}
+	if pendingCount > len(m.pending) {
 		return Publication{}, false, ErrSourceMismatch
 	}
 	for index, rawID := range command.SourceSegmentIDs {
@@ -207,7 +204,10 @@ func (m *Moderator) Publish(command PublishCommand) (Publication, bool, error) {
 		if id == "" {
 			return Publication{}, false, ErrSourceMismatch
 		}
-		if !fromDraft && (m.pending[index].ID != id || m.pending[index].Provider != command.Provider) {
+		if index < pendingCount && (m.pending[index].ID != id || m.pending[index].Provider != command.Provider) {
+			return Publication{}, false, ErrSourceMismatch
+		}
+		if index == pendingCount && fromDraft && (m.draft == nil || m.draft.ID != id) {
 			return Publication{}, false, ErrSourceMismatch
 		}
 		sourceIDs[index] = id
@@ -222,23 +222,18 @@ func (m *Moderator) Publish(command PublishCommand) (Publication, bool, error) {
 		PublishedAt:      m.now(),
 	}
 	var publishedSources []SourceSegment
+	publishedSources = append(publishedSources, m.pending[:pendingCount]...)
+	m.pending = append([]SourceSegment(nil), m.pending[pendingCount:]...)
 	if fromDraft {
-		publishedSources = []SourceSegment{*m.draft}
+		publishedSources = append(publishedSources, *m.draft)
 		m.draft = nil
-		m.rememberConsumedDraftLocked(sourceIDs[0])
-		if command.RemainingText != "" {
-			remainder := publishedSources[0]
-			remainder.Text = command.RemainingText
-			remainder.IsFinal = true
-			m.pending = append([]SourceSegment{remainder}, m.pending...)
-		}
-	} else {
-		publishedSources = append([]SourceSegment(nil), m.pending[:len(sourceIDs)]...)
-		if command.RemainingText != "" {
-			m.pending[0].Text = command.RemainingText
-		} else {
-			m.pending = append([]SourceSegment(nil), m.pending[len(sourceIDs):]...)
-		}
+		m.rememberConsumedDraftLocked(sourceIDs[len(sourceIDs)-1])
+	}
+	if command.RemainingText != "" {
+		remainder := publishedSources[len(publishedSources)-1]
+		remainder.Text = command.RemainingText
+		remainder.IsFinal = true
+		m.pending = append([]SourceSegment{remainder}, m.pending...)
 	}
 	m.rebuildPendingIndexLocked()
 	m.rememberPublicationLocked(publication, publishedSources, command.RemainingText != "", fromDraft)
@@ -263,13 +258,15 @@ func (m *Moderator) Rollback(requestID string) bool {
 		}
 	}
 	if record.hasRemainder && len(m.pending) > 0 &&
-		len(record.sources) == 1 && m.pending[0].ID == record.sources[0].ID {
+		m.pending[0].ID == record.sources[len(record.sources)-1].ID {
 		m.pending = m.pending[1:]
 	}
 	if record.fromDraft {
-		m.forgetConsumedDraftLocked(record.sources[0].ID)
-		draft := record.sources[0]
+		last := len(record.sources) - 1
+		m.forgetConsumedDraftLocked(record.sources[last].ID)
+		draft := record.sources[last]
 		m.draft = &draft
+		m.pending = append(append([]SourceSegment(nil), record.sources[:last]...), m.pending...)
 	} else {
 		m.pending = append(append([]SourceSegment(nil), record.sources...), m.pending...)
 	}

@@ -64,13 +64,13 @@ func TestModeratorReplacesDraftAndKeepsFinalsInOrder(t *testing.T) {
 	}
 }
 
-func TestModeratorInterimModeClearsBacklogAndKeepsOnlyLatestSegment(t *testing.T) {
+func TestModeratorInterimModeKeepsBacklogAndLatestDraft(t *testing.T) {
 	moderator := New("google", ModeModerated, time.Now)
 	ingestFinals(moderator, "google-1", "google-2", "google-3")
 
 	snapshot := moderator.SetUseInterim(true)
-	if len(snapshot.Pending) != 0 {
-		t.Fatalf("pending after interim mode = %#v, want empty", snapshot.Pending)
+	if got, want := pendingIDs(snapshot), []string{"google-1", "google-2", "google-3"}; !equalStrings(got, want) {
+		t.Fatalf("pending after interim mode = %v, want %v", got, want)
 	}
 	moderator.Ingest(SourceSegment{
 		ID: "google-4", Provider: "google", Text: "ข้อความสด", Sequence: 4,
@@ -81,8 +81,38 @@ func TestModeratorInterimModeClearsBacklogAndKeepsOnlyLatestSegment(t *testing.T
 	snapshot = moderator.Ingest(SourceSegment{
 		ID: "google-5", Provider: "google", Text: "ข้อความสดใหม่", Sequence: 6,
 	})
-	if len(snapshot.Pending) != 0 || snapshot.Draft == nil || snapshot.Draft.ID != "google-5" {
-		t.Fatalf("latest-only snapshot = %#v", snapshot)
+	if got, want := pendingIDs(snapshot), []string{"google-1", "google-2", "google-3", "google-4"}; !equalStrings(got, want) {
+		t.Fatalf("pending snapshot = %v, want %v", got, want)
+	}
+	if snapshot.Draft == nil || snapshot.Draft.ID != "google-5" {
+		t.Fatalf("latest draft = %#v", snapshot.Draft)
+	}
+}
+
+func TestModeratorPublishesAccumulatedFinalsAndDraftWithRemainder(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	moderator.SetUseInterim(true)
+	ingestFinals(moderator, "google-1", "google-2")
+	moderator.Ingest(SourceSegment{
+		ID: "google-3", Provider: "google", Text: "ข้อความสด", Sequence: 3,
+	})
+
+	_, _, err := moderator.Publish(PublishCommand{
+		RequestID: "request-accumulated", Provider: "google",
+		SourceSegmentIDs: []string{"google-1", "google-2", "google-3"},
+		Text:             "ส่วนที่เผยแพร่",
+		RemainingText:    "ส่วนที่เหลือ",
+	})
+	if err != nil {
+		t.Fatalf("Publish(accumulated) error = %v", err)
+	}
+	snapshot := moderator.Snapshot()
+	if snapshot.Draft != nil {
+		t.Fatalf("draft remained after publish: %#v", snapshot.Draft)
+	}
+	if len(snapshot.Pending) != 1 || snapshot.Pending[0].ID != "google-3" ||
+		snapshot.Pending[0].Text != "ส่วนที่เหลือ" {
+		t.Fatalf("remaining pending = %#v", snapshot.Pending)
 	}
 }
 
@@ -118,6 +148,26 @@ func TestModeratorBoundsPendingSegmentsAtFiveHundred(t *testing.T) {
 	}
 }
 
+func TestModeratorStartReviewWindowDropsOnlyPreJoinTranscriptState(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	ingestFinals(moderator, "google-1", "google-2")
+	moderator.Ingest(SourceSegment{
+		ID: "google-3", Provider: "google", Text: "draft", Sequence: 3,
+	})
+
+	snapshot := moderator.StartReviewWindow()
+	if snapshot.Draft != nil || len(snapshot.Pending) != 0 {
+		t.Fatalf("review window snapshot = %#v, want empty", snapshot)
+	}
+
+	snapshot = moderator.Ingest(SourceSegment{
+		ID: "google-4", Provider: "google", Text: "new final", IsFinal: true, Sequence: 4,
+	})
+	if got, want := pendingIDs(snapshot), []string{"google-4"}; !equalStrings(got, want) {
+		t.Fatalf("post-join pending = %v, want %v", got, want)
+	}
+}
+
 func TestModeratorPublishesPendingPrefix(t *testing.T) {
 	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
 	moderator := New("google", ModeModerated, func() time.Time { return now })
@@ -143,6 +193,25 @@ func TestModeratorPublishesPendingPrefix(t *testing.T) {
 	}
 	if got, want := pendingIDs(moderator.Snapshot()), []string{"google-3"}; !equalStrings(got, want) {
 		t.Fatalf("remaining pending IDs = %v, want %v", got, want)
+	}
+}
+
+func TestModeratorPreservesOperatorFormatting(t *testing.T) {
+	moderator := New("google", ModeModerated, time.Now)
+	ingestFinals(moderator, "google-1")
+	formatted := "  บรรทัดแรก\\n  บรรทัดถัดไป  "
+
+	publication, _, err := moderator.Publish(PublishCommand{
+		RequestID:        "request-formatted",
+		Provider:         "google",
+		SourceSegmentIDs: []string{"google-1"},
+		Text:             formatted,
+	})
+	if err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if publication.Text != formatted {
+		t.Fatalf("publication text = %q, want %q", publication.Text, formatted)
 	}
 }
 

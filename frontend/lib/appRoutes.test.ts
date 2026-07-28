@@ -46,6 +46,9 @@ test('route builders encode rooms and never include credentials', () => {
 
 test('Caption Desk route builder encodes room and provider without credentials', () => {
   const url = buildCaptionDeskUrl('https://transcriber.example/app', 'room name', 'Google');
+  const roomUrl = buildCaptionDeskUrl('https://transcriber.example/app', 'room name', '');
   assert.equal(url, 'https://transcriber.example/app#caption-desk?room=room+name&provider=google');
+  assert.equal(roomUrl, 'https://transcriber.example/app#caption-desk?room=room+name');
   assert.equal(url.includes('token'), false);
+  assert.equal(roomUrl.includes('token'), false);
 });

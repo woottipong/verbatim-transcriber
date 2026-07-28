@@ -44,10 +44,10 @@ func TestHandleCreateTranscriptTokenRequiresSecret(t *testing.T) {
 	}
 }
 
-func TestBuildCaptionWebSocketURLUsesProviderAndRoom(t *testing.T) {
+func TestBuildCaptionWebSocketURLUsesRoom(t *testing.T) {
 	app := fiber.New()
 	app.Get("/", func(c *fiber.Ctx) error {
-		return c.SendString(buildCaptionWebSocketURL(c, "daily-briefing", "google", "signed token"))
+		return c.SendString(buildCaptionWebSocketURL(c, "daily-briefing", "signed token"))
 	})
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
 	request.Host = "transcriber.example"
@@ -57,7 +57,7 @@ func TestBuildCaptionWebSocketURLUsesProviderAndRoom(t *testing.T) {
 		t.Fatal(err)
 	}
 	body, _ := io.ReadAll(response.Body)
-	want := "wss://transcriber.example/ws/caption/google/daily-briefing?token=signed+token"
+	want := "wss://transcriber.example/ws/caption/daily-briefing?token=signed+token"
 	if string(body) != want {
 		t.Fatalf("URL = %q, want %q", body, want)
 	}
@@ -76,10 +76,10 @@ func TestHandleCreateCaptionTokenRequiresConnectedProvider(t *testing.T) {
 		return newCaptionTokenAgent()
 	})
 	app := fiber.New()
-	app.Post("/:room/:provider", func(c *fiber.Ctx) error {
+	app.Post("/:room", func(c *fiber.Ctx) error {
 		return HandleCreateCaptionToken(c, access, supervisor)
 	})
-	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/room-a/google", nil))
+	response, err := app.Test(httptest.NewRequest(http.MethodPost, "/room-a", nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestHandleCreateCaptionTokenReturnsApprovedFeedURL(t *testing.T) {
 	}
 	agent := <-created
 	waitForCaptionTokenSignal(t, agent.started)
-	for !hasConnectedAgent(supervisor, "room-a", "google") {
+	for !hasConnectedRoomAgent(supervisor, "room-a") {
 		select {
 		case <-time.After(time.Millisecond):
 		case <-t.Context().Done():
@@ -118,10 +118,10 @@ func TestHandleCreateCaptionTokenReturnsApprovedFeedURL(t *testing.T) {
 	t.Cleanup(func() { _ = supervisor.Stop("room-a", "google") })
 
 	app := fiber.New()
-	app.Post("/:room/:provider", func(c *fiber.Ctx) error {
+	app.Post("/:room", func(c *fiber.Ctx) error {
 		return HandleCreateCaptionToken(c, access, supervisor)
 	})
-	request := httptest.NewRequest(http.MethodPost, "/room-a/google", nil)
+	request := httptest.NewRequest(http.MethodPost, "/room-a", nil)
 	request.Host = "api.example.com"
 	request.Header.Set("X-Forwarded-Proto", "https")
 	response, err := app.Test(request)
@@ -132,7 +132,7 @@ func TestHandleCreateCaptionTokenReturnsApprovedFeedURL(t *testing.T) {
 		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
 	}
 	body, _ := io.ReadAll(response.Body)
-	if !strings.Contains(string(body), `wss://api.example.com/ws/caption/google/room-a?token=`) {
+	if !strings.Contains(string(body), `wss://api.example.com/ws/caption/room-a?token=`) {
 		t.Fatalf("response = %s", body)
 	}
 }
@@ -150,19 +150,19 @@ func TestCaptionAndTranscriptTokensCannotCrossMiddleware(t *testing.T) {
 		t.Fatal(err)
 	}
 	caption, err := access.Issue(t.Context(), transcriptaccess.Scope{
-		Room: "room-a", Provider: "google", Purpose: transcriptaccess.FeedCaption,
+		Room: "room-a", Purpose: transcriptaccess.FeedCaption,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	app := fiber.New()
-	app.Get("/caption/:provider/:room", CaptionWebSocketMiddleware(access), func(c *fiber.Ctx) error {
+	app.Get("/caption/:room", CaptionWebSocketMiddleware(access), func(c *fiber.Ctx) error {
 		return c.SendStatus(http.StatusNoContent)
 	})
 	app.Get("/raw/:provider/:room", ProviderTranscriptWebSocketMiddleware(access), func(c *fiber.Ctx) error {
 		return c.SendStatus(http.StatusNoContent)
 	})
-	if status := websocketUpgradeStatus(t, app, "/caption/google/room-a?token="+raw.Token); status != http.StatusUnauthorized {
+	if status := websocketUpgradeStatus(t, app, "/caption/room-a?token="+raw.Token); status != http.StatusUnauthorized {
 		t.Fatalf("raw token on caption endpoint = %d", status)
 	}
 	if status := websocketUpgradeStatus(t, app, "/raw/google/room-a?token="+caption.Token); status != http.StatusUnauthorized {
@@ -173,7 +173,7 @@ func TestCaptionAndTranscriptTokensCannotCrossMiddleware(t *testing.T) {
 func TestCaptionWebSocketWritesOnePlainTextFrameWithoutReadyEvent(t *testing.T) {
 	hub := transcript.NewHub()
 	app := fiber.New()
-	app.Get("/ws/caption/:provider/:room", fiberwebsocket.New(HandleCaptionWebSocket(hub)))
+	app.Get("/ws/caption/:room", fiberwebsocket.New(HandleCaptionWebSocket(hub)))
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +190,7 @@ func TestCaptionWebSocketWritesOnePlainTextFrameWithoutReadyEvent(t *testing.T) 
 	})
 
 	conn, _, err := gorillawebsocket.DefaultDialer.Dial(
-		"ws://"+listener.Addr().String()+"/ws/caption/google/room-a",
+		"ws://"+listener.Addr().String()+"/ws/caption/room-a",
 		nil,
 	)
 	if err != nil {
@@ -203,7 +203,7 @@ func TestCaptionWebSocketWritesOnePlainTextFrameWithoutReadyEvent(t *testing.T) 
 		ticker := time.NewTicker(10 * time.Millisecond)
 		defer ticker.Stop()
 		for range ticker.C {
-			hub.PublishCaption("room-a", "google", "ผู้ป่วยมีอาการเจ็บหน้าอก")
+			hub.PublishCaption("room-a", "ผู้ป่วยมีอาการเจ็บหน้าอก")
 			return
 		}
 	}()

@@ -41,6 +41,23 @@ func TestPolicyRejectsInvalidProviderBeforeRoomLookup(t *testing.T) {
 	}
 }
 
+func TestPolicyAllowsRoomScopedCaptionFeed(t *testing.T) {
+	codec := &fakeCodec{}
+	policy := New(
+		fakeRooms{room: roomoperations.Room{Name: "room-a", SID: "RM_1"}},
+		codec,
+		fakeGenerations(2),
+	)
+
+	grant, err := policy.Issue(context.Background(), Scope{Room: "room-a", Purpose: FeedCaption})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grant.Scope.Provider != "" || codec.provider != "" || codec.purpose != string(FeedCaption) {
+		t.Fatalf("caption grant was not room scoped: %#v, %#v", grant, codec)
+	}
+}
+
 type fakeRooms struct {
 	room roomoperations.Room
 	err  error

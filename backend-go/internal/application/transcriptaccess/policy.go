@@ -123,9 +123,6 @@ func normalizeScope(scope Scope) (Scope, error) {
 	if scope.Purpose != FeedTranscript && scope.Purpose != FeedCaption {
 		return Scope{}, ErrInvalidProvider
 	}
-	if scope.Purpose == FeedCaption && scope.Provider == "" {
-		return Scope{}, ErrInvalidProvider
-	}
 	if scope.Provider == "" {
 		return scope, nil
 	}

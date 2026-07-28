@@ -97,7 +97,7 @@ The lean external WebSocket uses one JSON object per text frame:
 {"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":true}
 ```
 
-Moderated agents additionally expose an approved-caption feed. It emits one plain UTF-8 text frame per approved publication:
+Caption Desk additionally exposes one room-scoped approved-caption feed. It emits one plain UTF-8 text frame per approved publication, regardless of the selected input provider:
 
 ```text
 ผู้ป่วยมีอาการเจ็บหน้าอก

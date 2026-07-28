@@ -232,8 +232,8 @@ public frontend build.
 | `POST` | `/livekit/rooms/:room/transcript-token/:provider` | Issue a 24-hour room/provider-bound WebSocket URL |
 | `GET` | `/ws/transcript/:provider/:room?token=...` | Read-only lean provider transcript WebSocket |
 | `POST` | `/livekit/rooms/:room/caption-token/:provider` | Issue a LiveKit token for a Caption Desk operator attached to an active provider |
-| `POST` | `/livekit/rooms/:room/caption-token/:provider/ws` | Issue a purpose-bound approved-caption WebSocket URL |
-| `GET` | `/ws/caption/:provider/:room?token=...` | Approved captions as one plain UTF-8 text frame per publication |
+| `POST` | `/livekit/rooms/:room/caption-token/ws` | Issue a purpose-bound, room-scoped approved-caption WebSocket URL |
+| `GET` | `/ws/caption/:room?token=...` | Approved captions as one plain UTF-8 text frame per publication |
 | `GET` | `/livekit/rooms/:name` | Room participants |
 | `DELETE` | `/livekit/rooms/:name` | Delete room |
 | `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove participant |
@@ -255,7 +255,7 @@ There are no public `/google`, `/azure`, or `/gemini` audio WebSocket routes.
 
 Provider transcript WebSockets are text-frame feeds and are separate from the upstream Azure provider WebSocket. They authenticate with a signed HS256 JWT containing the room, provider, current LiveKit room SID, generation, issuer and subject `transcript:subscribe`, and an expiry 24 hours from issuance. Deleting a room invalidates active subscribers and prevents an old link from attaching to a recreated room with the same name. Provider feeds have no history/replay, ready event, audio input, or commands.
 
-Approved caption sockets use the same expiry and room-generation invalidation but a distinct signed `caption` purpose. They send only approved source text, with no JSON, Draft, ready event, replay, audio, or commands. Caption moderation state is in memory; agent restart clears pending segments and processed request history.
+Approved caption sockets use the same expiry and room-generation invalidation but a distinct signed `caption` purpose. One room-scoped feed receives publications from its active Caption Desk regardless of the selected input provider. It sends only approved source text, with no JSON, Draft, ready event, replay, audio, or commands. Caption moderation state is in memory; agent restart clears pending segments and processed request history.
 
 ```json
 {"text":"ผู้ป่วยมีอาการ","isFinal":false}

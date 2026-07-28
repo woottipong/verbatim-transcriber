@@ -104,8 +104,8 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         isDeletingRoom,
         generatingTranscriptProviders,
         transcriptFeedErrors,
-        captionFeedErrors,
-        generatingCaptionProviders,
+        captionFeedError,
+        isGeneratingCaptionLink,
         refreshRooms,
         refreshAgentStatus,
         createRoom,
@@ -148,7 +148,10 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         return rooms.filter(room => room.name.toLowerCase().includes(query));
     }, [rooms, searchQuery]);
     const activeTranscriptLink = (provider: AgentProvider) => getActiveTranscriptLink(selectedRoomName, provider);
-    const activeApprovedLink = (provider: AgentProvider) => activeCaptionLink(selectedRoomName, provider);
+    const approvedLink = activeCaptionLink(selectedRoomName);
+    const approvedError = captionFeedError?.roomName === selectedRoomName
+        ? captionFeedError.message
+        : null;
     const readiness = deriveAdminReadiness(selectedRoom?.participants ?? [], selectedAgents.length);
 
     const rememberDialogTrigger = (trigger: HTMLElement) => {
@@ -290,20 +293,19 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         await copyText(response.websocketUrl, `${providerLabels[provider]} WebSocket link`);
     };
 
-    const copyApprovedLink = async (provider: AgentProvider) => {
-        const response = activeApprovedLink(provider);
-        if (!response) {
-            showNotice({ tone: 'error', message: `Generate the ${providerLabels[provider]} approved caption link first.` });
+    const copyApprovedLink = async () => {
+        if (!approvedLink) {
+            showNotice({ tone: 'error', message: 'Generate the approved caption link before copying it.' });
             return;
         }
-        await copyText(response.websocketUrl, `${providerLabels[provider]} approved caption link`);
+        await copyText(approvedLink.websocketUrl, 'Approved caption link');
     };
 
-    const getApprovedLink = async (provider: AgentProvider) => {
+    const getApprovedLink = async () => {
         if (!selectedRoom) return;
         try {
-            await generateCaptionLink(selectedRoom.name, provider);
-            showNotice({ tone: 'success', message: `${providerLabels[provider]} approved caption link is ready.` });
+            await generateCaptionLink(selectedRoom.name);
+            showNotice({ tone: 'success', message: 'Approved caption link is ready.' });
         } catch (err) {
             showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to generate approved caption link' });
         }
@@ -451,9 +453,9 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                             <ShareRow
                                                 icon={<PencilLine size={16} />}
                                                 label="Caption Desk"
-                                                description="Choose a room and provider to review captions"
-                                                onOpen={() => openLink(buildCaptionDeskUrl(appBaseUrl, '', ''))}
-                                                onCopy={() => void copyText(buildCaptionDeskUrl(appBaseUrl, '', ''), 'Caption Desk link')}
+                                                description="Choose an active provider to review captions"
+                                                onOpen={() => openLink(buildCaptionDeskUrl(appBaseUrl, selectedRoom.name, ''))}
+                                                onCopy={() => void copyText(buildCaptionDeskUrl(appBaseUrl, selectedRoom.name, ''), 'Caption Desk link')}
                                             />
                                         </div>
                                     </section>
@@ -520,7 +522,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                     </section>
 
                                     <section className="admin-section order-4 xl:col-span-2" aria-labelledby="external-systems-heading">
-                                        <SectionHeading id="external-systems-heading" icon={<Cable size={16} />} title="External systems" detail="Generate one signed feed for each active provider." />
+                                        <SectionHeading id="external-systems-heading" icon={<Cable size={16} />} title="External systems" detail="Generate provider live feeds and one approved feed for this room." />
                                         <div className="mt-3 space-y-2">
                                         {runningTranscriptProviders.length === 0 ? (
                                             <div className="rounded-lg bg-slate-950/20 px-4 py-4">
@@ -528,20 +530,17 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                             </div>
                                         ) : runningTranscriptProviders.map(provider => {
                                             const link = activeTranscriptLink(provider);
-                                            const approvedLink = activeApprovedLink(provider);
                                             const isGenerating = generatingTranscriptProviders.has(provider);
-                                            const isGeneratingApproved = generatingCaptionProviders.has(provider);
-                                            const isModerated = selectedAgents.some(agent => agent.provider === provider && agent.mode === 'moderated');
-                                            const approvedError = captionFeedErrors[provider]?.roomName === selectedRoomName
-                                                ? captionFeedErrors[provider]?.message
-                                                : null;
                                             const error = transcriptFeedErrors[provider]?.roomName === selectedRoomName
                                                 ? transcriptFeedErrors[provider]?.message
                                                 : null;
                                             return (
                                                 <div key={provider} className="admin-control-surface rounded-lg p-3 sm:p-4">
                                                     <div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-                                                        <p className="text-sm font-medium text-white">{providerLabels[provider]}</p>
+                                                        <div className="min-w-32">
+                                                            <p className="text-sm font-medium text-white">{providerLabels[provider]}</p>
+                                                            <p className="text-xs text-slate-500">Live transcript</p>
+                                                        </div>
                                                         {link && (
                                                             <div className="min-w-0 rounded-md border border-slate-700 bg-slate-950/45 px-3 py-2">
                                                                 <code className="block truncate text-xs text-slate-300" title={maskTranscriptWebSocketUrl(link.websocketUrl)}>
@@ -575,31 +574,6 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                                             <span className="text-slate-500">New links do not revoke existing links.</span>
                                                         </div>
                                                     )}
-                                                    {isModerated && (
-                                                        <div className="mt-3 border-t border-slate-700/60 pt-3">
-                                                            <div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-                                                                <p className="text-xs font-medium uppercase tracking-wide text-slate-400">Approved captions</p>
-                                                                {approvedLink && (
-                                                                    <div className="min-w-0 rounded-md border border-slate-700 bg-slate-950/45 px-3 py-2">
-                                                                        <code className="block truncate text-xs text-slate-300">{maskTranscriptWebSocketUrl(approvedLink.websocketUrl)}</code>
-                                                                    </div>
-                                                                )}
-                                                                <div className="flex gap-2">
-                                                                    <button onClick={() => void getApprovedLink(provider)} disabled={isGeneratingApproved} className="control-button control-button--inline">
-                                                                        {isGeneratingApproved ? <LoaderCircle size={15} className="animate-spin" /> : <RefreshCw size={15} />}
-                                                                        {approvedError ? 'Retry' : approvedLink ? 'Generate new' : 'Generate link'}
-                                                                    </button>
-                                                                    <button onClick={() => void copyApprovedLink(provider)} disabled={!approvedLink || isGeneratingApproved || Boolean(approvedError)} className="control-button control-button--inline control-button--inline-accent">
-                                                                        <Copy size={15} /> Copy URL
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                            {approvedLink && !approvedError && (
-                                                                <p className="mt-2 text-xs text-emerald-200">Ready · expires {formatExpiry(approvedLink.expiresAt)}</p>
-                                                            )}
-                                                            {approvedError && <p className="mt-2 text-xs text-red-200" role="alert">{approvedError}</p>}
-                                                        </div>
-                                                    )}
                                                     {error && (
                                                         <p className="mt-2 flex max-w-2xl items-start gap-2 text-sm leading-5 text-red-200" role="alert">
                                                             <AlertTriangle size={15} className="mt-0.5 shrink-0" aria-hidden="true" />
@@ -610,13 +584,54 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                             );
                                         })}
                                         {runningTranscriptProviders.length > 0 && (
+                                            <div className="admin-control-surface rounded-lg p-3 sm:p-4">
+                                                <div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+                                                    <div className="min-w-32">
+                                                        <p className="text-sm font-medium text-white">Approved captions</p>
+                                                        <p className="text-xs text-slate-500">Caption Desk · room output</p>
+                                                    </div>
+                                                    {approvedLink && (
+                                                        <div className="min-w-0 rounded-md border border-slate-700 bg-slate-950/45 px-3 py-2">
+                                                            <code className="block truncate text-xs text-slate-300" title={maskTranscriptWebSocketUrl(approvedLink.websocketUrl)}>
+                                                                {maskTranscriptWebSocketUrl(approvedLink.websocketUrl)}
+                                                            </code>
+                                                        </div>
+                                                    )}
+                                                    <div className="flex shrink-0 flex-wrap gap-2 sm:col-start-3">
+                                                        <button
+                                                            onClick={() => void getApprovedLink()}
+                                                            disabled={isGeneratingCaptionLink}
+                                                            className="control-button control-button--inline"
+                                                            aria-label={`${approvedError ? 'Retry' : approvedLink ? 'Generate new' : 'Generate'} approved caption WebSocket link`}
+                                                        >
+                                                            {isGeneratingCaptionLink ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
+                                                            {approvedError ? 'Retry' : approvedLink ? 'Generate new' : 'Generate link'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => void copyApprovedLink()}
+                                                            disabled={!approvedLink || isGeneratingCaptionLink || Boolean(approvedError)}
+                                                            className="control-button control-button--inline control-button--inline-accent"
+                                                            aria-label="Copy approved caption WebSocket URL"
+                                                        >
+                                                            <Copy size={15} aria-hidden="true" /> Copy URL
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                {approvedLink && !approvedError && (
+                                                    <p className="mt-2 text-xs text-emerald-200">Ready · expires {formatExpiry(approvedLink.expiresAt)}</p>
+                                                )}
+                                                {approvedError && <p className="mt-2 text-xs text-red-200" role="alert">{approvedError}</p>}
+                                            </div>
+                                        )}
+                                        {runningTranscriptProviders.length > 0 && (
                                             <div className="px-1">
                                                 <p className="text-xs leading-5 text-slate-500">Anyone with a signed URL can read that provider’s live transcript until it expires.</p>
                                                 <details className="mt-2 text-xs text-slate-400">
                                                     <summary className="cursor-pointer select-none font-medium text-slate-300">Integration details</summary>
                                                     <div className="mt-2 space-y-2 rounded-lg border border-slate-700/70 bg-slate-950/25 p-3 leading-5">
-                                                        <p>Connect with the copied URL. Each WebSocket message is a JSON object; replace interim text until <code>isFinal</code> is true.</p>
-                                                        <code className="block overflow-x-auto rounded bg-slate-950/60 px-2 py-1.5 text-slate-300">{'{"text":"ผู้ป่วยมีอาการ","isFinal":false}'}</code>
+                                                <p>The live transcript feed sends JSON; replace interim text until <code>isFinal</code> is true.</p>
+                                                <code className="block overflow-x-auto rounded bg-slate-950/60 px-2 py-1.5 text-slate-300">{'{"text":"ผู้ป่วยมีอาการ","isFinal":false}'}</code>
+                                                <p>The approved caption feed sends one plain UTF-8 text message for each Caption Desk publication.</p>
                                                     </div>
                                                 </details>
                                             </div>

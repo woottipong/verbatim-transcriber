@@ -45,6 +45,11 @@ test('transcript token responses are validated without storing them', () => {
         expiresAt: '2026-07-17T10:00:00Z',
         websocketUrl: 'wss://example.test/ws/transcript/google/demo?token=signed-token',
     }), true);
+    assert.equal(isTranscriptTokenResponse({
+        token: 'signed-caption-token',
+        expiresAt: '2026-07-17T10:00:00Z',
+        websocketUrl: 'wss://example.test/ws/caption/demo?token=signed-caption-token',
+    }), true);
     assert.equal(isTranscriptTokenResponse({ provider: 'openai', token: 'x', expiresAt: '2026-07-17T10:00:00Z', websocketUrl: 'ws://x' }), false);
     assert.equal(isTranscriptTokenResponse({ provider: 'google', token: 'x', expiresAt: 'not-a-date', websocketUrl: 'ws://x' }), false);
     assert.equal(isTranscriptTokenResponse({ provider: 'google', token: 'x', expiresAt: '2026-07-17T10:00:00Z', websocketUrl: 'https://x' }), false);

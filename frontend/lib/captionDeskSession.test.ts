@@ -8,20 +8,20 @@ const pending = (id: string, text: string) => packet({
   source: { segmentId: id, text, provider: 'google', isFinal: true, sequence: 1 },
 });
 
-test('finals queue behind the active segment and release one at a time', () => {
+test('finals accumulate in one editable review buffer', () => {
   const session = new CaptionDeskSession();
   session.ingestOperatorPacket(pending('g-1', 'หนึ่ง'));
   session.ingestOperatorPacket(pending('g-2', 'สอง'));
-  assert.equal(session.getSnapshot().reviewText, 'หนึ่ง');
-  assert.equal(session.getSnapshot().rawText, 'หนึ่ง');
-  assert.equal(session.getSnapshot().queuedCount, 1);
-  session.edit('แก้หนึ่ง');
+  assert.equal(session.getSnapshot().reviewText, 'หนึ่ง สอง');
+  assert.equal(session.getSnapshot().rawText, 'หนึ่ง สอง');
+  assert.equal(session.getSnapshot().queuedCount, 0);
+  session.edit('แก้หนึ่ง แก้สอง');
 
   const command = session.release('google');
-  assert.equal(command?.text, 'แก้หนึ่ง');
-  assert.deepEqual(command?.sourceSegmentIds, ['g-1']);
-  assert.equal(session.getSnapshot().reviewText, 'สอง');
-  assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-2']);
+  assert.equal(command?.text, 'แก้หนึ่ง แก้สอง');
+  assert.deepEqual(command?.sourceSegmentIds, ['g-1', 'g-2']);
+  assert.equal(session.getSnapshot().reviewText, '');
+  assert.deepEqual(session.getSnapshot().sourceSegmentIds, []);
   assert.equal(session.getSnapshot().queuedCount, 0);
   assert.equal(session.getSnapshot().waiting.length, 1);
 });
@@ -32,9 +32,9 @@ test('release at the caret publishes only the prefix and keeps the remainder', (
 
   const command = session.release('google', 'ประโยคแรก'.length);
   assert.equal(command?.text, 'ประโยคแรก');
-  assert.equal(command?.remainingText, 'ประโยคถัดไป');
+  assert.equal(command?.remainingText, ' ประโยคถัดไป');
   assert.deepEqual(command?.sourceSegmentIds, ['g-1']);
-  assert.equal(session.getSnapshot().reviewText, 'ประโยคถัดไป');
+  assert.equal(session.getSnapshot().reviewText, ' ประโยคถัดไป');
   assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-1']);
 
   session.acknowledge({
@@ -47,9 +47,22 @@ test('release at the caret publishes only the prefix and keeps the remainder', (
     publishedAt: 1,
   });
   const remainder = session.release('google');
-  assert.equal(remainder?.text, 'ประโยคถัดไป');
+  assert.equal(remainder?.text, ' ประโยคถัดไป');
   assert.equal(remainder?.remainingText, undefined);
   assert.deepEqual(remainder?.sourceSegmentIds, ['g-1']);
+});
+
+test('release preserves operator whitespace and line breaks on both sides of the caret', () => {
+  const session = new CaptionDeskSession();
+  session.ingestOperatorPacket(pending('g-1', 'ข้อความต้นทาง'));
+  session.edit('  บรรทัดแรก \n  บรรทัดถัดไป  ');
+
+  const splitAt = '  บรรทัดแรก \n'.length;
+  const command = session.release('google', splitAt);
+
+  assert.equal(command?.text, '  บรรทัดแรก \n');
+  assert.equal(command?.remainingText, '  บรรทัดถัดไป  ');
+  assert.equal(session.getSnapshot().reviewText, '  บรรทัดถัดไป  ');
 });
 
 test('release at the beginning does not publish the whole caption', () => {
@@ -85,9 +98,9 @@ test('reconnect snapshot keeps the remainder of a partial publication active', (
     ],
   }));
 
-  assert.equal(session.getSnapshot().reviewText, 'ประโยคถัดไป');
-  assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-1']);
-  assert.equal(session.getSnapshot().queuedCount, 1);
+  assert.equal(session.getSnapshot().reviewText, ' ประโยคถัดไป ข้อความใหม่');
+  assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-1', 'g-2']);
+  assert.equal(session.getSnapshot().queuedCount, 0);
   assert.equal(session.getSnapshot().error, null);
 });
 
@@ -141,8 +154,9 @@ test('rejection restores failed text before newer edits', () => {
   assert.equal(session.getSnapshot().reviewText, 'แก้สอง');
 });
 
-test('draft replaces draft and snapshot replaces pending state', () => {
+test('final review mode keeps the current draft separate from editable finals', () => {
   const session = new CaptionDeskSession();
+  session.ingestOperatorPacket(pending('g-0', 'ข้อความก่อนหน้า'));
   session.ingestOperatorPacket(packet({
     type: 'caption.draft', provider: 'google',
     source: { segmentId: 'draft', text: 'กำลัง', provider: 'google', isFinal: false, sequence: 1 },
@@ -151,32 +165,28 @@ test('draft replaces draft and snapshot replaces pending state', () => {
     type: 'caption.draft', provider: 'google',
     source: { segmentId: 'draft', text: 'กำลังพูด', provider: 'google', isFinal: false, sequence: 2 },
   }));
-  assert.equal(session.getSnapshot().incomingDraft, 'กำลังพูด');
-  session.ingestOperatorPacket(packet({
-    type: 'caption.snapshot', requestId: 's-1', provider: 'google',
-    pending: [{ segmentId: 'g-1', text: 'ใหม่', provider: 'google', isFinal: true, sequence: 3 }],
-  }));
-  assert.equal(session.getSnapshot().reviewText, 'ใหม่');
+  assert.equal(session.getSnapshot().reviewText, 'ข้อความก่อนหน้า');
+  assert.equal(session.getSnapshot().draftPreview, 'กำลังพูด');
+  assert.equal(session.getSnapshot().isDraftActive, true);
+  session.edit('ข้อความก่อนหน้าที่แก้แล้ว');
+  const command = session.release('google');
+  assert.equal(command?.text, 'ข้อความก่อนหน้าที่แก้แล้ว');
+  assert.deepEqual(command?.sourceSegmentIds, ['g-0']);
+  assert.equal(session.getSnapshot().draftPreview, 'กำลังพูด');
+
+  session.ingestOperatorPacket(pending('draft', 'ข้อความ final'));
+  assert.equal(session.getSnapshot().reviewText, 'ข้อความ final');
+  assert.equal(session.getSnapshot().draftPreview, '');
+  assert.equal(session.getSnapshot().isDraftActive, false);
+  session.edit('ข้อความที่แก้แล้ว');
+  assert.equal(session.getSnapshot().reviewText, 'ข้อความที่แก้แล้ว');
 });
 
-test('disabled interim stops draft state updates without blocking finals', () => {
+test('final review mode accepts a finalized packet without a preceding draft', () => {
   const session = new CaptionDeskSession();
-  session.setInterimEnabled(false);
-  session.ingestOperatorPacket(packet({
-    type: 'caption.draft', provider: 'google',
-    source: { segmentId: 'draft', text: 'ไม่ควรแสดง', provider: 'google', isFinal: false, sequence: 1 },
-  }));
-  assert.equal(session.getSnapshot().incomingDraft, '');
-
   session.ingestOperatorPacket(pending('g-1', 'ข้อความ final'));
   assert.equal(session.getSnapshot().reviewText, 'ข้อความ final');
-
-  session.setInterimEnabled(true);
-  session.ingestOperatorPacket(packet({
-    type: 'caption.draft', provider: 'google',
-    source: { segmentId: 'draft-2', text: 'แสดงอีกครั้ง', provider: 'google', isFinal: false, sequence: 2 },
-  }));
-  assert.equal(session.getSnapshot().incomingDraft, 'แสดงอีกครั้ง');
+  assert.equal(session.getSnapshot().isDraftActive, false);
 });
 
 test('interim review mode makes a draft editable and publishable before final', () => {
@@ -212,7 +222,7 @@ test('human edits freeze the active interim until it is published', () => {
   }));
 
   assert.equal(session.getSnapshot().reviewText, 'ข้อความที่แก้แล้ว');
-  assert.equal(session.getSnapshot().incomingDraft, 'ข้อความแรกที่ยาวขึ้น');
+  assert.equal(session.getSnapshot().rawText, 'ข้อความแรกที่ยาวขึ้น');
 });
 
 test('matching final promotes an interim review without overwriting human edits', () => {
@@ -230,21 +240,56 @@ test('matching final promotes an interim review without overwriting human edits'
   assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-1']);
 });
 
-test('interim review mode replaces an unhandled final with the latest draft', () => {
+test('interim review mode accumulates finals and replaces only the active draft revision', () => {
   const session = new CaptionDeskSession();
   session.setInterimReviewEnabled(true);
   session.ingestOperatorPacket(pending('g-1', 'final เก่า'));
   session.ingestOperatorPacket(packet({
     type: 'caption.draft', provider: 'google',
-    source: { segmentId: 'g-2', text: 'ข้อความสดใหม่', provider: 'google', isFinal: false, sequence: 2 },
+    source: { segmentId: 'g-2', text: 'ข้อความสด', provider: 'google', isFinal: false, sequence: 2 },
+  }));
+  session.ingestOperatorPacket(packet({
+    type: 'caption.draft', provider: 'google',
+    source: { segmentId: 'g-2', text: 'ข้อความสดใหม่', provider: 'google', isFinal: false, sequence: 3 },
   }));
 
-  assert.equal(session.getSnapshot().reviewText, 'ข้อความสดใหม่');
-  assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-2']);
+  assert.equal(session.getSnapshot().reviewText, 'final เก่า ข้อความสดใหม่');
+  assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-1', 'g-2']);
   assert.equal(session.getSnapshot().queuedCount, 0);
+
+  const command = session.release('google', 'final เก่า'.length);
+  assert.equal(command?.text, 'final เก่า');
+  assert.equal(command?.remainingText, ' ข้อความสดใหม่');
+  assert.deepEqual(command?.sourceSegmentIds, ['g-1', 'g-2']);
 });
 
-test('reconnect snapshot preserves human edits and queues new finals', () => {
+test('partial publication keeps only the backend-owned remainder source for the next release', () => {
+  const session = new CaptionDeskSession();
+  session.ingestOperatorPacket(pending('g-1', 'หนึ่ง'));
+  session.ingestOperatorPacket(pending('g-2', 'สอง'));
+
+  const first = session.release('google', 'หนึ่ง'.length);
+  assert.equal(first?.text, 'หนึ่ง');
+  assert.equal(first?.remainingText, ' สอง');
+  assert.deepEqual(first?.sourceSegmentIds, ['g-1', 'g-2']);
+  assert.equal(session.getSnapshot().reviewText, ' สอง');
+  assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-2']);
+
+  session.ingestOperatorPacket(packet({
+    type: 'caption.published',
+    requestId: first?.requestId,
+    provider: 'google',
+    publicationId: 'p-1',
+    sourceSegmentIds: ['g-1', 'g-2'],
+    text: 'หนึ่ง',
+    publishedAt: 1,
+  }));
+  const second = session.release('google');
+  assert.equal(second?.text, ' สอง');
+  assert.deepEqual(second?.sourceSegmentIds, ['g-2']);
+});
+
+test('reconnect snapshot preserves human edits and appends new finals', () => {
   const session = new CaptionDeskSession();
   session.ingestOperatorPacket(pending('g-1', 'หนึ่ง'));
   session.edit('แก้ไขหนึ่ง');
@@ -255,10 +300,11 @@ test('reconnect snapshot preserves human edits and queues new finals', () => {
       { segmentId: 'g-2', text: 'สอง', provider: 'google', isFinal: true, sequence: 2 },
     ],
   }));
-  assert.equal(session.getSnapshot().reviewText, 'แก้ไขหนึ่ง');
+  assert.equal(session.getSnapshot().reviewText, 'แก้ไขหนึ่ง สอง');
   const command = session.release('google');
-  assert.equal(command?.text, 'แก้ไขหนึ่ง');
-  assert.equal(session.getSnapshot().reviewText, 'สอง');
+  assert.equal(command?.text, 'แก้ไขหนึ่ง สอง');
+  assert.deepEqual(command?.sourceSegmentIds, ['g-1', 'g-2']);
+  assert.equal(session.getSnapshot().reviewText, '');
   assert.equal(session.getSnapshot().queuedCount, 0);
 });
 

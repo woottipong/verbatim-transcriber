@@ -61,7 +61,7 @@ ASR source Draft/final
       → agent validates ordered source IDs and request idempotency
       → a published Draft consumes its segment and suppresses the later final
       ├── reliable `caption.public` → Transcript viewers
-      └── plain UTF-8 frame → `/ws/caption/:provider/:room`
+      └── plain UTF-8 frame → `/ws/caption/:room`
 ```
 
 Only one primary Caption Desk operator owns a room/provider queue. Unapproved text remains in the operator queue and is never auto-published to the approved-caption channel; the provider's raw transcript remains available normally. Gemini translation continues through the existing live path and is not editable in version 1.
@@ -78,8 +78,8 @@ Only one primary Caption Desk operator owns a room/provider queue. Unapproved te
 | `POST` | `/livekit/rooms/:room/transcript-token/:provider` | Signed room/provider-bound transcript URL |
 | `GET` | `/ws/transcript/:provider/:room?token=...` | Lean provider source transcript stream |
 | `POST` | `/livekit/rooms/:room/caption-token/:provider` | Dedicated Caption Desk participant token |
-| `POST` | `/livekit/rooms/:room/caption-token/:provider/ws` | Signed approved-caption URL |
-| `GET` | `/ws/caption/:provider/:room?token=...` | Approved source text only |
+| `POST` | `/livekit/rooms/:room/caption-token/ws` | Signed room-scoped approved-caption URL |
+| `GET` | `/ws/caption/:room?token=...` | Approved source text only |
 | `GET` / `DELETE` | `/livekit/rooms/:name` | Inspect/delete room |
 | `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove participant |
 | `POST` | `/livekit/agent/start` | Start provider agent |
@@ -94,7 +94,7 @@ The provider-specific socket sends one full provider-derived source snapshot per
 
 Clients replace the current Draft for interim frames and commit then clear it for final frames. Gemini translation stays on the LiveKit data channel. The provider socket has no ready event or replay; the legacy room-wide socket retains its versioned event contract.
 
-The approved-caption socket is separate and emits exactly one plain UTF-8 frame per accepted publication. It has no JSON envelope, Drafts, ready event, replay, or application commands. Signed grants include a feed purpose so raw and approved URLs cannot cross-authorize.
+The approved-caption socket is separate and room-scoped. It emits exactly one plain UTF-8 frame per accepted publication from the active Caption Desk, regardless of its selected input provider. It has no JSON envelope, Drafts, ready event, replay, or application commands. Signed grants include a feed purpose so raw and approved URLs cannot cross-authorize.
 
 ## Transcript packet
 
