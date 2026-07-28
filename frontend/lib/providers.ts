@@ -15,6 +15,18 @@ export function isAgentProvider(value: string): value is AgentProvider {
     return ['google', 'gemini', 'azure', 'gpt-realtime-whisper'].includes(value);
 }
 
+export function selectActiveRoomProviders(
+    agents: Array<{ running: boolean; room: string; provider: string }>,
+    roomName: string,
+): AgentProvider[] {
+    if (!roomName) return [];
+    return Array.from(new Set(
+        agents
+            .filter(agent => agent.running && agent.room === roomName && isAgentProvider(agent.provider))
+            .map(agent => agent.provider as AgentProvider),
+    ));
+}
+
 export function hasSourceLanguageLabel(provider: string | undefined, languageCode: string | undefined): boolean {
     return Boolean(languageCode && (provider === 'gemini' || provider === 'gpt-realtime-whisper'));
 }

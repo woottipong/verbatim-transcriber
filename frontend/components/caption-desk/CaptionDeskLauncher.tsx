@@ -6,7 +6,7 @@ import {
   type RoomDetails,
   type RunningAgent,
 } from '../../lib/api';
-import { formatProviderName, isAgentProvider, type AgentProvider } from '../../lib/providers';
+import { formatProviderName, selectActiveRoomProviders, type AgentProvider } from '../../lib/providers';
 
 interface CaptionDeskLauncherProps {
   backendUrl: string;
@@ -32,11 +32,7 @@ export function CaptionDeskLauncher({
     [rooms],
   );
   const providers = useMemo(
-    () => Array.from(new Set(
-      agents
-        .filter(agent => agent.running && agent.room === roomName && isAgentProvider(agent.provider))
-        .map(agent => agent.provider as AgentProvider),
-    )),
+    () => selectActiveRoomProviders(agents, roomName),
     [agents, roomName],
   );
 

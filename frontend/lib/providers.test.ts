@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel, providerFromAgentIdentity } from './providers.ts';
+import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel, providerFromAgentIdentity, selectActiveRoomProviders } from './providers.ts';
 
 test('preserves the full hyphenated OpenAI provider identity', () => {
     assert.equal(providerFromAgentIdentity('agent-gpt-realtime-whisper'), 'gpt-realtime-whisper');
@@ -32,3 +32,18 @@ test('provides one shared visual presentation for every provider surface', () =>
         draftText: 'text-slate-300',
     });
 });
+
+test('selectActiveRoomProviders filters active running providers for target room', () => {
+    const agents = [
+        { running: true, room: 'room-a', provider: 'google' },
+        { running: true, room: 'room-a', provider: 'gemini' },
+        { running: false, room: 'room-a', provider: 'azure' },
+        { running: true, room: 'room-b', provider: 'gpt-realtime-whisper' },
+        { running: true, room: 'room-a', provider: 'google' }, // duplicate
+    ];
+    assert.deepEqual(selectActiveRoomProviders(agents, 'room-a'), ['google', 'gemini']);
+    assert.deepEqual(selectActiveRoomProviders(agents, 'room-b'), ['gpt-realtime-whisper']);
+    assert.deepEqual(selectActiveRoomProviders(agents, 'room-c'), []);
+    assert.deepEqual(selectActiveRoomProviders(agents, ''), []);
+});
+

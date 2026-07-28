@@ -136,6 +136,25 @@ test('rapid releases use distinct IDs and acknowledgements remove only their req
   ]);
 });
 
+test('recently published history is automatically bounded to 10 items', () => {
+  const session = new CaptionDeskSession();
+  for (let i = 1; i <= 15; i += 1) {
+    session.ingestOperatorPacket(packet({
+      type: 'caption.published',
+      requestId: `req-${i}`,
+      provider: 'google',
+      publicationId: `pub-${i}`,
+      sourceSegmentIds: [`seg-${i}`],
+      text: `ข้อความ ${i}`,
+      publishedAt: i,
+    }));
+  }
+  const published = session.getSnapshot().recentlyPublished;
+  assert.equal(published.length, 10);
+  assert.equal(published[0].publicationId, 'pub-6');
+  assert.equal(published[9].publicationId, 'pub-15');
+});
+
 test('rejection restores failed text before newer edits', () => {
   const session = new CaptionDeskSession();
   session.ingestOperatorPacket(pending('g-1', 'หนึ่ง'));

@@ -982,6 +982,8 @@ select:focus-visible {
 .caption-review-editor {
   caret-color: var(--ink);
   caret-width: 2px; /* progressive enhancement — Chrome/Edge; no-op on Firefox/Safari */
+  font-size: 1.25rem;
+  line-height: 2.125rem;
 }
 
 .caption-review-editor:empty[data-draft=""]::before {

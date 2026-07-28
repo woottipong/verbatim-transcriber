@@ -32,6 +32,7 @@ const EMPTY: CaptionDeskSnapshot = {
   queuedCount: 0, waiting: [], recentlyPublished: [], error: null,
 };
 export const MAX_WAITING_CAPTIONS = 64;
+export const MAX_RECENTLY_PUBLISHED = 10;
 
 export class CaptionDeskSession {
   private snapshot: CaptionDeskSnapshot = EMPTY;
@@ -164,7 +165,7 @@ export class CaptionDeskSession {
       recentlyPublished: [
         ...this.snapshot.recentlyPublished,
         { publicationId: message.publicationId, text: message.text, publishedAt: message.publishedAt },
-      ].slice(-20),
+      ].slice(-MAX_RECENTLY_PUBLISHED),
       error: null,
     });
   }

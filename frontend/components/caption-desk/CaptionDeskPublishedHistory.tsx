@@ -39,7 +39,7 @@ export function CaptionDeskPublishedHistory({ snapshot }: CaptionDeskPublishedHi
                 <p className="break-words whitespace-pre-wrap text-sm leading-6 text-[var(--ink)] [overflow-wrap:anywhere]">{item.text}</p>
               </li>
             ))}
-            {[...snapshot.recentlyPublished].slice(-10).reverse().map(item => (
+            {[...snapshot.recentlyPublished].reverse().map(item => (
               <li key={item.publicationId} className="px-4 py-3">
                 <time className="mb-1 block text-xs text-[var(--subtle)]" dateTime={new Date(item.publishedAt).toISOString()}>
                   {formatPublishedTime(item.publishedAt)}
