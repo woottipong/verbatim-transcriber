@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,6 +67,54 @@ func TestOpenAITranscriptionCommitUsesDocumentedEvent(t *testing.T) {
 func TestNewOpenAITranscriptionProviderRequiresAPIKey(t *testing.T) {
 	if _, err := NewOpenAITranscriptionProvider(context.Background(), OpenAITranscriptionConfig{}); err == nil {
 		t.Fatal("provider without API key was accepted")
+	}
+}
+
+func TestOpenAITranscriptionStopUnblocksSaturatedResultPublisher(t *testing.T) {
+	provider := &openAITranscriptionProvider{
+		results:         make(chan domain.TranscriptResult, 1),
+		transcriptItems: make(map[string]string),
+	}
+	provider.results <- domain.TranscriptResult{Text: "buffer full"}
+
+	publishDone := make(chan struct{})
+	go func() {
+		defer close(publishDone)
+		provider.appendTranscriptDelta("item-1", 0, "blocked result")
+	}()
+	waitForOpenAIResultPublisher(t, provider)
+
+	stopDone := make(chan error, 1)
+	go func() {
+		stopDone <- provider.Stop()
+	}()
+	select {
+	case err := <-stopDone:
+		if err != nil {
+			t.Fatalf("Stop() error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Stop() blocked behind a saturated result publisher")
+	}
+	select {
+	case <-publishDone:
+	case <-time.After(time.Second):
+		t.Fatal("result publisher remained blocked after Stop()")
+	}
+}
+
+func waitForOpenAIResultPublisher(t *testing.T, provider *openAITranscriptionProvider) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		if !provider.resultsMu.TryLock() {
+			return
+		}
+		provider.resultsMu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("result publisher did not block on the saturated channel")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -283,6 +332,10 @@ func TestOpenAITranscriptionReconnectsAndReplaysRecentAudio(t *testing.T) {
 	if err := provider.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
+	provider.transcriptMu.Lock()
+	provider.transcriptItems["stale-item:0"] = "stale Draft"
+	provider.transcriptItemOrder = append(provider.transcriptItemOrder, "stale-item:0")
+	provider.transcriptMu.Unlock()
 	audio := pcm16Batch(4000, 40*time.Millisecond, 24000)
 	if err := provider.SendAudio(audio); err != nil {
 		t.Fatalf("SendAudio() error = %v", err)
@@ -295,6 +348,12 @@ func TestOpenAITranscriptionReconnectsAndReplaysRecentAudio(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatalf("timed out waiting for reconnect and replay; connections=%d", connectionCount.Load())
+	}
+	provider.transcriptMu.Lock()
+	staleItemCount := len(provider.transcriptItems)
+	provider.transcriptMu.Unlock()
+	if staleItemCount != 0 {
+		t.Fatalf("fresh session retained %d stale transcript items", staleItemCount)
 	}
 	select {
 	case _, ok := <-provider.Results():
@@ -711,6 +770,29 @@ func TestOpenAITranscriptionProviderPublishesSourceOnly(t *testing.T) {
 	}
 	if result.TurnID != "gpt-realtime-whisper:item-1:0" {
 		t.Fatalf("turn ID = %q", result.TurnID)
+	}
+}
+
+func TestOpenAITranscriptionBoundsActiveTranscriptItems(t *testing.T) {
+	provider := &openAITranscriptionProvider{
+		cfg:             normalizeOpenAITranscriptionConfig(OpenAITranscriptionConfig{}),
+		results:         make(chan domain.TranscriptResult, openAITranscriptionMaxActiveItems+1),
+		transcriptItems: make(map[string]string),
+	}
+	for index := 0; index <= openAITranscriptionMaxActiveItems; index++ {
+		itemID := fmt.Sprintf("item-%d", index)
+		if !provider.appendTranscriptDelta(itemID, 0, itemID) {
+			t.Fatalf("append item %d stopped provider", index)
+		}
+	}
+
+	provider.transcriptMu.Lock()
+	defer provider.transcriptMu.Unlock()
+	if got := len(provider.transcriptItems); got != openAITranscriptionMaxActiveItems {
+		t.Fatalf("active transcript items = %d, want %d", got, openAITranscriptionMaxActiveItems)
+	}
+	if _, exists := provider.transcriptItems["item-0:0"]; exists {
+		t.Fatal("oldest active transcript item was not evicted")
 	}
 }
 

@@ -6,10 +6,18 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	"thai-transcriber-backend/internal/application/captionmoderation"
 	"thai-transcriber-backend/internal/domain"
 )
+
+const defaultCaptionDraftInterval = 50 * time.Millisecond
+
+type captionDraftDelivery struct {
+	envelope captionOperatorEnvelope
+	identity string
+}
 
 type captionOperatorMetadata struct {
 	Role     string `json:"role"`
@@ -35,9 +43,19 @@ func (a *Agent) handleTranscriptMessage(message TranscriptMessage) {
 		Sequence:     sequence,
 		LanguageCode: message.LanguageCode,
 	}
-	snapshot := a.moderator.Ingest(source)
+	a.mu.Lock()
+	operatorID := a.captionOperatorID
+	reviewStarted := a.captionReviewStarted
+	if operatorID == "" && !reviewStarted {
+		a.moderator.ObserveCurrentDraft(source)
+		a.mu.Unlock()
+		return
+	}
+	a.mu.Unlock()
+	if !a.moderator.Ingest(source) {
+		return
+	}
 
-	operatorID := a.captionOperator()
 	if operatorID == "" {
 		return
 	}
@@ -47,20 +65,8 @@ func (a *Agent) handleTranscriptMessage(message TranscriptMessage) {
 		Source:   captionSourceFromModeration(source),
 	}
 	if message.IsFinal {
-		found := false
-		for _, pending := range snapshot.Pending {
-			if pending.ID == source.ID {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return
-		}
 		envelope.Type = captionPendingType
 		envelope.Source = captionSourceFromModeration(source)
-	} else if snapshot.Draft == nil || snapshot.Draft.ID != source.ID {
-		return
 	}
 	if err := a.publishCaptionOperator(envelope, message.IsFinal, operatorID); err != nil {
 		log.Printf("⚠️ [Caption] Failed to deliver %s to operator: %v", envelope.Type, err)
@@ -117,13 +123,16 @@ func (a *Agent) subscribeCaptionOperator(identity string, command captionCommand
 		return
 	}
 	isNewOperator := a.captionOperatorID == ""
+	var snapshot captionmoderation.Snapshot
+	if isNewOperator && !a.captionReviewStarted {
+		snapshot = a.moderator.StartReviewWindow()
+		a.captionReviewStarted = true
+	} else {
+		snapshot = a.moderator.Snapshot()
+	}
 	a.captionOperatorID = identity
 	a.mu.Unlock()
 
-	snapshot := a.moderator.Snapshot()
-	if isNewOperator {
-		snapshot = a.moderator.StartReviewWindow()
-	}
 	envelope := captionOperatorEnvelope{
 		Type:      captionSnapshotType,
 		RequestID: command.RequestID,
@@ -215,6 +224,73 @@ func (a *Agent) publishCaptionOperator(
 	reliable bool,
 	identity string,
 ) error {
+	a.captionDeliveryMu.Lock()
+	defer a.captionDeliveryMu.Unlock()
+	if envelope.Type == captionDraftType && !reliable {
+		return a.queueCaptionDraftLocked(envelope, identity)
+	}
+	if envelope.Type == captionPendingType {
+		a.discardPendingCaptionDraftLocked()
+	}
+	return a.publishCaptionOperatorNow(envelope, reliable, identity)
+}
+
+func (a *Agent) queueCaptionDraftLocked(
+	envelope captionOperatorEnvelope,
+	identity string,
+) error {
+	now := time.Now()
+	interval := a.captionDraftInterval
+	if interval <= 0 {
+		interval = defaultCaptionDraftInterval
+	}
+	if a.captionDraftLastSent.IsZero() || now.Sub(a.captionDraftLastSent) >= interval {
+		a.captionDraftLastSent = now
+		return a.publishCaptionOperatorNow(envelope, false, identity)
+	}
+
+	a.captionDraftPending = &captionDraftDelivery{envelope: envelope, identity: identity}
+	if a.captionDraftTimer == nil {
+		delay := interval - now.Sub(a.captionDraftLastSent)
+		a.captionDraftTimer = time.AfterFunc(delay, a.flushCaptionDraft)
+	}
+	return nil
+}
+
+func (a *Agent) flushCaptionDraft() {
+	a.captionDeliveryMu.Lock()
+	defer a.captionDeliveryMu.Unlock()
+	pending := a.captionDraftPending
+	a.captionDraftPending = nil
+	a.captionDraftTimer = nil
+	if pending == nil {
+		return
+	}
+	a.captionDraftLastSent = time.Now()
+	if err := a.publishCaptionOperatorNow(pending.envelope, false, pending.identity); err != nil {
+		log.Printf("⚠️ [Caption] Failed to deliver coalesced Draft: %v", err)
+	}
+}
+
+func (a *Agent) discardPendingCaptionDraft() {
+	a.captionDeliveryMu.Lock()
+	defer a.captionDeliveryMu.Unlock()
+	a.discardPendingCaptionDraftLocked()
+}
+
+func (a *Agent) discardPendingCaptionDraftLocked() {
+	if a.captionDraftTimer != nil {
+		a.captionDraftTimer.Stop()
+		a.captionDraftTimer = nil
+	}
+	a.captionDraftPending = nil
+}
+
+func (a *Agent) publishCaptionOperatorNow(
+	envelope captionOperatorEnvelope,
+	reliable bool,
+	identity string,
+) error {
 	payload, err := json.Marshal(envelope)
 	if err != nil {
 		return err
@@ -244,9 +320,14 @@ func (a *Agent) captionOperator() string {
 
 func (a *Agent) clearCaptionOperator(identity string) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
+	cleared := false
 	if a.captionOperatorID == identity {
 		a.captionOperatorID = ""
+		cleared = true
+	}
+	a.mu.Unlock()
+	if cleared {
+		a.discardPendingCaptionDraft()
 	}
 }
 

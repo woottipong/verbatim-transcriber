@@ -87,33 +87,32 @@ func New(provider string, now func() time.Time) *Moderator {
 	}
 }
 
-func (m *Moderator) Ingest(segment SourceSegment) Snapshot {
+// Ingest records one provider revision and reports whether it changed review
+// state. Call Snapshot only at synchronization boundaries; high-frequency
+// transcript ingestion must not clone the full pending queue.
+func (m *Moderator) Ingest(segment SourceSegment) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	segment.ID = strings.TrimSpace(segment.ID)
-	segment.Provider = strings.ToLower(strings.TrimSpace(segment.Provider))
-	segment.Text = strings.TrimSpace(segment.Text)
-	if segment.ID == "" || segment.Text == "" || segment.Provider != m.provider {
-		return m.snapshotLocked()
-	}
-	if _, consumed := m.consumedDrafts[segment.ID]; consumed {
-		return m.snapshotLocked()
+	segment = normalizeSourceSegment(segment)
+	if !m.acceptsLocked(segment) {
+		return false
 	}
 
 	if !segment.IsFinal {
 		if m.draft == nil || segment.Sequence >= m.draft.Sequence {
 			copy := segment
 			m.draft = &copy
+			return true
 		}
-		return m.snapshotLocked()
+		return false
 	}
 
 	if m.draft != nil && m.draft.ID == segment.ID {
 		m.draft = nil
 	}
 	if _, exists := m.pendingIndex[segment.ID]; exists {
-		return m.snapshotLocked()
+		return false
 	}
 
 	m.pending = append(m.pending, segment)
@@ -121,7 +120,33 @@ func (m *Moderator) Ingest(segment SourceSegment) Snapshot {
 		m.pending = append([]SourceSegment(nil), m.pending[len(m.pending)-maxPendingSegments:]...)
 	}
 	m.rebuildPendingIndexLocked()
-	return m.snapshotLocked()
+	return true
+}
+
+// ObserveCurrentDraft retains only the active provider Draft before review
+// begins. Final segments clear their matching Draft but are not queued, so a
+// newly joined operator sees what is live at the join boundary without history.
+func (m *Moderator) ObserveCurrentDraft(segment SourceSegment) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	segment = normalizeSourceSegment(segment)
+	if !m.acceptsLocked(segment) {
+		return false
+	}
+	if segment.IsFinal {
+		if m.draft != nil && m.draft.ID == segment.ID {
+			m.draft = nil
+			return true
+		}
+		return false
+	}
+	if m.draft != nil && segment.Sequence < m.draft.Sequence {
+		return false
+	}
+	copy := segment
+	m.draft = &copy
+	return true
 }
 
 func (m *Moderator) SetUseInterim(enabled bool) Snapshot {
@@ -140,15 +165,30 @@ func (m *Moderator) Snapshot() Snapshot {
 	return m.snapshotLocked()
 }
 
-// StartReviewWindow discards transcript state created before a new operator
-// joined. Publications and request replay records remain intact.
+// StartReviewWindow discards finalized pre-join history while retaining the
+// Draft active at the join boundary. Publications and request replay records
+// remain intact.
 func (m *Moderator) StartReviewWindow() Snapshot {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.draft = nil
 	m.pending = nil
 	m.rebuildPendingIndexLocked()
 	return m.snapshotLocked()
+}
+
+func normalizeSourceSegment(segment SourceSegment) SourceSegment {
+	segment.ID = strings.TrimSpace(segment.ID)
+	segment.Provider = strings.ToLower(strings.TrimSpace(segment.Provider))
+	segment.Text = strings.TrimSpace(segment.Text)
+	return segment
+}
+
+func (m *Moderator) acceptsLocked(segment SourceSegment) bool {
+	if segment.ID == "" || segment.Text == "" || segment.Provider != m.provider {
+		return false
+	}
+	_, consumed := m.consumedDrafts[segment.ID]
+	return !consumed
 }
 
 func (m *Moderator) Publish(command PublishCommand) (Publication, bool, error) {

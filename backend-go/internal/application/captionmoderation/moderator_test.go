@@ -10,26 +10,29 @@ import (
 func TestModeratorReplacesDraftAndKeepsFinalsInOrder(t *testing.T) {
 	moderator := New("google", time.Now)
 
-	snapshot := moderator.Ingest(SourceSegment{
+	moderator.Ingest(SourceSegment{
 		ID: "google-1", Provider: "google", Text: "ผู้ป่วย", Sequence: 1,
 	})
+	snapshot := moderator.Snapshot()
 	if snapshot.Draft == nil || snapshot.Draft.Text != "ผู้ป่วย" {
 		t.Fatalf("first Draft = %#v", snapshot.Draft)
 	}
 
-	snapshot = moderator.Ingest(SourceSegment{
+	moderator.Ingest(SourceSegment{
 		ID: "google-1", Provider: "google", Text: "ผู้ป่วยมีอาการ", Sequence: 2,
 	})
+	snapshot = moderator.Snapshot()
 	if snapshot.Draft == nil || snapshot.Draft.Text != "ผู้ป่วยมีอาการ" {
 		t.Fatalf("revised Draft = %#v", snapshot.Draft)
 	}
 
-	snapshot = moderator.Ingest(SourceSegment{
+	moderator.Ingest(SourceSegment{
 		ID: "google-1", Provider: "google", Text: "ผู้ป่วยมีอาการ", IsFinal: true, Sequence: 3,
 	})
-	snapshot = moderator.Ingest(SourceSegment{
+	moderator.Ingest(SourceSegment{
 		ID: "google-2", Provider: "google", Text: "เจ็บหน้าอก", IsFinal: true, Sequence: 4,
 	})
+	snapshot = moderator.Snapshot()
 
 	if snapshot.Draft != nil {
 		t.Fatalf("Draft remained after matching final: %#v", snapshot.Draft)
@@ -53,9 +56,10 @@ func TestModeratorInterimModeKeepsBacklogAndLatestDraft(t *testing.T) {
 	moderator.Ingest(SourceSegment{
 		ID: "google-4", Provider: "google", Text: "ข้อความ final", IsFinal: true, Sequence: 5,
 	})
-	snapshot = moderator.Ingest(SourceSegment{
+	moderator.Ingest(SourceSegment{
 		ID: "google-5", Provider: "google", Text: "ข้อความสดใหม่", Sequence: 6,
 	})
+	snapshot = moderator.Snapshot()
 	if got, want := pendingIDs(snapshot), []string{"google-1", "google-2", "google-3", "google-4"}; !equalStrings(got, want) {
 		t.Fatalf("pending snapshot = %v, want %v", got, want)
 	}
@@ -93,10 +97,13 @@ func TestModeratorPublishesAccumulatedFinalsAndDraftWithRemainder(t *testing.T) 
 
 func TestModeratorIgnoresOtherProvider(t *testing.T) {
 	moderator := New("google", time.Now)
-	snapshot := moderator.Ingest(SourceSegment{
+	accepted := moderator.Ingest(SourceSegment{
 		ID: "gemini-1", Provider: "gemini", Text: "ไม่ควรเข้า", IsFinal: true, Sequence: 1,
 	})
-
+	if accepted {
+		t.Fatal("other provider was accepted")
+	}
+	snapshot := moderator.Snapshot()
 	if snapshot.Draft != nil || len(snapshot.Pending) != 0 {
 		t.Fatalf("other provider changed snapshot: %#v", snapshot)
 	}
@@ -123,7 +130,7 @@ func TestModeratorBoundsPendingSegmentsAtFiveHundred(t *testing.T) {
 	}
 }
 
-func TestModeratorStartReviewWindowDropsOnlyPreJoinTranscriptState(t *testing.T) {
+func TestModeratorStartReviewWindowKeepsActiveDraftAndDropsPreJoinFinals(t *testing.T) {
 	moderator := New("google", time.Now)
 	ingestFinals(moderator, "google-1", "google-2")
 	moderator.Ingest(SourceSegment{
@@ -131,13 +138,17 @@ func TestModeratorStartReviewWindowDropsOnlyPreJoinTranscriptState(t *testing.T)
 	})
 
 	snapshot := moderator.StartReviewWindow()
-	if snapshot.Draft != nil || len(snapshot.Pending) != 0 {
-		t.Fatalf("review window snapshot = %#v, want empty", snapshot)
+	if snapshot.Draft == nil || snapshot.Draft.ID != "google-3" || snapshot.Draft.Text != "draft" {
+		t.Fatalf("review window Draft = %#v, want active google-3 Draft", snapshot.Draft)
+	}
+	if len(snapshot.Pending) != 0 {
+		t.Fatalf("review window pending = %#v, want no pre-join finals", snapshot.Pending)
 	}
 
-	snapshot = moderator.Ingest(SourceSegment{
+	moderator.Ingest(SourceSegment{
 		ID: "google-4", Provider: "google", Text: "new final", IsFinal: true, Sequence: 4,
 	})
+	snapshot = moderator.Snapshot()
 	if got, want := pendingIDs(snapshot), []string{"google-4"}; !equalStrings(got, want) {
 		t.Fatalf("post-join pending = %v, want %v", got, want)
 	}
@@ -203,9 +214,13 @@ func TestModeratorPublishesDraftAndSuppressesItsFinal(t *testing.T) {
 	if err != nil || replayed {
 		t.Fatalf("Publish(draft) = (%#v, %v, %v)", publication, replayed, err)
 	}
-	snapshot := moderator.Ingest(SourceSegment{
+	accepted := moderator.Ingest(SourceSegment{
 		ID: "google-1", Provider: "google", Text: "ข้อความ final", IsFinal: true, Sequence: 2,
 	})
+	if accepted {
+		t.Fatal("consumed draft final was accepted")
+	}
+	snapshot := moderator.Snapshot()
 	if snapshot.Draft != nil || len(snapshot.Pending) != 0 {
 		t.Fatalf("consumed draft final was not suppressed: %#v", snapshot)
 	}
@@ -224,9 +239,12 @@ func TestModeratorDraftRemainderStaysPendingAndFinalDoesNotReplaceIt(t *testing.
 	}); err != nil {
 		t.Fatalf("Publish(draft remainder) error = %v", err)
 	}
-	snapshot := moderator.Ingest(SourceSegment{
+	if moderator.Ingest(SourceSegment{
 		ID: "google-1", Provider: "google", Text: "provider final", IsFinal: true, Sequence: 2,
-	})
+	}) {
+		t.Fatal("provider final replaced a consumed draft remainder")
+	}
+	snapshot := moderator.Snapshot()
 	if len(snapshot.Pending) != 1 || snapshot.Pending[0].Text != "ส่วนที่เหลือ" {
 		t.Fatalf("pending remainder = %#v", snapshot.Pending)
 	}

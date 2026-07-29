@@ -86,6 +86,84 @@ func TestActiveProviderTargetsDraftToOperatorAndKeepsRawLive(t *testing.T) {
 	}
 }
 
+func TestCaptionDraftDeliveryCoalescesRevisionsAndSendsFinalImmediately(t *testing.T) {
+	operatorPackets := make(chan captionOperatorEnvelope, 8)
+	agent := &Agent{
+		preferredProvider:    "google",
+		moderator:            captionmoderation.New("google", time.Now),
+		captionOperatorID:    "caption-operator-1",
+		captionReviewStarted: true,
+		dataPublisher: func(payload []byte, topic string, _ bool, _ []string) error {
+			if topic != CaptionOperatorTopic {
+				return nil
+			}
+			var envelope captionOperatorEnvelope
+			if err := json.Unmarshal(payload, &envelope); err != nil {
+				t.Fatalf("decode operator packet: %v", err)
+			}
+			operatorPackets <- envelope
+			return nil
+		},
+	}
+
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "หนึ่ง", Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+	if got := receiveCaptionOperatorEnvelope(t, operatorPackets); got.Source == nil || got.Source.Text != "หนึ่ง" {
+		t.Fatalf("first Draft = %#v", got)
+	}
+
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "หนึ่ง สอง", Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "หนึ่ง สอง สาม", Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+	select {
+	case unexpected := <-operatorPackets:
+		t.Fatalf("rapid Draft was not coalesced: %#v", unexpected)
+	case <-time.After(10 * time.Millisecond):
+	}
+	if got := receiveCaptionOperatorEnvelope(t, operatorPackets); got.Source == nil || got.Source.Text != "หนึ่ง สอง สาม" {
+		t.Fatalf("coalesced Draft = %#v", got)
+	}
+
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "หนึ่ง สอง สาม สี่", Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ข้อความ final", IsFinal: true, Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+	if got := receiveCaptionOperatorEnvelope(t, operatorPackets); got.Type != captionPendingType ||
+		got.Source == nil || got.Source.Text != "ข้อความ final" {
+		t.Fatalf("immediate final = %#v", got)
+	}
+	select {
+	case unexpected := <-operatorPackets:
+		t.Fatalf("pending Draft was delivered after final: %#v", unexpected)
+	case <-time.After(75 * time.Millisecond):
+	}
+}
+
+func receiveCaptionOperatorEnvelope(
+	t *testing.T,
+	packets <-chan captionOperatorEnvelope,
+) captionOperatorEnvelope {
+	t.Helper()
+	select {
+	case packet := <-packets:
+		return packet
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for caption operator packet")
+		return captionOperatorEnvelope{}
+	}
+}
+
 func TestCaptionFallbackKeepsDraftAndFinalOnSameSegment(t *testing.T) {
 	agent := New(&config.Config{}, "azure")
 	draftID := agent.moderationSegmentID(TranscriptMessage{
@@ -238,20 +316,38 @@ func TestCaptionOperatorDisconnectKeepsPendingState(t *testing.T) {
 	}
 }
 
-func TestNewCaptionOperatorStartsWithAnEmptyReviewWindow(t *testing.T) {
+func TestNewCaptionOperatorReceivesActiveDraftWithoutPreJoinFinals(t *testing.T) {
 	var packets []publishedData
 	agent := newCaptionTestAgent("google", &packets)
 	agent.handleTranscriptMessage(TranscriptMessage{
 		Type: "transcript", Text: "ข้อความก่อนเข้าห้อง", IsFinal: true, Provider: "google",
 		Role: domain.TranscriptRoleSource, SegmentID: "google-before",
 	})
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ข้อความที่กำลังพูด", Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-active",
+	})
 
 	agent.subscribeCaptionOperator("caption-operator-1", captionCommandEnvelope{
 		Type: captionSubscribeType, RequestID: "subscribe-1", Provider: "google",
 	})
 	snapshot := agent.moderator.Snapshot()
-	if snapshot.Draft != nil || len(snapshot.Pending) != 0 {
-		t.Fatalf("new operator snapshot = %#v, want empty", snapshot)
+	if snapshot.Draft == nil || snapshot.Draft.ID != "google-active" ||
+		snapshot.Draft.Text != "ข้อความที่กำลังพูด" {
+		t.Fatalf("new operator Draft = %#v, want active Draft at join", snapshot.Draft)
+	}
+	if len(snapshot.Pending) != 0 {
+		t.Fatalf("new operator pending = %#v, want no pre-join finals", snapshot.Pending)
+	}
+	var delivered captionOperatorEnvelope
+	if err := json.Unmarshal(packets[len(packets)-1].payload, &delivered); err != nil {
+		t.Fatalf("decode join snapshot: %v", err)
+	}
+	if delivered.Type != captionSnapshotType || delivered.Draft == nil ||
+		delivered.Draft.SegmentID != "google-active" ||
+		delivered.Draft.Text != "ข้อความที่กำลังพูด" ||
+		len(delivered.Pending) != 0 {
+		t.Fatalf("delivered join snapshot = %#v, want active Draft without history", delivered)
 	}
 
 	agent.handleTranscriptMessage(TranscriptMessage{
@@ -263,6 +359,27 @@ func TestNewCaptionOperatorStartsWithAnEmptyReviewWindow(t *testing.T) {
 	})
 	if got := len(agent.moderator.Snapshot().Pending); got != 1 {
 		t.Fatalf("same operator reconnect pending count = %d, want 1", got)
+	}
+}
+
+func TestNewCaptionOperatorDoesNotReceiveDraftFinalizedBeforeJoin(t *testing.T) {
+	var packets []publishedData
+	agent := newCaptionTestAgent("google", &packets)
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ข้อความที่กำลังพูด", Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-before",
+	})
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ข้อความที่พูดจบแล้ว", IsFinal: true, Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-before",
+	})
+
+	agent.subscribeCaptionOperator("caption-operator-1", captionCommandEnvelope{
+		Type: captionSubscribeType, RequestID: "subscribe-1", Provider: "google",
+	})
+	snapshot := agent.moderator.Snapshot()
+	if snapshot.Draft != nil || len(snapshot.Pending) != 0 {
+		t.Fatalf("new operator snapshot = %#v, want no finalized pre-join transcript", snapshot)
 	}
 }
 

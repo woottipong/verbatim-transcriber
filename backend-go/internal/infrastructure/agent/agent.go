@@ -161,25 +161,31 @@ func formatTranscriptLog(message TranscriptMessage) string {
 
 // Agent handles audio transcription in a LiveKit room
 type Agent struct {
-	config             *config.Config
-	room               *lksdk.Room
-	asrProvider        domain.ASRProvider
-	activeTrackID      string
-	pendingTrackID     string
-	trackChanged       chan struct{}
-	transcriptSequence uint64
-	mu                 sync.Mutex
-	isRunning          bool
-	stopRequested      bool
-	cancel             context.CancelFunc
-	preferredProvider  string // "google", "gemini", "azure", "gpt-realtime-whisper", or "" for auto
-	roomName           string // store room name for status
-	transcriptSink     TranscriptSink
-	captionSink        CaptionSink
-	moderator          *captionmoderation.Moderator
-	captionOperatorID  string
-	moderationDraftID  string
-	dataPublisher      dataPublishFunc
+	config               *config.Config
+	room                 *lksdk.Room
+	asrProvider          domain.ASRProvider
+	activeTrackID        string
+	pendingTrackID       string
+	trackChanged         chan struct{}
+	transcriptSequence   uint64
+	mu                   sync.Mutex
+	isRunning            bool
+	stopRequested        bool
+	cancel               context.CancelFunc
+	preferredProvider    string // "google", "gemini", "azure", "gpt-realtime-whisper", or "" for auto
+	roomName             string // store room name for status
+	transcriptSink       TranscriptSink
+	captionSink          CaptionSink
+	moderator            *captionmoderation.Moderator
+	captionOperatorID    string
+	captionReviewStarted bool
+	captionDeliveryMu    sync.Mutex
+	captionDraftTimer    *time.Timer
+	captionDraftPending  *captionDraftDelivery
+	captionDraftLastSent time.Time
+	captionDraftInterval time.Duration
+	moderationDraftID    string
+	dataPublisher        dataPublishFunc
 }
 
 // New creates a new LiveKit ASR Agent
@@ -363,6 +369,7 @@ func (a *Agent) registerCaptionOperator(participant *lksdk.RemoteParticipant) {
 
 // Stop disconnects from the room
 func (a *Agent) Stop() {
+	a.discardPendingCaptionDraft()
 	a.mu.Lock()
 	if !a.isRunning {
 		a.stopRequested = true
