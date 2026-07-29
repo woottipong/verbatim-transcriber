@@ -60,18 +60,15 @@ func TestParseCaptionPublishCommandWithRemainder(t *testing.T) {
 	}
 }
 
-func TestParseCaptionReviewModeCommand(t *testing.T) {
-	command, err := parseCaptionCommand([]byte(`{
+func TestParseCaptionCommandRejectsObsoleteReviewMode(t *testing.T) {
+	_, err := parseCaptionCommand([]byte(`{
 		"type":"caption.review-mode",
 		"requestId":"mode-1",
 		"provider":"gemini",
 		"useInterim":true
 	}`))
-	if err != nil {
-		t.Fatalf("parseCaptionCommand() error = %v", err)
-	}
-	if command.UseInterim == nil || !*command.UseInterim {
-		t.Fatalf("UseInterim = %#v", command.UseInterim)
+	if !errors.Is(err, errInvalidCaptionCommand) {
+		t.Fatalf("parseCaptionCommand() error = %v, want errInvalidCaptionCommand", err)
 	}
 }
 

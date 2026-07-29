@@ -64,7 +64,6 @@ type Moderator struct {
 	processedOrder []string
 	consumedDrafts map[string]struct{}
 	consumedOrder  []string
-	useInterim     bool
 }
 
 type processedPublication struct {
@@ -147,16 +146,6 @@ func (m *Moderator) ObserveCurrentDraft(segment SourceSegment) bool {
 	copy := segment
 	m.draft = &copy
 	return true
-}
-
-func (m *Moderator) SetUseInterim(enabled bool) Snapshot {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.useInterim == enabled {
-		return m.snapshotLocked()
-	}
-	m.useInterim = enabled
-	return m.snapshotLocked()
 }
 
 func (m *Moderator) Snapshot() Snapshot {

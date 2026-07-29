@@ -1,4 +1,5 @@
 export type AppPage = 'admin' | 'stream' | 'viewer' | 'caption-desk';
+export type CaptionDeskSource = 'final' | 'live-draft';
 
 export interface AppRoute {
   page: AppPage;
@@ -39,12 +40,32 @@ export function buildViewerUrl(baseUrl: string, roomName: string): string {
   return buildRouteUrl(baseUrl, 'viewer', roomName, Boolean(roomName));
 }
 
-export function buildCaptionDeskUrl(baseUrl: string, roomName: string, providerName: string): string {
+export function parseCaptionDeskSource(hash: string): CaptionDeskSource {
+  const query = hash.split('?', 2)[1] || '';
+  const source = new URLSearchParams(query).get('source');
+  return source === 'live-draft' || source === 'interim' ? 'live-draft' : 'final';
+}
+
+export function buildCaptionDeskSessionKey(
+  roomName: string,
+  providerName: string,
+  source: CaptionDeskSource,
+): string {
+  return `${roomName}:${providerName}:${source}`;
+}
+
+export function buildCaptionDeskUrl(
+  baseUrl: string,
+  roomName: string,
+  providerName: string,
+  source: CaptionDeskSource = 'final',
+): string {
   const url = new URL(baseUrl);
   url.hash = '';
   const params = new URLSearchParams();
   if (roomName.trim()) params.set('room', roomName.trim());
   if (providerName.trim()) params.set('provider', providerName.trim().toLowerCase());
+  if (source === 'live-draft') params.set('source', source);
   url.hash = `caption-desk?${params.toString()}`;
   return url.toString();
 }

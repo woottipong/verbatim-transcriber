@@ -56,7 +56,7 @@ ASR source Draft/final
   → active room/provider agent
   ├── raw transcript continues to normal viewers and feeds
   └── targeted `caption.operator` packet
-      → Caption Desk queues finals by default or includes the active Interim Draft
+      → Caption Desk receives finals plus the active Draft; its selected client workflow decides whether the Draft enters the editor
       → reliable `caption.publish` command
       → agent validates ordered source IDs and request idempotency
       → a published Draft consumes its segment and suppresses the later final

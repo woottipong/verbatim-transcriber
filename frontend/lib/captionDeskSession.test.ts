@@ -209,8 +209,7 @@ test('final review mode accepts a finalized packet without a preceding draft', (
 });
 
 test('interim review mode makes a draft editable and publishable before final', () => {
-  const session = new CaptionDeskSession();
-  session.setInterimReviewEnabled(true);
+  const session = new CaptionDeskSession('live-draft');
   session.ingestOperatorPacket(packet({
     type: 'caption.draft', provider: 'google',
     source: { segmentId: 'g-1', text: 'กำลังถอด', provider: 'google', isFinal: false, sequence: 1 },
@@ -227,41 +226,111 @@ test('interim review mode makes a draft editable and publishable before final', 
   assert.deepEqual(command?.sourceSegmentIds, ['g-1']);
 });
 
-test('human edits freeze the active interim until it is published', () => {
-  const session = new CaptionDeskSession();
-  session.setInterimReviewEnabled(true);
+test('Live Draft session places the current join snapshot Draft in the editor', () => {
+  const session = new CaptionDeskSession('live-draft');
   session.ingestOperatorPacket(packet({
-    type: 'caption.draft', provider: 'google',
-    source: { segmentId: 'g-1', text: 'ข้อความแรก', provider: 'google', isFinal: false, sequence: 1 },
-  }));
-  session.edit('ข้อความที่แก้แล้ว');
-  session.ingestOperatorPacket(packet({
-    type: 'caption.draft', provider: 'google',
-    source: { segmentId: 'g-1', text: 'ข้อความแรกที่ยาวขึ้น', provider: 'google', isFinal: false, sequence: 2 },
+    type: 'caption.snapshot',
+    requestId: 'subscribe-1',
+    provider: 'gemini',
+    pending: [],
+    draft: {
+      segmentId: 'gemini-1',
+      text: 'ข้อความที่กำลังพูด',
+      provider: 'gemini',
+      isFinal: false,
+      sequence: 3,
+    },
   }));
 
-  assert.equal(session.getSnapshot().reviewText, 'ข้อความที่แก้แล้ว');
-  assert.equal(session.getSnapshot().rawText, 'ข้อความแรกที่ยาวขึ้น');
+  assert.equal(session.getSnapshot().reviewText, 'ข้อความที่กำลังพูด');
+  assert.equal(session.getSnapshot().rawText, 'ข้อความที่กำลังพูด');
+  assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['gemini-1']);
+  assert.equal(session.getSnapshot().draftPreview, '');
 });
 
-test('matching final promotes an interim review without overwriting human edits', () => {
-  const session = new CaptionDeskSession();
-  session.setInterimReviewEnabled(true);
+test('human edits protect existing text while new Draft text continues to append', () => {
+  const session = new CaptionDeskSession('live-draft');
   session.ingestOperatorPacket(packet({
     type: 'caption.draft', provider: 'google',
-    source: { segmentId: 'g-1', text: 'ข้อความแรก', provider: 'google', isFinal: false, sequence: 1 },
+    source: {
+      segmentId: 'g-1',
+      text: 'จริงนะฮะเดือนสิงหาคมปี 2005 นะครับ',
+      provider: 'google',
+      isFinal: false,
+      sequence: 1,
+    },
   }));
-  session.edit('ข้อความที่แก้แล้ว');
-  session.ingestOperatorPacket(pending('g-1', 'ข้อความ final'));
+  session.edit('จริงนะฮะเดือนสิงหาคมปี 2005');
+  session.ingestOperatorPacket(packet({
+    type: 'caption.draft', provider: 'google',
+    source: {
+      segmentId: 'g-1',
+      text: 'จริงนะครับ เดือนสิงหาคมปี 2005 นะครับก็ค่อยย้อนเวลาไป',
+      provider: 'google',
+      isFinal: false,
+      sequence: 2,
+    },
+  }));
 
-  assert.equal(session.getSnapshot().reviewText, 'ข้อความที่แก้แล้ว');
-  assert.equal(session.getSnapshot().rawText, 'ข้อความ final');
+  assert.equal(
+    session.getSnapshot().reviewText,
+    'จริงนะฮะเดือนสิงหาคมปี 2005ก็ค่อยย้อนเวลาไป',
+  );
+  assert.equal(
+    session.getSnapshot().rawText,
+    'จริงนะครับ เดือนสิงหาคมปี 2005 นะครับก็ค่อยย้อนเวลาไป',
+  );
+  assert.equal(session.getSnapshot().operatorEditsActive, true);
+
+  session.restore();
+  assert.equal(
+    session.getSnapshot().reviewText,
+    'จริงนะครับ เดือนสิงหาคมปี 2005 นะครับก็ค่อยย้อนเวลาไป',
+  );
+  assert.equal(session.getSnapshot().operatorEditsActive, false);
+});
+
+test('editing a Live Draft back to the latest raw text resumes live updates', () => {
+  const session = new CaptionDeskSession('live-draft');
+  session.ingestOperatorPacket(packet({
+    type: 'caption.draft',
+    provider: 'google',
+    source: { segmentId: 'g-1', text: 'ข้อความสด', provider: 'google', isFinal: false, sequence: 1 },
+  }));
+  session.edit('ข้อความที่แก้');
+  assert.equal(session.getSnapshot().operatorEditsActive, true);
+
+  session.edit('ข้อความสด');
+  assert.equal(session.getSnapshot().operatorEditsActive, false);
+  session.ingestOperatorPacket(packet({
+    type: 'caption.draft',
+    provider: 'google',
+    source: { segmentId: 'g-1', text: 'ข้อความสดล่าสุด', provider: 'google', isFinal: false, sequence: 2 },
+  }));
+  assert.equal(session.getSnapshot().reviewText, 'ข้อความสดล่าสุด');
+});
+
+test('matching final protects human edits and appends its unseen continuation', () => {
+  const session = new CaptionDeskSession('live-draft');
+  session.ingestOperatorPacket(packet({
+    type: 'caption.draft', provider: 'google',
+    source: { segmentId: 'g-1', text: 'กำลังพูด', provider: 'google', isFinal: false, sequence: 1 },
+  }));
+  session.edit('กำลังพูด (แก้)');
+  session.ingestOperatorPacket(pending('g-1', 'กำลังพูดต่อจนจบ'));
+
+  assert.equal(session.getSnapshot().reviewText, 'กำลังพูด (แก้)ต่อจนจบ');
+  assert.equal(session.getSnapshot().rawText, 'กำลังพูดต่อจนจบ');
   assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-1']);
+  assert.equal(session.getSnapshot().operatorEditsActive, true);
+
+  session.restore();
+  assert.equal(session.getSnapshot().reviewText, 'กำลังพูดต่อจนจบ');
+  assert.equal(session.getSnapshot().operatorEditsActive, false);
 });
 
 test('interim review mode accumulates finals and replaces only the active draft revision', () => {
-  const session = new CaptionDeskSession();
-  session.setInterimReviewEnabled(true);
+  const session = new CaptionDeskSession('live-draft');
   session.ingestOperatorPacket(pending('g-1', 'final เก่า'));
   session.ingestOperatorPacket(packet({
     type: 'caption.draft', provider: 'google',

@@ -1,5 +1,10 @@
 import { RefreshCw } from 'lucide-react';
 import { useCaptionDesk } from '../hooks/useCaptionDesk';
+import {
+  buildCaptionDeskSessionKey,
+  parseCaptionDeskSource,
+  type CaptionDeskSource,
+} from '../lib/appRoutes';
 import { isAgentProvider, type AgentProvider } from '../lib/providers';
 import { ConnectionState } from '../types';
 import { CaptionDeskHeader } from './caption-desk/CaptionDeskHeader';
@@ -21,15 +26,15 @@ export default function CaptionDeskPage({ backendUrl, roomName, providerName }: 
     return <CaptionDeskLauncher backendUrl={backendUrl} initialRoomName={roomName} />;
   }
 
-  const hashParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
-  const initialInterim = hashParams.get('source') === 'interim';
+  const source = parseCaptionDeskSource(window.location.hash);
 
   return (
     <ConnectedCaptionDesk
+      key={buildCaptionDeskSessionKey(roomName, provider, source)}
       backendUrl={backendUrl}
       roomName={roomName}
       provider={provider}
-      initialInterim={initialInterim}
+      source={source}
     />
   );
 }
@@ -38,12 +43,12 @@ function ConnectedCaptionDesk({
   backendUrl,
   roomName,
   provider,
-  initialInterim = false,
+  source,
 }: {
   backendUrl: string;
   roomName: string;
   provider: AgentProvider;
-  initialInterim?: boolean;
+  source: CaptionDeskSource;
 }) {
   const {
     snapshot,
@@ -54,10 +59,11 @@ function ConnectedCaptionDesk({
     edit,
     publish,
     reconnect,
-  } = useCaptionDesk(backendUrl, roomName, provider);
+  } = useCaptionDesk(backendUrl, roomName, provider, source);
 
   const connected = connectionState === ConnectionState.CONNECTED;
   const errorMessage = snapshot.error || error;
+  const canReconnect = Boolean(error) || connectionState === ConnectionState.DISCONNECTED;
 
   return (
     <div className="app-shell flex h-dvh flex-col overflow-hidden bg-[var(--canvas)] text-[var(--ink)]">
@@ -68,7 +74,7 @@ function ConnectedCaptionDesk({
       <CaptionDeskHeader
         roomName={roomName}
         provider={provider}
-        connected={connected}
+        connectionState={connectionState}
         captionConnected={captionConnected}
         agentConnected={agentConnected}
       />
@@ -77,30 +83,36 @@ function ConnectedCaptionDesk({
         {errorMessage || connectionState === ConnectionState.DISCONNECTED ? (
           <div className="mb-4 flex items-center justify-between gap-4 rounded-lg border border-red-400/35 bg-red-500/10 px-4 py-3 text-sm text-red-200" role="alert">
             <span>{errorMessage || 'Caption Desk disconnected. Your current edits are preserved.'}</span>
-            {connectionState !== ConnectionState.CONNECTED ? (
+            {canReconnect ? (
               <button type="button" onClick={reconnect} className="control-button control-button--inline shrink-0">
-                <RefreshCw size={15} /> Reconnect
+                <RefreshCw size={15} /> {connected ? 'Try again' : 'Reconnect'}
               </button>
             ) : null}
           </div>
         ) : null}
 
         <div className="caption-desk-workspace grid flex-1 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,19rem)]">
-          <CaptionDeskPublishedHistory snapshot={snapshot} />
-
           <CaptionDeskReviewEditor
             snapshot={snapshot}
-            useInterimInReview={initialInterim}
+            useInterimInReview={source === 'live-draft'}
             captionConnected={captionConnected}
             agentConnected={agentConnected}
             edit={edit}
             publish={publish}
           />
+
+          <CaptionDeskPublishedHistory snapshot={snapshot} />
         </div>
 
-        <span className="sr-only" aria-live="polite">
-          {snapshot.error || (snapshot.recentlyPublished.at(-1) ? 'Caption published' : '')}
-        </span>
+        {snapshot.recentlyPublished.at(-1) ? (
+          <span
+            key={snapshot.recentlyPublished.at(-1)?.publicationId}
+            className="sr-only"
+            aria-live="polite"
+          >
+            Caption published.
+          </span>
+        ) : null}
       </main>
     </div>
   );

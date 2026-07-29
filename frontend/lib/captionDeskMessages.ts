@@ -67,13 +67,6 @@ export interface CaptionPublishCommand {
   remainingText?: string;
 }
 
-export interface CaptionReviewModeCommand {
-  type: 'caption.review-mode';
-  requestId: string;
-  provider: string;
-  useInterim: boolean;
-}
-
 export function parseCaptionOperatorPacket(payload: Uint8Array): CaptionOperatorMessage | undefined {
   let value: unknown;
   try {
@@ -142,18 +135,16 @@ export function buildCaptionPublishCommand(command: CaptionPublishCommand): Uint
   return encode(command);
 }
 
-export function buildCaptionReviewModeCommand(provider: string, useInterim: boolean): Uint8Array {
-  const command: CaptionReviewModeCommand = {
-    type: 'caption.review-mode',
-    requestId: crypto.randomUUID(),
-    provider,
-    useInterim,
-  };
-  return encode(command);
-}
-
 export function shouldPublishOnEnter(event: Pick<KeyboardEvent, 'key' | 'shiftKey' | 'isComposing'>): boolean {
   return event.key === 'Enter' && !event.shiftKey && !event.isComposing;
+}
+
+export function getCaptionSubscriptionError(
+  message: CaptionOperatorMessage,
+  subscribed: boolean,
+): string | null {
+  if (subscribed || message.type !== 'caption.rejected') return null;
+  return message.message || 'Caption Desk could not subscribe to this provider.';
 }
 
 export function isCaptionAgentIdentity(identity: string | undefined, provider: string): boolean {

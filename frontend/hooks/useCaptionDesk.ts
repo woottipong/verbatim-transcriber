@@ -3,28 +3,33 @@ import { DataPacket_Kind, Room, RoomEvent, type RemoteParticipant } from 'liveki
 import { createCaptionDeskToken } from '../lib/api';
 import {
   buildCaptionPublishCommand,
-  buildCaptionReviewModeCommand,
   buildCaptionSubscribeCommand,
   CAPTION_COMMAND_TOPIC,
   CAPTION_OPERATOR_TOPIC,
+  getCaptionSubscriptionError,
   isCaptionAgentIdentity,
   parseCaptionOperatorPacket,
   type CaptionPublishCommand,
 } from '../lib/captionDeskMessages';
 import { CaptionDeskSession } from '../lib/captionDeskSession';
+import type { CaptionDeskSource } from '../lib/appRoutes';
 import type { AgentProvider } from '../lib/providers';
 import { ConnectionState } from '../types';
 
 const CAPTION_SUBSCRIBE_RETRY_MS = 1_500;
 
-export function useCaptionDesk(backendUrl: string, roomName: string, provider: AgentProvider) {
+export function useCaptionDesk(
+  backendUrl: string,
+  roomName: string,
+  provider: AgentProvider,
+  source: CaptionDeskSource,
+) {
   const sessionRef = useRef<CaptionDeskSession | null>(null);
-  if (!sessionRef.current) sessionRef.current = new CaptionDeskSession();
+  if (!sessionRef.current) sessionRef.current = new CaptionDeskSession(source);
   const session = sessionRef.current;
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   const roomRef = useRef<Room | null>(null);
   const scopeRef = useRef('');
-  const interimReviewRef = useRef(false);
   const [connectionState, setConnectionState] = useState(ConnectionState.DISCONNECTED);
   const [error, setError] = useState<string | null>(null);
   const [agentConnected, setAgentConnected] = useState(false);
@@ -36,10 +41,6 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
       reliable: true,
       topic: CAPTION_COMMAND_TOPIC,
     });
-    await room.localParticipant.publishData(
-      buildCaptionReviewModeCommand(provider, interimReviewRef.current),
-      { reliable: true, topic: CAPTION_COMMAND_TOPIC },
-    );
   }, [provider]);
 
   const replayWaiting = useCallback(async (room: Room) => {
@@ -60,6 +61,7 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
     }
     let disposed = false;
     let subscribed = false;
+    let subscriptionBlocked = false;
     let subscribeInFlight = false;
     let subscribeRetry: number | undefined;
     const room = new Room({ adaptiveStream: true, dynacast: true });
@@ -75,7 +77,7 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
     };
     const scheduleSubscribe = () => {
       clearSubscribeRetry();
-      if (disposed || subscribed || !hasAgent()) return;
+      if (disposed || subscribed || subscriptionBlocked || !hasAgent()) return;
       subscribeRetry = window.setTimeout(() => {
         void requestSubscribe();
       }, CAPTION_SUBSCRIBE_RETRY_MS);
@@ -111,7 +113,17 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
     ) => {
       if (topic !== CAPTION_OPERATOR_TOPIC || !matchesAgent(participant)) return;
       const message = parseCaptionOperatorPacket(payload);
-      if (message && message.type !== 'caption.rejected' && !subscribed) {
+      if (!message) return;
+      const subscriptionError = getCaptionSubscriptionError(message, subscribed);
+      if (subscriptionError) {
+        subscriptionBlocked = true;
+        setCaptionConnected(false);
+        setError(subscriptionError);
+        clearSubscribeRetry();
+        session.ingestOperatorPacket(payload);
+        return;
+      }
+      if (message.type !== 'caption.rejected' && !subscribed) {
         subscribed = true;
         setCaptionConnected(true);
         setError(null);
@@ -182,23 +194,6 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
   useEffect(() => () => session.clear(), [session]);
 
   const edit = useCallback((text: string) => session.edit(text), [session]);
-  const restore = useCallback(() => session.restore(), [session]);
-  const setInterimReviewEnabled = useCallback(async (enabled: boolean): Promise<boolean> => {
-    const room = roomRef.current;
-    if (!room || connectionState !== ConnectionState.CONNECTED || !captionConnected) return false;
-    try {
-      await room.localParticipant.publishData(buildCaptionReviewModeCommand(provider, enabled), {
-        reliable: true,
-        topic: CAPTION_COMMAND_TOPIC,
-      });
-      interimReviewRef.current = enabled;
-      session.setInterimReviewEnabled(enabled);
-      return true;
-    } catch (cause) {
-      setError(errorMessage(cause));
-      return false;
-    }
-  }, [captionConnected, connectionState, provider, session]);
   const publish = useCallback(async (splitIndex?: number): Promise<boolean> => {
     const room = roomRef.current;
     if (!room || connectionState !== ConnectionState.CONNECTED || !captionConnected) return false;
@@ -228,7 +223,7 @@ export function useCaptionDesk(backendUrl: string, roomName: string, provider: A
 
   return {
     snapshot, connectionState, error, agentConnected, captionConnected,
-    edit, restore, setInterimReviewEnabled, publish, reconnect,
+    edit, publish, reconnect,
   };
 }
 

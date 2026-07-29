@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildCaptionDeskUrl, buildStreamUrl, buildViewerUrl, parseAppRoute } from './appRoutes.ts';
+import {
+  buildCaptionDeskUrl,
+  buildCaptionDeskSessionKey,
+  buildStreamUrl,
+  buildViewerUrl,
+  parseAppRoute,
+  parseCaptionDeskSource,
+} from './appRoutes.ts';
 
 test('parseAppRoute defaults the root and unknown hashes to admin', () => {
   assert.deepEqual(parseAppRoute(''), { page: 'admin', roomName: '', providerName: '', autoConnect: false });
@@ -47,8 +54,45 @@ test('route builders encode rooms and never include credentials', () => {
 test('Caption Desk route builder encodes room and provider without credentials', () => {
   const url = buildCaptionDeskUrl('https://transcriber.example/app', 'room name', 'Google');
   const roomUrl = buildCaptionDeskUrl('https://transcriber.example/app', 'room name', '');
+  const liveDraftUrl = buildCaptionDeskUrl(
+    'https://transcriber.example/app',
+    'room name',
+    'Gemini',
+    'live-draft',
+  );
   assert.equal(url, 'https://transcriber.example/app#caption-desk?room=room+name&provider=google');
   assert.equal(roomUrl, 'https://transcriber.example/app#caption-desk?room=room+name');
+  assert.equal(
+    liveDraftUrl,
+    'https://transcriber.example/app#caption-desk?room=room+name&provider=gemini&source=live-draft',
+  );
   assert.equal(url.includes('token'), false);
   assert.equal(roomUrl.includes('token'), false);
+});
+
+test('Caption Desk source mode defaults safely and reads Live Draft explicitly', () => {
+  assert.equal(parseCaptionDeskSource('#caption-desk?room=room&provider=google'), 'final');
+  assert.equal(
+    parseCaptionDeskSource('#caption-desk?room=room&provider=gemini&source=live-draft'),
+    'live-draft',
+  );
+  assert.equal(
+    parseCaptionDeskSource('#caption-desk?room=room&provider=gemini&source=interim'),
+    'live-draft',
+  );
+  assert.equal(
+    parseCaptionDeskSource('#caption-desk?room=room&provider=gemini&source=unknown'),
+    'final',
+  );
+});
+
+test('Caption Desk session identity changes with room, provider, or source mode', () => {
+  assert.equal(
+    buildCaptionDeskSessionKey('room-a', 'gemini', 'final'),
+    'room-a:gemini:final',
+  );
+  assert.notEqual(
+    buildCaptionDeskSessionKey('room-a', 'gemini', 'final'),
+    buildCaptionDeskSessionKey('room-a', 'gemini', 'live-draft'),
+  );
 });

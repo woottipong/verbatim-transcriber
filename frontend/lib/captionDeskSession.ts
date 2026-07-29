@@ -7,6 +7,7 @@ import {
   MAX_CAPTION_TEXT_BYTES,
   parseCaptionOperatorPacket,
 } from './captionDeskMessages.ts';
+import type { CaptionDeskSource } from './appRoutes.ts';
 
 export interface WaitingCaption {
   requestId: string;
@@ -20,6 +21,7 @@ export interface CaptionDeskSnapshot {
   rawText: string;
   sourceSegmentIds: string[];
   isDraftActive: boolean;
+  operatorEditsActive: boolean;
   draftPreview: string;
   queuedCount: number;
   waiting: WaitingCaption[];
@@ -28,21 +30,26 @@ export interface CaptionDeskSnapshot {
 }
 
 const EMPTY: CaptionDeskSnapshot = {
-  reviewText: '', rawText: '', sourceSegmentIds: [], isDraftActive: false, draftPreview: '',
+  reviewText: '', rawText: '', sourceSegmentIds: [], isDraftActive: false,
+  operatorEditsActive: false, draftPreview: '',
   queuedCount: 0, waiting: [], recentlyPublished: [], error: null,
 };
 export const MAX_WAITING_CAPTIONS = 64;
 export const MAX_RECENTLY_PUBLISHED = 10;
 
 export class CaptionDeskSession {
-  private snapshot: CaptionDeskSnapshot = EMPTY;
+  private snapshot: CaptionDeskSnapshot = { ...EMPTY };
   private listeners = new Set<() => void>();
   private edited = false;
   private queued: CaptionSource[] = [];
-  private interimReviewEnabled = false;
+  private interimReviewEnabled: boolean;
   private activeIsDraft = false;
   private activeDraftID = '';
   private activeDraftText = '';
+
+  constructor(source: CaptionDeskSource = 'final') {
+    this.interimReviewEnabled = source === 'live-draft';
+  }
 
   getSnapshot = (): CaptionDeskSnapshot => this.snapshot;
   subscribe = (listener: () => void): (() => void) => {
@@ -56,32 +63,13 @@ export class CaptionDeskSession {
   }
 
   edit(text: string): void {
-    this.edited = true;
+    this.edited = text !== this.snapshot.rawText;
     this.update({ ...this.snapshot, reviewText: text, error: null });
   }
 
   restore(): void {
     this.edited = false;
     this.update({ ...this.snapshot, reviewText: this.snapshot.rawText, error: null });
-  }
-
-  setInterimReviewEnabled(enabled: boolean): void {
-    this.interimReviewEnabled = enabled;
-    this.edited = false;
-    this.activeIsDraft = false;
-    this.activeDraftID = '';
-    this.activeDraftText = '';
-    this.queued = [];
-    this.update({
-      ...this.snapshot,
-      reviewText: '',
-      rawText: '',
-      sourceSegmentIds: [],
-      isDraftActive: false,
-      draftPreview: '',
-      queuedCount: 0,
-      error: null,
-    });
   }
 
   release(provider: string, splitIndex?: number): CaptionPublishCommand | null {
@@ -229,8 +217,12 @@ export class CaptionDeskSession {
           this.activeDraftText,
           message.source.text,
         );
-        const reviewText = this.interimReviewEnabled && this.edited
-          ? this.snapshot.reviewText
+        const reviewText = this.edited
+          ? appendDraftContinuation(
+              this.snapshot.reviewText,
+              this.activeDraftText,
+              message.source.text,
+            )
           : replaceTrailingSource(this.snapshot.reviewText, this.activeDraftText, message.source.text);
         this.activeDraftText = message.source.text;
         this.update({
@@ -316,7 +308,11 @@ export class CaptionDeskSession {
         this.activeDraftID = '';
         const rawText = replaceTrailingSource(this.snapshot.rawText, this.activeDraftText, source.text);
         const reviewText = this.edited
-          ? this.snapshot.reviewText
+          ? appendDraftContinuation(
+              this.snapshot.reviewText,
+              this.activeDraftText,
+              source.text,
+            )
           : replaceTrailingSource(this.snapshot.reviewText, this.activeDraftText, source.text);
         this.activeDraftText = '';
         this.update({
@@ -342,7 +338,10 @@ export class CaptionDeskSession {
   }
 
   private update(next: CaptionDeskSnapshot): void {
-    this.snapshot = next;
+    this.snapshot = {
+      ...next,
+      operatorEditsActive: this.interimReviewEnabled && this.edited,
+    };
     this.listeners.forEach(listener => listener());
   }
 }
@@ -360,4 +359,25 @@ function replaceTrailingSource(current: string, previous: string, incoming: stri
   const suffix = previous.trim();
   if (!suffix || !text.endsWith(suffix)) return text;
   return appendSourceText(text.slice(0, -suffix.length), incoming);
+}
+
+function appendDraftContinuation(current: string, previous: string, incoming: string): string {
+  if (!previous) return current;
+  if (incoming.startsWith(previous)) {
+    return `${current}${incoming.slice(previous.length)}`;
+  }
+
+  const maxAnchorLength = Math.min(previous.length, 256);
+  const minAnchorLength = Math.min(previous.length, 4);
+  for (let length = maxAnchorLength; length >= minAnchorLength; length -= 1) {
+    const anchor = previous.slice(-length);
+    const anchorIndex = incoming.lastIndexOf(anchor);
+    if (anchorIndex < 0) continue;
+    return `${current}${incoming.slice(anchorIndex + anchor.length)}`;
+  }
+
+  if (incoming.length > previous.length) {
+    return `${current}${incoming.slice(previous.length)}`;
+  }
+  return current;
 }

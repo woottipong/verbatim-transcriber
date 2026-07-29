@@ -42,11 +42,11 @@ func TestModeratorReplacesDraftAndKeepsFinalsInOrder(t *testing.T) {
 	}
 }
 
-func TestModeratorInterimModeKeepsBacklogAndLatestDraft(t *testing.T) {
+func TestModeratorKeepsBacklogAndLatestDraft(t *testing.T) {
 	moderator := New("google", time.Now)
 	ingestFinals(moderator, "google-1", "google-2", "google-3")
 
-	snapshot := moderator.SetUseInterim(true)
+	snapshot := moderator.Snapshot()
 	if got, want := pendingIDs(snapshot), []string{"google-1", "google-2", "google-3"}; !equalStrings(got, want) {
 		t.Fatalf("pending after interim mode = %v, want %v", got, want)
 	}
@@ -70,7 +70,6 @@ func TestModeratorInterimModeKeepsBacklogAndLatestDraft(t *testing.T) {
 
 func TestModeratorPublishesAccumulatedFinalsAndDraftWithRemainder(t *testing.T) {
 	moderator := New("google", time.Now)
-	moderator.SetUseInterim(true)
 	ingestFinals(moderator, "google-1", "google-2")
 	moderator.Ingest(SourceSegment{
 		ID: "google-3", Provider: "google", Text: "ข้อความสด", Sequence: 3,

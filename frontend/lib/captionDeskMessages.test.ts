@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isCaptionAgentIdentity, parseCaptionOperatorPacket, shouldPublishOnEnter } from './captionDeskMessages.ts';
+import {
+  getCaptionSubscriptionError,
+  isCaptionAgentIdentity,
+  parseCaptionOperatorPacket,
+  shouldPublishOnEnter,
+} from './captionDeskMessages.ts';
 
 const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
 
@@ -23,6 +28,29 @@ test('parses a pending operator packet', () => {
     source: { segmentId: 'g-1', text: 'ผู้ป่วยมีอาการ', provider: 'google', isFinal: true, sequence: 1 },
   }));
   assert.equal(message?.type, 'caption.pending');
+});
+
+test('surfaces a pre-subscription operator rejection as a terminal connection error', () => {
+  const rejection = parseCaptionOperatorPacket(encode({
+    type: 'caption.rejected',
+    requestId: 'subscribe-1',
+    provider: 'gemini',
+    code: 'operator_already_active',
+    message: 'Another Caption Desk is already active for this provider.',
+  }));
+  assert.ok(rejection);
+  assert.equal(
+    getCaptionSubscriptionError(rejection, false),
+    'Another Caption Desk is already active for this provider.',
+  );
+  assert.equal(getCaptionSubscriptionError(rejection, true), null);
+  const pending = parseCaptionOperatorPacket(encode({
+    type: 'caption.pending',
+    provider: 'gemini',
+    source: { segmentId: 'g-1', text: 'text', provider: 'gemini', isFinal: true, sequence: 1 },
+  }));
+  assert.ok(pending);
+  assert.equal(getCaptionSubscriptionError(pending, false), null);
 });
 
 test('rejects malformed, unsupported and oversized operator packets', () => {

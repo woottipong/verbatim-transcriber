@@ -27,6 +27,8 @@
   --status-success-text: oklch(84% 0.11 154);
   --status-warning-bg: oklch(33% 0.065 84 / 0.54);
   --status-warning-text: oklch(86% 0.12 84);
+  --status-danger-bg: oklch(29% 0.075 25 / 0.58);
+  --status-danger-text: oklch(84% 0.11 25);
   --control-surface-bg: oklch(18% 0.025 274 / 0.28);
   --language-source-border: oklch(57% 0.045 274 / 0.65);
   --language-source-bg: oklch(29% 0.028 274 / 0.72);
@@ -416,10 +418,14 @@ select:focus-visible {
 .admin-status--neutral { color: var(--status-neutral-text); background: var(--status-neutral-bg); }
 .admin-status--success { color: var(--status-success-text); background: var(--status-success-bg); }
 .admin-status--warning { color: var(--status-warning-text); background: var(--status-warning-bg); }
+.admin-status--danger { color: var(--status-danger-text); background: var(--status-danger-bg); }
 
 .status-dot { width: 0.5rem; height: 0.5rem; flex: 0 0 auto; border-radius: 999px; background: var(--subtle); }
 .status-dot--live { background: var(--success); box-shadow: 0 0 0 4px oklch(73% 0.16 154 / 0.1); }
 .status-dot--pending { background: var(--warning); animation: status-pulse 1.6s ease-in-out infinite; }
+.status-dot--success { background: var(--success); }
+.status-dot--warning { background: var(--warning); animation: status-pulse 1.6s ease-in-out infinite; }
+.status-dot--danger { background: var(--danger); }
 .status-dot--error { background: var(--danger); }
 
 .microphone-strip {
@@ -481,6 +487,12 @@ select:focus-visible {
 .caption-desk-history {
   min-height: 3.5rem;
   max-height: 16rem;
+}
+
+@media (max-width: 1023px) {
+  .caption-desk-history--empty {
+    max-height: 8rem;
+  }
 }
 
 @media (min-width: 1024px) {

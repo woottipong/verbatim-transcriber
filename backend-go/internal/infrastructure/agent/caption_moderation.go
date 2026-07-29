@@ -92,26 +92,6 @@ func (a *Agent) handleCaptionPacket(payload []byte, senderIdentity, senderMetada
 		a.subscribeCaptionOperator(senderIdentity, command)
 	case captionPublishType:
 		a.publishCaptionCommand(senderIdentity, command)
-	case captionReviewModeType:
-		a.setCaptionReviewMode(senderIdentity, command)
-	}
-}
-
-func (a *Agent) setCaptionReviewMode(identity string, command captionCommandEnvelope) {
-	if a.captionOperator() != identity || command.UseInterim == nil {
-		a.rejectCaptionCommand(identity, command.RequestID, command.Provider, "operator_not_primary")
-		return
-	}
-	snapshot := a.moderator.SetUseInterim(*command.UseInterim)
-	envelope := captionOperatorEnvelope{
-		Type:      captionSnapshotType,
-		RequestID: command.RequestID,
-		Provider:  command.Provider,
-		Draft:     captionSourceFromModeration(snapshot.Draft),
-		Pending:   captionSourcesFromModeration(snapshot.Pending),
-	}
-	if err := a.publishCaptionOperator(envelope, true, identity); err != nil {
-		log.Printf("⚠️ [Caption] Failed to confirm review mode: %v", err)
 	}
 }
 
@@ -409,7 +389,7 @@ func moderationErrorCode(err error) string {
 func captionRejectionMessage(code string) string {
 	switch code {
 	case "operator_already_active":
-		return "Another operator is already editing this provider."
+		return "Another Caption Desk is already active for this provider. Close it or try again later."
 	case "operator_unauthorized", "operator_not_primary":
 		return "This participant cannot publish captions."
 	case "provider_mismatch", "source_mismatch":

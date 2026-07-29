@@ -19,7 +19,9 @@ export function CaptionDeskPublishedHistory({ snapshot }: CaptionDeskPublishedHi
 
   return (
     <section
-      className="app-panel caption-desk-history order-2 flex min-h-0 flex-col overflow-hidden bg-[var(--canvas-raised)] shadow-none lg:order-2 lg:h-full"
+      className={`app-panel caption-desk-history order-2 flex min-h-0 flex-col overflow-hidden bg-[var(--canvas-raised)] shadow-none lg:order-2 lg:h-full ${
+        isEmpty ? 'caption-desk-history--empty' : ''
+      }`}
       aria-labelledby="published-captions-heading"
     >
       <div className="panel-header px-4 py-2.5">

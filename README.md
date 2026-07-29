@@ -25,7 +25,7 @@ The system is designed for operators who need explicit room, audio, provider, an
 | **Control Room** | `#admin` or `/` | Create rooms, share links, run providers, monitor participants, and generate external feeds |
 | **Audio Source** | `#stream?room=<room>` | Select microphone or Chrome Tab audio and publish it to the room |
 | **Transcript** | `#viewer?room=<room>&autoconnect=1` | Subscribe to room audio and follow live transcript output without publishing |
-| **Caption Desk** | `#caption-desk?room=<room>&provider=<provider>` | Review final text—or opt into interim review—and publish approved captions with Enter |
+| **Caption Desk** | `#caption-desk?room=<room>&provider=<provider>` | Choose **Wait for Final** or **Edit Live Draft**, then publish approved captions with Enter |
 
 The normal operating sequence is:
 
@@ -81,12 +81,15 @@ lane attached to an active provider: it receives targeted source Draft/final
 packets and publishes operator-approved text on `caption.public` and the
 room-scoped approved-caption WebSocket.
 
-Caption Desk reviews final source segments by default and can opt into reviewing
-the active interim Draft. It uses `Enter` to publish and `Shift+Enter` for a
-newline. It permits one in-flight publication per source segment; later segments
-may continue to queue. Publishing an interim consumes that provider segment, so
-its later final is suppressed from the review queue. Pending review state is
-bounded and held in agent memory; restarting the agent clears it.
+Caption Desk uses **Wait for Final** by default or lets the operator choose
+**Edit Live Draft** before joining. Live Draft text remains replaceable until
+the operator changes it; after a real edit, the edited text is protected while
+new continuation text still appends. Cursor movement alone does not protect the
+text. The operator uses `Enter` to publish and `Shift+Enter` for a newline. It permits
+one in-flight publication per source segment; later segments may continue to
+queue. Publishing a Draft consumes that provider segment, so its later final is
+suppressed from the review queue. Pending review state is bounded and held in
+agent memory; restarting the agent clears it.
 
 Provider output stays identifiable and replaceable while it is still changing:
 

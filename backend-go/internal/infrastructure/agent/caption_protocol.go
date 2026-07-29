@@ -15,7 +15,6 @@ const (
 
 	captionSubscribeType        = "caption.subscribe"
 	captionPublishType          = "caption.publish"
-	captionReviewModeType       = "caption.review-mode"
 	maxCaptionCommandTextBytes  = 16_000
 	maxCaptionCommandSourceIDs  = 500
 	maxCaptionCommandRequestLen = 128
@@ -36,7 +35,6 @@ type captionCommandEnvelope struct {
 	SourceSegmentIDs []string `json:"sourceSegmentIds,omitempty"`
 	Text             string   `json:"text,omitempty"`
 	RemainingText    string   `json:"remainingText,omitempty"`
-	UseInterim       *bool    `json:"useInterim,omitempty"`
 }
 
 type captionSourceEnvelope struct {
@@ -83,16 +81,13 @@ func parseCaptionCommand(payload []byte) (captionCommandEnvelope, error) {
 
 	switch command.Type {
 	case captionSubscribeType:
-		if command.Text != "" || command.RemainingText != "" || command.UseInterim != nil || len(command.SourceSegmentIDs) != 0 {
+		if command.Text != "" || command.RemainingText != "" || len(command.SourceSegmentIDs) != 0 {
 			return captionCommandEnvelope{}, errInvalidCaptionCommand
 		}
 	case captionPublishType:
 		if strings.TrimSpace(command.Text) == "" || len(command.Text) > maxCaptionCommandTextBytes ||
 			len(command.RemainingText) > maxCaptionCommandTextBytes ||
 			len(command.SourceSegmentIDs) == 0 || len(command.SourceSegmentIDs) > maxCaptionCommandSourceIDs {
-			return captionCommandEnvelope{}, errInvalidCaptionCommand
-		}
-		if command.UseInterim != nil {
 			return captionCommandEnvelope{}, errInvalidCaptionCommand
 		}
 		seen := make(map[string]struct{}, len(command.SourceSegmentIDs))
@@ -106,11 +101,6 @@ func parseCaptionCommand(payload []byte) (captionCommandEnvelope, error) {
 			}
 			seen[id] = struct{}{}
 			command.SourceSegmentIDs[index] = id
-		}
-	case captionReviewModeType:
-		if command.UseInterim == nil || command.Text != "" ||
-			command.RemainingText != "" || len(command.SourceSegmentIDs) != 0 {
-			return captionCommandEnvelope{}, errInvalidCaptionCommand
 		}
 	default:
 		return captionCommandEnvelope{}, errInvalidCaptionCommand

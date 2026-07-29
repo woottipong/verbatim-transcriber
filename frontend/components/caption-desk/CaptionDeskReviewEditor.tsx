@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CaptionDeskSnapshot } from '../../lib/captionDeskSession';
 import { shouldPublishOnEnter } from '../../lib/captionDeskMessages';
+import {
+  formatCaptionSegmentAge,
+  getCaptionEditorTextUpdate,
+  getCaptionReviewInstructions,
+} from '../../lib/captionDeskPresentation';
 import { getContentEditableCaretOffset } from '../../lib/caretUtils';
 
 interface CaptionDeskReviewEditorProps {
@@ -21,22 +26,29 @@ export function CaptionDeskReviewEditor({
   publish,
 }: CaptionDeskReviewEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => editorRef.current?.focus(), []);
+  const hasSegmentIds = snapshot.sourceSegmentIds.length > 0;
+  const canEdit = captionConnected || hasSegmentIds || snapshot.reviewText.length > 0;
 
   useEffect(() => {
     const editor = editorRef.current;
-    if (editor && editor.textContent !== snapshot.reviewText) {
-      editor.textContent = snapshot.reviewText;
+    if (!editor) return;
+    const update = getCaptionEditorTextUpdate(
+      editor.textContent || '',
+      snapshot.reviewText,
+      snapshot.operatorEditsActive,
+    );
+    if (update.kind === 'append') {
+      editor.append(document.createTextNode(update.text));
+    } else if (update.kind === 'replace') {
+      editor.textContent = update.text;
     }
-  }, [snapshot.reviewText]);
+  }, [snapshot.operatorEditsActive, snapshot.reviewText]);
 
   const release = (splitAtCaret = false) => {
     const splitIndex = splitAtCaret ? getContentEditableCaretOffset(editorRef.current) : undefined;
     void publish(splitIndex).finally(() => requestAnimationFrame(() => editorRef.current?.focus()));
   };
 
-  const hasSegmentIds = snapshot.sourceSegmentIds.length > 0;
   const isDraftActive = !useInterimInReview && snapshot.isDraftActive;
 
   return (
@@ -44,11 +56,13 @@ export function CaptionDeskReviewEditor({
       <div className="panel-header caption-desk-toolbar px-4 py-2.5 sm:px-5">
         <div className="min-w-0">
           <h2 id="review-caption-heading" className="font-semibold">Review caption</h2>
-          <p className="truncate text-xs text-[var(--muted)]">Place the cursor at a break, then press Enter to publish up to it.</p>
+          <p id="caption-review-instructions" className="text-xs leading-5 text-[var(--muted)]">
+            {getCaptionReviewInstructions(canEdit)}
+          </p>
         </div>
         <div className="caption-desk-toolbar__tools">
-          <span className="caption-desk-source-badge" aria-label={`Review source: ${useInterimInReview ? 'Interim' : 'Final'}`}>
-            {useInterimInReview ? 'Interim' : 'Final'}
+          <span className="caption-desk-source-badge" aria-label={`Caption input: ${useInterimInReview ? 'Live Draft' : 'Final only'}`}>
+            {useInterimInReview ? 'Live Draft' : 'Final only'}
           </span>
           <div className="caption-desk-queue-status text-right text-xs text-[var(--muted)]">
             {hasSegmentIds ? (
@@ -70,12 +84,14 @@ export function CaptionDeskReviewEditor({
       <div
         ref={editorRef}
         role="textbox"
-        contentEditable="plaintext-only"
+        contentEditable={canEdit ? 'plaintext-only' : false}
         suppressContentEditableWarning
         aria-multiline="true"
+        aria-disabled={!canEdit}
+        aria-describedby="caption-review-instructions"
         data-placeholder={
           captionConnected
-            ? 'Final transcript text will collect here…'
+            ? 'Caption text will collect here…'
             : agentConnected
               ? 'Connecting to the caption feed…'
               : 'Waiting for the transcriber…'
@@ -88,7 +104,7 @@ export function CaptionDeskReviewEditor({
           release(true);
         }}
         aria-label="Caption text to review and publish"
-        className="caption-review-editor transcript-paragraph-source w-full flex-1 overflow-y-auto bg-transparent px-4 py-3 text-[var(--ink)] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] sm:px-5 sm:py-4"
+        className="caption-review-editor transcript-paragraph-source w-full flex-1 overflow-y-auto bg-transparent px-4 py-3 text-[var(--ink)] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] aria-disabled:cursor-wait aria-disabled:text-[var(--muted)] sm:px-5 sm:py-4"
       />
 
       <span className="sr-only" aria-live="polite">
@@ -97,8 +113,14 @@ export function CaptionDeskReviewEditor({
 
       <footer className="caption-desk-editor-footer flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-[var(--line)] bg-[var(--control-surface-bg)] px-4 py-2.5 sm:px-5">
         <span className="text-sm text-[var(--muted)]">{snapshot.reviewText.length} characters</span>
-        <span className="text-xs text-[var(--subtle)] hidden sm:inline">Enter → publish to cursor · Shift+Enter → new line</span>
-        <span className="text-xs text-[var(--subtle)] sm:hidden">Enter → publish · Shift+Enter → new line</span>
+        {canEdit ? (
+          <>
+            <span className="hidden text-xs text-[var(--subtle)] sm:inline">Enter → publish to cursor · Shift+Enter → new line</span>
+            <span className="text-xs text-[var(--subtle)] sm:hidden">Enter → publish · Shift+Enter → new line</span>
+          </>
+        ) : (
+          <span className="text-xs text-[var(--subtle)]">Waiting for captions…</span>
+        )}
       </footer>
     </section>
   );
@@ -116,5 +138,5 @@ function SegmentAge({ segmentKey }: { segmentKey: string }) {
     return () => window.clearInterval(timer);
   }, [segmentKey]);
 
-  return <span> · {age}s behind</span>;
+  return <span> · {formatCaptionSegmentAge(age)}</span>;
 }
