@@ -1,8 +1,4 @@
-import { buildCaptionDeskUrl } from '../../lib/appRoutes';
-import {
-  getCaptionDeskRoomStatus,
-  type CaptionDeskStatusTone,
-} from '../../lib/captionDeskPresentation';
+import { type CaptionDeskStatusTone, getCaptionDeskOperationalStatus } from '../../lib/captionDeskPresentation';
 import { formatProviderName, type AgentProvider } from '../../lib/providers';
 import type { ConnectionState } from '../../types';
 
@@ -12,6 +8,8 @@ interface CaptionDeskHeaderProps {
   connectionState: ConnectionState;
   captionConnected: boolean;
   agentConnected: boolean;
+  subscriptionBlockCode: string | null;
+  onChangeDesk: () => void;
 }
 
 export function CaptionDeskHeader({
@@ -20,8 +18,15 @@ export function CaptionDeskHeader({
   connectionState,
   captionConnected,
   agentConnected,
+  subscriptionBlockCode,
+  onChangeDesk,
 }: CaptionDeskHeaderProps) {
-  const roomStatus = getCaptionDeskRoomStatus(connectionState);
+  const operationalStatus = getCaptionDeskOperationalStatus(
+    connectionState,
+    captionConnected,
+    agentConnected,
+    subscriptionBlockCode,
+  );
 
   return (
     <header className="app-header">
@@ -44,28 +49,15 @@ export function CaptionDeskHeader({
         </div>
         <div className="caption-desk-navbar__controls flex items-center justify-end gap-2">
           <div className="flex items-center gap-1.5" aria-label="Caption Desk status">
-            <Status tone={roomStatus.tone} label={roomStatus.label} />
-            <Status
-              tone={captionConnected ? 'success' : 'warning'}
-              label={
-                captionConnected
-                  ? 'Receiving captions'
-                  : agentConnected
-                    ? 'Connecting captions'
-                    : 'Transcriber unavailable'
-              }
-            />
+            <Status tone={operationalStatus.tone} label={operationalStatus.label} />
           </div>
-          <a
-            href={buildCaptionDeskUrl(
-              `${window.location.origin}${window.location.pathname}`,
-              roomName,
-              '',
-            )}
+          <button
+            type="button"
+            onClick={onChangeDesk}
             className="control-button control-button--inline"
           >
-            Change
-          </a>
+            Change desk
+          </button>
         </div>
       </div>
     </header>

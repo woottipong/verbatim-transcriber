@@ -7,6 +7,7 @@ import {
   type RunningAgent,
 } from '../../lib/api';
 import { buildCaptionDeskUrl, type CaptionDeskSource } from '../../lib/appRoutes';
+import { formatCaptionDeskError } from '../../lib/captionDeskPresentation';
 import { formatProviderName, selectActiveRoomProviders, type AgentProvider } from '../../lib/providers';
 
 interface CaptionDeskLauncherProps {
@@ -48,7 +49,7 @@ export function CaptionDeskLauncher({
       setRooms(roomList);
       setAgents(status.agents);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Failed to load Caption Desk options.');
+      setError(formatCaptionDeskError(cause));
     } finally {
       setLoading(false);
     }
@@ -125,9 +126,7 @@ export function CaptionDeskLauncher({
                 <RefreshCw size={15} /> Retry
               </button>
             </div>
-          ) : null}
-
-          {!error && !loading && rooms.length === 0 ? (
+          ) : !loading && rooms.length === 0 ? (
             <div className="mt-5 rounded-lg bg-[var(--control-surface-bg)] px-4 py-4">
               <p className="text-sm font-medium">No rooms yet.</p>
               <p className="mt-1 text-sm text-[var(--muted)]">Start by creating one in Control Room, then come back here.</p>

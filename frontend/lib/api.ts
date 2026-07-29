@@ -147,9 +147,10 @@ export async function createCaptionDeskToken(
     backendUrl: string,
     roomName: string,
     provider: AgentProvider,
+    sessionId: string,
 ): Promise<CaptionDeskTokenResponse> {
     const response = await fetch(
-        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/caption-token/${encodeURIComponent(provider)}`,
+        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/caption-token/${encodeURIComponent(provider)}?sessionId=${encodeURIComponent(sessionId)}`,
         { method: 'POST', headers: getControlAuthHeaders() },
     );
     return parseApiResponse<CaptionDeskTokenResponse>(response, 'Failed to open Caption Desk');

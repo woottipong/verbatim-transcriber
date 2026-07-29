@@ -12,6 +12,7 @@ import {
   type CaptionPublishCommand,
 } from '../lib/captionDeskMessages';
 import { CaptionDeskSession } from '../lib/captionDeskSession';
+import { formatCaptionDeskError } from '../lib/captionDeskPresentation';
 import type { CaptionDeskSource } from '../lib/appRoutes';
 import type { AgentProvider } from '../lib/providers';
 import { ConnectionState } from '../types';
@@ -29,11 +30,13 @@ export function useCaptionDesk(
   const session = sessionRef.current;
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   const roomRef = useRef<Room | null>(null);
+  const deskSessionIDRef = useRef(crypto.randomUUID());
   const scopeRef = useRef('');
   const [connectionState, setConnectionState] = useState(ConnectionState.DISCONNECTED);
   const [error, setError] = useState<string | null>(null);
   const [agentConnected, setAgentConnected] = useState(false);
   const [captionConnected, setCaptionConnected] = useState(false);
+  const [subscriptionBlockCode, setSubscriptionBlockCode] = useState<string | null>(null);
   const [reconnectNonce, setReconnectNonce] = useState(0);
 
   const sendSubscribe = useCallback(async (room: Room) => {
@@ -117,6 +120,7 @@ export function useCaptionDesk(
       const subscriptionError = getCaptionSubscriptionError(message, subscribed);
       if (subscriptionError) {
         subscriptionBlocked = true;
+        setSubscriptionBlockCode(message.type === 'caption.rejected' ? message.code : 'subscription_failed');
         setCaptionConnected(false);
         setError(subscriptionError);
         clearSubscribeRetry();
@@ -125,6 +129,7 @@ export function useCaptionDesk(
       }
       if (message.type !== 'caption.rejected' && !subscribed) {
         subscribed = true;
+        setSubscriptionBlockCode(null);
         setCaptionConnected(true);
         setError(null);
         clearSubscribeRetry();
@@ -166,8 +171,14 @@ export function useCaptionDesk(
     const connect = async () => {
       setConnectionState(ConnectionState.CONNECTING);
       setError(null);
+      setSubscriptionBlockCode(null);
       try {
-        const credentials = await createCaptionDeskToken(backendUrl, roomName, provider);
+        const credentials = await createCaptionDeskToken(
+          backendUrl,
+          roomName,
+          provider,
+          deskSessionIDRef.current,
+        );
         if (disposed) return;
         await room.connect(credentials.wsUrl, credentials.token);
         if (disposed) return;
@@ -218,15 +229,16 @@ export function useCaptionDesk(
   }, [captionConnected, connectionState, provider, session]);
   const reconnect = useCallback(() => {
     setError(null);
+    setSubscriptionBlockCode(null);
     setReconnectNonce(current => current + 1);
   }, []);
 
   return {
     snapshot, connectionState, error, agentConnected, captionConnected,
-    edit, publish, reconnect,
+    subscriptionBlockCode, edit, publish, reconnect,
   };
 }
 
 function errorMessage(value: unknown): string {
-  return value instanceof Error ? value.message : 'Caption Desk connection failed.';
+  return formatCaptionDeskError(value);
 }

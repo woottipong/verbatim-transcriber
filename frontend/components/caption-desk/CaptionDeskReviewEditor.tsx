@@ -17,6 +17,8 @@ interface CaptionDeskReviewEditorProps {
   publish: (splitIndex?: number) => Promise<void>;
 }
 
+const SHORTCUT_HINT_STORAGE_KEY = 'captionlive.caption-desk.shortcut-hint-seen';
+
 export function CaptionDeskReviewEditor({
   snapshot,
   useInterimInReview,
@@ -28,6 +30,16 @@ export function CaptionDeskReviewEditor({
   const editorRef = useRef<HTMLDivElement>(null);
   const hasSegmentIds = snapshot.sourceSegmentIds.length > 0;
   const canEdit = captionConnected || hasSegmentIds || snapshot.reviewText.length > 0;
+  const [showShortcutHint, setShowShortcutHint] = useState(() => !hasSeenShortcutHint());
+
+  const dismissShortcutHint = () => {
+    try {
+      window.localStorage.setItem(SHORTCUT_HINT_STORAGE_KEY, '1');
+    } catch {
+      // The hint still dismisses for this session when storage is unavailable.
+    }
+    setShowShortcutHint(false);
+  };
 
   useEffect(() => {
     const editor = editorRef.current;
@@ -52,7 +64,7 @@ export function CaptionDeskReviewEditor({
   const isDraftActive = !useInterimInReview && snapshot.isDraftActive;
 
   return (
-    <section className="app-panel order-1 flex min-h-[20rem] flex-col lg:order-1 lg:h-full lg:min-h-0" aria-labelledby="review-caption-heading">
+    <section className="app-panel caption-desk-review order-1 flex min-h-64 flex-col lg:order-1 lg:h-full lg:min-h-0" aria-labelledby="review-caption-heading">
       <div className="panel-header caption-desk-toolbar px-4 py-2.5 sm:px-5">
         <div className="min-w-0">
           <h2 id="review-caption-heading" className="font-semibold">Review caption</h2>
@@ -101,6 +113,7 @@ export function CaptionDeskReviewEditor({
         onKeyDown={event => {
           if (!shouldPublishOnEnter(event.nativeEvent)) return;
           event.preventDefault();
+          if (showShortcutHint) dismissShortcutHint();
           release(true);
         }}
         aria-label="Caption text to review and publish"
@@ -110,6 +123,15 @@ export function CaptionDeskReviewEditor({
       <span className="sr-only" aria-live="polite">
         {isDraftActive ? 'Draft active, waiting for final' : ''}
       </span>
+
+      {canEdit && showShortcutHint ? (
+        <div className="caption-desk-shortcut-hint flex items-center justify-between gap-3 border-t border-[var(--line)] px-4 py-2 text-xs sm:px-5">
+          <span><strong>Quick publish:</strong> Enter publishes to the cursor. Shift+Enter adds a new line.</span>
+          <button type="button" className="control-button control-button--inline shrink-0" onClick={dismissShortcutHint}>
+            Got it
+          </button>
+        </div>
+      ) : null}
 
       <footer className="caption-desk-editor-footer flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-[var(--line)] bg-[var(--control-surface-bg)] px-4 py-2.5 sm:px-5">
         <span className="text-sm text-[var(--muted)]">{snapshot.reviewText.length} characters</span>
@@ -124,6 +146,14 @@ export function CaptionDeskReviewEditor({
       </footer>
     </section>
   );
+}
+
+function hasSeenShortcutHint(): boolean {
+  try {
+    return window.localStorage.getItem(SHORTCUT_HINT_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
 }
 
 function SegmentAge({ segmentKey }: { segmentKey: string }) {

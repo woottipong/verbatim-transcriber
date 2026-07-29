@@ -18,6 +18,7 @@ import (
 )
 
 var roomNamePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
+var deskSessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,128}$`)
 
 func validateRoomName(name string) error {
 	if name == "" || name != strings.TrimSpace(name) || !roomNamePattern.MatchString(name) {
@@ -107,6 +108,12 @@ func HandleCaptionDeskToken(
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 	}
+	sessionID := strings.TrimSpace(c.Query("sessionId"))
+	if !deskSessionIDPattern.MatchString(sessionID) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Caption Desk session ID is invalid",
+		})
+	}
 	if _, err := rooms.Find(c.UserContext(), roomName); err != nil {
 		if errors.Is(err, roomoperations.ErrRoomNotFound) {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
@@ -134,7 +141,9 @@ func HandleCaptionDeskToken(
 		CanSubscribe:   &canSubscribe,
 		CanPublishData: &canPublishData,
 	}
-	metadata, err := json.Marshal(captionOperatorMetadata{Role: "caption-operator", Provider: provider})
+	metadata, err := json.Marshal(captionOperatorMetadata{
+		Role: "caption-operator", Provider: provider, SessionID: sessionID,
+	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create operator metadata"})
 	}
@@ -153,8 +162,9 @@ func HandleCaptionDeskToken(
 }
 
 type captionOperatorMetadata struct {
-	Role     string `json:"role"`
-	Provider string `json:"provider"`
+	Role      string `json:"role"`
+	Provider  string `json:"provider"`
+	SessionID string `json:"sessionId"`
 }
 
 // HandleCreateRoom creates an empty room. Starting an agent remains a separate

@@ -316,6 +316,64 @@ func TestCaptionOperatorDisconnectKeepsPendingState(t *testing.T) {
 	}
 }
 
+func TestCaptionDeskSessionReconnectsDuringGraceAndBlocksOtherSessions(t *testing.T) {
+	var packets []publishedData
+	agent := newCaptionTestAgent("google", &packets)
+	agent.captionOperatorGrace = 20 * time.Millisecond
+	agent.subscribeCaptionOperator("caption-operator-1", "desk-session-a", captionCommandEnvelope{
+		Type: captionSubscribeType, RequestID: "subscribe-1", Provider: "google",
+	})
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ข้อความรอตรวจ", IsFinal: true, Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+	agent.clearCaptionOperator("caption-operator-1")
+
+	agent.subscribeCaptionOperator("caption-operator-2", "desk-session-b", captionCommandEnvelope{
+		Type: captionSubscribeType, RequestID: "subscribe-2", Provider: "google",
+	})
+	var blocked captionOperatorEnvelope
+	if err := json.Unmarshal(packets[len(packets)-1].payload, &blocked); err != nil {
+		t.Fatal(err)
+	}
+	if blocked.Code != "operator_already_active" {
+		t.Fatalf("takeover during grace = %#v", blocked)
+	}
+
+	agent.subscribeCaptionOperator("caption-operator-3", "desk-session-a", captionCommandEnvelope{
+		Type: captionSubscribeType, RequestID: "subscribe-3", Provider: "google",
+	})
+	if got := len(agent.moderator.Snapshot().Pending); got != 1 {
+		t.Fatalf("same-session reconnect pending = %d, want 1", got)
+	}
+	time.Sleep(30 * time.Millisecond)
+	if got := len(agent.moderator.Snapshot().Pending); got != 1 {
+		t.Fatalf("reconnect grace timer cleared active session pending = %d", got)
+	}
+}
+
+func TestCaptionDeskSessionExpiryStartsNextOperatorWithoutBacklog(t *testing.T) {
+	var packets []publishedData
+	agent := newCaptionTestAgent("google", &packets)
+	agent.captionOperatorGrace = 5 * time.Millisecond
+	agent.subscribeCaptionOperator("caption-operator-1", "desk-session-a", captionCommandEnvelope{
+		Type: captionSubscribeType, RequestID: "subscribe-1", Provider: "google",
+	})
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ข้อความเก่า", IsFinal: true, Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+	agent.clearCaptionOperator("caption-operator-1")
+	time.Sleep(20 * time.Millisecond)
+
+	agent.subscribeCaptionOperator("caption-operator-2", "desk-session-b", captionCommandEnvelope{
+		Type: captionSubscribeType, RequestID: "subscribe-2", Provider: "google",
+	})
+	if snapshot := agent.moderator.Snapshot(); len(snapshot.Pending) != 0 {
+		t.Fatalf("new session received expired backlog: %#v", snapshot.Pending)
+	}
+}
+
 func TestNewCaptionOperatorReceivesActiveDraftWithoutPreJoinFinals(t *testing.T) {
 	var packets []publishedData
 	agent := newCaptionTestAgent("google", &packets)
@@ -328,7 +386,7 @@ func TestNewCaptionOperatorReceivesActiveDraftWithoutPreJoinFinals(t *testing.T)
 		Role: domain.TranscriptRoleSource, SegmentID: "google-active",
 	})
 
-	agent.subscribeCaptionOperator("caption-operator-1", captionCommandEnvelope{
+	agent.subscribeCaptionOperator("caption-operator-1", "desk-session-1", captionCommandEnvelope{
 		Type: captionSubscribeType, RequestID: "subscribe-1", Provider: "google",
 	})
 	snapshot := agent.moderator.Snapshot()
@@ -354,7 +412,7 @@ func TestNewCaptionOperatorReceivesActiveDraftWithoutPreJoinFinals(t *testing.T)
 		Type: "transcript", Text: "ข้อความหลังเข้าห้อง", IsFinal: true, Provider: "google",
 		Role: domain.TranscriptRoleSource, SegmentID: "google-after",
 	})
-	agent.subscribeCaptionOperator("caption-operator-1", captionCommandEnvelope{
+	agent.subscribeCaptionOperator("caption-operator-1", "desk-session-1", captionCommandEnvelope{
 		Type: captionSubscribeType, RequestID: "subscribe-2", Provider: "google",
 	})
 	if got := len(agent.moderator.Snapshot().Pending); got != 1 {
@@ -374,7 +432,7 @@ func TestNewCaptionOperatorDoesNotReceiveDraftFinalizedBeforeJoin(t *testing.T) 
 		Role: domain.TranscriptRoleSource, SegmentID: "google-before",
 	})
 
-	agent.subscribeCaptionOperator("caption-operator-1", captionCommandEnvelope{
+	agent.subscribeCaptionOperator("caption-operator-1", "desk-session-1", captionCommandEnvelope{
 		Type: captionSubscribeType, RequestID: "subscribe-1", Provider: "google",
 	})
 	snapshot := agent.moderator.Snapshot()

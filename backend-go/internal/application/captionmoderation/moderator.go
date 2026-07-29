@@ -165,6 +165,19 @@ func (m *Moderator) StartReviewWindow() Snapshot {
 	return m.snapshotLocked()
 }
 
+// EndReviewWindow drops review-session state while retaining the provider Draft
+// that may still be active when the next operator joins.
+func (m *Moderator) EndReviewWindow() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.pending = nil
+	clear(m.pendingIndex)
+	m.processed = make(map[string]processedPublication)
+	m.processedOrder = nil
+	m.consumedDrafts = make(map[string]struct{})
+	m.consumedOrder = nil
+}
+
 func normalizeSourceSegment(segment SourceSegment) SourceSegment {
 	segment.ID = strings.TrimSpace(segment.ID)
 	segment.Provider = strings.ToLower(strings.TrimSpace(segment.Provider))

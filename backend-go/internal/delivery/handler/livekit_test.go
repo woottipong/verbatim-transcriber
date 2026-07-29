@@ -114,7 +114,7 @@ func TestHandleCaptionDeskTokenRequiresActiveProvider(t *testing.T) {
 
 	response, err := app.Test(httptest.NewRequest(
 		http.MethodPost,
-		"/rooms/room-a/caption-token/google",
+		"/rooms/room-a/caption-token/google?sessionId=desk-session-12345678",
 		nil,
 	))
 	if err != nil {
@@ -126,7 +126,7 @@ func TestHandleCaptionDeskTokenRequiresActiveProvider(t *testing.T) {
 
 	missingResponse, err := app.Test(httptest.NewRequest(
 		http.MethodPost,
-		"/rooms/missing/caption-token/google",
+		"/rooms/missing/caption-token/google?sessionId=desk-session-12345678",
 		nil,
 	))
 	if err != nil {
@@ -164,7 +164,7 @@ func TestHandleCaptionDeskTokenIssuesServerOwnedOperatorGrant(t *testing.T) {
 	})
 	response, err := app.Test(httptest.NewRequest(
 		http.MethodPost,
-		"/rooms/room-a/caption-token/google",
+		"/rooms/room-a/caption-token/google?sessionId=desk-session-12345678",
 		nil,
 	))
 	if err != nil {
@@ -207,8 +207,35 @@ func TestHandleCaptionDeskTokenIssuesServerOwnedOperatorGrant(t *testing.T) {
 	if err := json.Unmarshal([]byte(grants.Metadata), &metadata); err != nil {
 		t.Fatal(err)
 	}
-	if metadata.Role != "caption-operator" || metadata.Provider != "google" {
+	if metadata.Role != "caption-operator" || metadata.Provider != "google" ||
+		metadata.SessionID != "desk-session-12345678" {
 		t.Fatalf("operator metadata = %#v", metadata)
+	}
+}
+
+func TestHandleCaptionDeskTokenRequiresSessionID(t *testing.T) {
+	cfg := captionTokenTestConfig()
+	operations := roomoperations.New(&roomHandlerAdapter{
+		rooms: []roomoperations.RoomRecord{{SID: "RM_room_a", Name: "room-a"}},
+	})
+	supervisor := agentsupervisor.New(func(string) agentsupervisor.Agent {
+		return newCaptionTokenAgent()
+	})
+	app := fiber.New()
+	app.Post("/rooms/:room/caption-token/:provider", func(c *fiber.Ctx) error {
+		return HandleCaptionDeskToken(c, cfg, operations, supervisor)
+	})
+
+	response, err := app.Test(httptest.NewRequest(
+		http.MethodPost,
+		"/rooms/room-a/caption-token/google",
+		nil,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusBadRequest)
 	}
 }
 

@@ -231,7 +231,7 @@ public frontend build.
 | `GET` | `/livekit/rooms/:room/transcripts/ws?token=...` | Read-only transcript WebSocket |
 | `POST` | `/livekit/rooms/:room/transcript-token/:provider` | Issue a 24-hour room/provider-bound WebSocket URL |
 | `GET` | `/ws/transcript/:provider/:room?token=...` | Read-only lean provider transcript WebSocket |
-| `POST` | `/livekit/rooms/:room/caption-token/:provider` | Issue a LiveKit token for a Caption Desk operator attached to an active provider |
+| `POST` | `/livekit/rooms/:room/caption-token/:provider?sessionId=...` | Issue a LiveKit token for one stable Caption Desk browser session attached to an active provider |
 | `POST` | `/livekit/rooms/:room/caption-token/ws` | Issue a purpose-bound, room-scoped approved-caption WebSocket URL |
 | `GET` | `/ws/caption/:room?token=...` | Approved captions as one plain UTF-8 text frame per publication |
 | `GET` | `/livekit/rooms/:name` | Room participants |

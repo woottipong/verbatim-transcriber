@@ -489,7 +489,24 @@ select:focus-visible {
   max-height: 16rem;
 }
 
+.caption-desk-history-compact [aria-expanded="true"] {
+  border-bottom: 1px solid var(--line);
+}
+
+.caption-desk-shortcut-hint {
+  color: var(--status-neutral-text);
+  background: var(--status-neutral-bg);
+}
+
 @media (max-width: 1023px) {
+  .caption-desk-main {
+    overscroll-behavior: contain;
+  }
+
+  .caption-desk-review {
+    min-height: clamp(12rem, 52dvh, 20rem);
+  }
+
   .caption-desk-history--empty {
     max-height: 8rem;
   }
@@ -1033,7 +1050,8 @@ select:focus-visible {
   }
 
   .caption-desk-workspace {
-    min-height: 0;
+    flex: 0 0 auto;
+    min-height: auto;
   }
 
   .caption-desk-editor-footer {

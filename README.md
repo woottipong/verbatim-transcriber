@@ -91,6 +91,12 @@ queue. Publishing a Draft consumes that provider segment, so its later final is
 suppressed from the review queue. Pending review state is bounded and held in
 agent memory; restarting the agent clears it.
 
+Only one Caption Desk session may own a room/provider lane at a time. The same
+browser session may reconnect during a 10-second grace period without losing
+its review buffer. When that grace period expires, the review window closes so
+the next operator starts at the current caption rather than receiving backlog
+from the previous Desk.
+
 Provider output stays identifiable and replaceable while it is still changing:
 
 ```text

@@ -153,6 +153,23 @@ func TestModeratorStartReviewWindowKeepsActiveDraftAndDropsPreJoinFinals(t *test
 	}
 }
 
+func TestModeratorEndReviewWindowDropsPendingAndKeepsCurrentDraft(t *testing.T) {
+	moderator := New("google", time.Now)
+	ingestFinals(moderator, "google-1", "google-2")
+	moderator.Ingest(SourceSegment{
+		ID: "google-3", Provider: "google", Text: "current draft", Sequence: 3,
+	})
+
+	moderator.EndReviewWindow()
+	snapshot := moderator.Snapshot()
+	if len(snapshot.Pending) != 0 {
+		t.Fatalf("pending after review ended = %#v, want empty", snapshot.Pending)
+	}
+	if snapshot.Draft == nil || snapshot.Draft.ID != "google-3" {
+		t.Fatalf("draft after review ended = %#v, want google-3", snapshot.Draft)
+	}
+}
+
 func TestModeratorPublishesPendingPrefix(t *testing.T) {
 	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
 	moderator := New("google", func() time.Time { return now })

@@ -13,6 +13,7 @@ import (
 )
 
 const defaultCaptionDraftInterval = 50 * time.Millisecond
+const defaultCaptionOperatorGrace = 10 * time.Second
 
 type captionDraftDelivery struct {
 	envelope captionOperatorEnvelope
@@ -20,8 +21,9 @@ type captionDraftDelivery struct {
 }
 
 type captionOperatorMetadata struct {
-	Role     string `json:"role"`
-	Provider string `json:"provider"`
+	Role      string `json:"role"`
+	Provider  string `json:"provider"`
+	SessionID string `json:"sessionId"`
 }
 
 func (a *Agent) handleTranscriptMessage(message TranscriptMessage) {
@@ -89,24 +91,38 @@ func (a *Agent) handleCaptionPacket(payload []byte, senderIdentity, senderMetada
 
 	switch command.Type {
 	case captionSubscribeType:
-		a.subscribeCaptionOperator(senderIdentity, command)
+		sessionID := a.captionOperatorSession(senderMetadata, command.Provider)
+		if sessionID == "" {
+			a.rejectCaptionCommand(senderIdentity, command.RequestID, command.Provider, "operator_unauthorized")
+			return
+		}
+		a.subscribeCaptionOperator(senderIdentity, sessionID, command)
 	case captionPublishType:
 		a.publishCaptionCommand(senderIdentity, command)
 	}
 }
 
-func (a *Agent) subscribeCaptionOperator(identity string, command captionCommandEnvelope) {
+func (a *Agent) subscribeCaptionOperator(
+	identity string,
+	sessionID string,
+	command captionCommandEnvelope,
+) {
 	a.mu.Lock()
-	if a.captionOperatorID != "" && a.captionOperatorID != identity {
+	if a.captionOperatorSessionID != "" && a.captionOperatorSessionID != sessionID {
 		a.mu.Unlock()
 		a.rejectCaptionCommand(identity, command.RequestID, command.Provider, "operator_already_active")
 		return
 	}
-	isNewOperator := a.captionOperatorID == ""
+	if a.captionReviewEndTimer != nil {
+		a.captionReviewEndTimer.Stop()
+		a.captionReviewEndTimer = nil
+	}
+	isNewSession := a.captionOperatorSessionID == ""
 	var snapshot captionmoderation.Snapshot
-	if isNewOperator && !a.captionReviewStarted {
+	if isNewSession {
 		snapshot = a.moderator.StartReviewWindow()
 		a.captionReviewStarted = true
+		a.captionOperatorSessionID = sessionID
 	} else {
 		snapshot = a.moderator.Snapshot()
 	}
@@ -304,6 +320,19 @@ func (a *Agent) clearCaptionOperator(identity string) {
 	if a.captionOperatorID == identity {
 		a.captionOperatorID = ""
 		cleared = true
+		sessionID := a.captionOperatorSessionID
+		grace := a.captionOperatorGrace
+		if grace <= 0 {
+			grace = defaultCaptionOperatorGrace
+		}
+		if sessionID != "" {
+			if a.captionReviewEndTimer != nil {
+				a.captionReviewEndTimer.Stop()
+			}
+			a.captionReviewEndTimer = time.AfterFunc(grace, func() {
+				a.expireCaptionOperatorSession(sessionID)
+			})
+		}
 	}
 	a.mu.Unlock()
 	if cleared {
@@ -311,13 +340,33 @@ func (a *Agent) clearCaptionOperator(identity string) {
 	}
 }
 
+func (a *Agent) expireCaptionOperatorSession(sessionID string) {
+	a.mu.Lock()
+	if a.captionOperatorID != "" || a.captionOperatorSessionID != sessionID {
+		a.mu.Unlock()
+		return
+	}
+	a.captionOperatorSessionID = ""
+	a.captionReviewStarted = false
+	a.captionReviewEndTimer = nil
+	a.mu.Unlock()
+	a.moderator.EndReviewWindow()
+}
+
 func (a *Agent) isAuthorizedCaptionOperator(metadata, provider string) bool {
+	return a.captionOperatorSession(metadata, provider) != ""
+}
+
+func (a *Agent) captionOperatorSession(metadata, provider string) string {
 	var parsed captionOperatorMetadata
 	if err := json.Unmarshal([]byte(metadata), &parsed); err != nil {
-		return false
+		return ""
 	}
-	return parsed.Role == "caption-operator" &&
-		strings.EqualFold(strings.TrimSpace(parsed.Provider), provider)
+	if parsed.Role != "caption-operator" ||
+		!strings.EqualFold(strings.TrimSpace(parsed.Provider), provider) {
+		return ""
+	}
+	return strings.TrimSpace(parsed.SessionID)
 }
 
 func (a *Agent) moderationSegmentID(message TranscriptMessage, sequence uint64) string {

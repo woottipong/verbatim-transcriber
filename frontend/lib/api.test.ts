@@ -71,6 +71,7 @@ test('Caption Desk adapter encodes room and provider targets', async () => {
             'ws://localhost:3000',
             'room/one',
             'google',
+            'desk-session-1',
         );
         assert.equal(token.identity, 'caption-operator-test');
     } finally {
@@ -79,7 +80,7 @@ test('Caption Desk adapter encodes room and provider targets', async () => {
 
     assert.equal(
         requests[0].url,
-        'http://localhost:3000/livekit/rooms/room%2Fone/caption-token/google',
+        'http://localhost:3000/livekit/rooms/room%2Fone/caption-token/google?sessionId=desk-session-1',
     );
     assert.equal(requests[0].init?.method, 'POST');
     assert.equal(requests[0].url.includes('token='), false);

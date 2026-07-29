@@ -107,6 +107,8 @@ Control Room starts transcription providers normally. Caption Desk lists only th
 - IME composition Enter never publishes;
 - only one publication per source segment may wait for acknowledgement at a time;
 - a rejected publication is restored ahead of newer text.
+- one browser session owns each room/provider Desk lane; reconnects within 10 seconds retain its buffer, while a different Desk is rejected;
+- after the reconnect grace period expires, the next Desk starts at the current caption without the previous operator's backlog.
 
 Caption Desk is an approval lane, not an agent delivery mode. The selected input
 behavior is local to the Desk session; there is no backend review-mode command.

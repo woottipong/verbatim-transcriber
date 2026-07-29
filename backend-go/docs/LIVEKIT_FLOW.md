@@ -82,7 +82,7 @@ version 1.
 | `GET` | `/livekit/rooms/:room/transcripts/ws?token=...` | Read-only source transcript stream |
 | `POST` | `/livekit/rooms/:room/transcript-token/:provider` | Signed room/provider-bound transcript URL |
 | `GET` | `/ws/transcript/:provider/:room?token=...` | Lean provider source transcript stream |
-| `POST` | `/livekit/rooms/:room/caption-token/:provider` | Dedicated Caption Desk participant token |
+| `POST` | `/livekit/rooms/:room/caption-token/:provider?sessionId=...` | Dedicated Caption Desk token scoped to a stable browser session |
 | `POST` | `/livekit/rooms/:room/caption-token/ws` | Signed room-scoped approved-caption URL |
 | `GET` | `/ws/caption/:room?token=...` | Approved source text only |
 | `GET` / `DELETE` | `/livekit/rooms/:name` | Inspect/delete room |
