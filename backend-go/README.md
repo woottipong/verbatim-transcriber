@@ -251,6 +251,12 @@ curl -X POST http://localhost:3000/livekit/agent/start \
 
 There are no public `/google`, `/azure`, or `/gemini` audio WebSocket routes.
 
+Agent start requests contain `roomName` and `provider`; there is no transcript
+delivery mode. Raw provider output always follows its existing LiveKit and
+provider-feed paths, while Caption Desk publishes to a separate approved-caption
+lane. Requests that still include the removed `mode` field are rejected with
+`400 Bad Request` so obsolete clients cannot mistake it for an active setting.
+
 `POST /livekit/token` returns `404` with code `room_not_found` when the requested room has not been provisioned. `GET /livekit/rooms/:name` also returns `404` for a missing room rather than representing it as an empty participant list.
 
 Provider transcript WebSockets are text-frame feeds and are separate from the upstream Azure provider WebSocket. They authenticate with a signed HS256 JWT containing the room, provider, current LiveKit room SID, generation, issuer and subject `transcript:subscribe`, and an expiry 24 hours from issuance. Deleting a room invalidates active subscribers and prevents an old link from attaching to a recreated room with the same name. Provider feeds have no history/replay, ready event, audio input, or commands.
@@ -324,6 +330,6 @@ Use the race detector for provider lifecycle, agent state, channel, lock, or gor
 - [Azure upstream flow](docs/AZURE_WEBSOCKET_FLOW.md)
 - [Google stream limit](docs/ISSUE_GOOGLE_5MIN_LIMIT.md)
 - [Cloud VAD and endpointing](docs/VAD_CONFIGURATION.md)
-- [Editor mode proposal](docs/EDITOR_MODE_DESIGN.md)
+- [Historical editor mode proposal](docs/EDITOR_MODE_DESIGN.md)
 
 See the root [AGENTS.md](../AGENTS.md) for development rules.

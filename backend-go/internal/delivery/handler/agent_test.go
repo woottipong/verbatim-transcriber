@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,7 +11,6 @@ import (
 
 	"thai-transcriber-backend/config"
 	"thai-transcriber-backend/internal/application/agentsupervisor"
-	"thai-transcriber-backend/internal/application/captionmoderation"
 
 	"github.com/gofiber/fiber/v2"
 )
@@ -64,7 +64,7 @@ func TestAgentHandlersPreserveAsyncLifecycleContract(t *testing.T) {
 		GoogleApplicationCredentials: "credentials.json",
 	}
 	created := make(chan *handlerFakeAgent, 1)
-	supervisor := agentsupervisor.New(func(string, captionmoderation.Mode) agentsupervisor.Agent {
+	supervisor := agentsupervisor.New(func(string) agentsupervisor.Agent {
 		agent := newHandlerFakeAgent()
 		created <- agent
 		return agent
@@ -80,23 +80,34 @@ func TestAgentHandlersPreserveAsyncLifecycleContract(t *testing.T) {
 		return HandleAgentStatus(c, supervisor)
 	})
 
-	assertAgentRequestStatus(t, app, http.MethodPost, "/start", `{"roomName":"room-a","provider":"google"}`, http.StatusOK)
+	startResponse := assertAgentRequestStatus(
+		t,
+		app,
+		http.MethodPost,
+		"/start",
+		`{"roomName":"room-a","provider":"google"}`,
+		http.StatusOK,
+	)
+	assertAgentResponseOmitsDeliveryMode(t, startResponse)
 	agent := <-created
 	agent.waitStarted(t)
 
-	assertAgentRequestStatus(t, app, http.MethodGet, "/status", "", http.StatusOK)
+	statusResponse := assertAgentRequestStatus(t, app, http.MethodGet, "/status", "", http.StatusOK)
+	assertAgentResponseOmitsDeliveryMode(t, statusResponse)
 	assertAgentRequestStatus(t, app, http.MethodPost, "/start", `{"roomName":"room-a","provider":"google"}`, http.StatusConflict)
 	assertAgentRequestStatus(t, app, http.MethodPost, "/stop", `{"roomName":"room-a","provider":"google"}`, http.StatusOK)
 	agent.waitFinished(t)
 	assertAgentRequestStatus(t, app, http.MethodPost, "/stop", `{"roomName":"room-a","provider":"google"}`, http.StatusNotFound)
 }
 
-func TestHandleAgentStartRejectsInvalidMode(t *testing.T) {
+func TestHandleAgentStartRejectsLegacyDeliveryMode(t *testing.T) {
 	cfg := &config.Config{
 		GoogleCloudProject:           "project",
 		GoogleApplicationCredentials: "credentials.json",
 	}
-	supervisor := agentsupervisor.New(func(string, captionmoderation.Mode) agentsupervisor.Agent {
+	created := false
+	supervisor := agentsupervisor.New(func(string) agentsupervisor.Agent {
+		created = true
 		return newHandlerFakeAgent()
 	})
 	app := fiber.New()
@@ -104,14 +115,24 @@ func TestHandleAgentStartRejectsInvalidMode(t *testing.T) {
 		return HandleAgentStart(c, cfg, supervisor)
 	})
 
-	assertAgentRequestStatus(
+	response := assertAgentRequestStatus(
 		t,
 		app,
 		http.MethodPost,
 		"/start",
-		`{"roomName":"room-a","provider":"google","mode":"automatic"}`,
+		`{"roomName":"room-a","provider":"google","mode":"moderated"}`,
 		http.StatusBadRequest,
 	)
+	var payload map[string]any
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode agent response: %v", err)
+	}
+	if got, want := payload["error"], "mode is no longer supported"; got != want {
+		t.Fatalf("error = %q, want %q", got, want)
+	}
+	if created {
+		t.Fatal("legacy mode request created an agent")
+	}
 }
 
 type handlerFakeAgent struct {
@@ -181,7 +202,7 @@ func assertAgentRequestStatus(
 	target string,
 	body string,
 	want int,
-) {
+) *http.Response {
 	t.Helper()
 	request := httptest.NewRequest(method, target, strings.NewReader(body))
 	if body != "" {
@@ -191,7 +212,44 @@ func assertAgentRequestStatus(
 	if err != nil {
 		t.Fatalf("%s %s error = %v", method, target, err)
 	}
+	t.Cleanup(func() {
+		_ = response.Body.Close()
+	})
 	if response.StatusCode != want {
 		t.Fatalf("%s %s status = %d, want %d", method, target, response.StatusCode, want)
 	}
+	return response
+}
+
+func assertAgentResponseOmitsDeliveryMode(t *testing.T, response *http.Response) {
+	t.Helper()
+	defer response.Body.Close()
+	var payload any
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode agent response: %v", err)
+	}
+	if responseContainsKey(payload, "mode") {
+		t.Fatalf("agent response still exposes legacy delivery mode: %#v", payload)
+	}
+}
+
+func responseContainsKey(value any, key string) bool {
+	switch current := value.(type) {
+	case map[string]any:
+		if _, exists := current[key]; exists {
+			return true
+		}
+		for _, nested := range current {
+			if responseContainsKey(nested, key) {
+				return true
+			}
+		}
+	case []any:
+		for _, nested := range current {
+			if responseContainsKey(nested, key) {
+				return true
+			}
+		}
+	}
+	return false
 }

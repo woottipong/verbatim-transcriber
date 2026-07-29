@@ -176,7 +176,6 @@ type Agent struct {
 	roomName           string // store room name for status
 	transcriptSink     TranscriptSink
 	captionSink        CaptionSink
-	mode               captionmoderation.Mode
 	moderator          *captionmoderation.Moderator
 	captionOperatorID  string
 	moderationDraftID  string
@@ -188,7 +187,6 @@ type Agent struct {
 func New(
 	cfg *config.Config,
 	provider string,
-	mode captionmoderation.Mode,
 	sinks ...TranscriptSink,
 ) *Agent {
 	var sink TranscriptSink
@@ -197,27 +195,13 @@ func New(
 		sink = sinks[0]
 		captionSink, _ = sinks[0].(CaptionSink)
 	}
-	if mode == "" {
-		mode = captionmoderation.ModeLive
-	}
-
 	return &Agent{
 		config:            cfg,
 		preferredProvider: provider,
 		transcriptSink:    sink,
 		captionSink:       captionSink,
-		mode:              mode,
-		moderator:         captionmoderation.New(provider, captionmoderation.ModeModerated, time.Now),
+		moderator:         captionmoderation.New(provider, time.Now),
 	}
-}
-
-func (a *Agent) Mode() captionmoderation.Mode {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.mode == "" {
-		return captionmoderation.ModeLive
-	}
-	return a.mode
 }
 
 // GetProvider returns the provider name

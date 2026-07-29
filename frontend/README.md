@@ -94,20 +94,20 @@ Keep provider-independent room and transcript behavior in the shared lifecycle/s
 
 ## Transcript behavior
 
-### Moderated captions
+### Approved captions
 
 Control Room starts transcription providers normally. Caption Desk lists only the providers already active in the selected room, then connects to that agent with a dedicated server-issued LiveKit identity and one editing buffer:
 
 - final source segments enter the textarea by default;
 - incoming interim text stays visually separate unless the operator selects **Review source: Interim**;
-- Interim review is latest-only and clears the older moderation backlog; the raw transcript remains available through its normal viewer/feed paths;
+- Interim review keeps the active Draft replaceable while finalized source text remains available in the review buffer; the raw transcript continues through its normal viewer/feed paths;
 - publishing an interim consumes that segment so its later final does not return to the moderation queue;
 - `Enter` publishes while `Shift+Enter` inserts a newline;
 - IME composition Enter never publishes;
 - only one publication per source segment may wait for acknowledgement at a time;
 - a rejected publication is restored ahead of newer text.
 
-The raw provider transcript continues through its existing viewer/feed paths. The browser cannot publish approved captions directly; it sends a reliable `caption.publish` command to the active agent, which remains authoritative.
+Caption Desk is an approval lane, not an agent delivery mode. The raw provider transcript continues through its existing viewer/feed paths. The browser cannot publish approved captions directly; it sends a reliable `caption.publish` command to the active agent, which remains authoritative.
 
 - Every packet is validated with `parseTranscriptMessage`.
 - `TranscriptSession` owns decoding, provider resolution, interim buffering, Gemini source/translation pairing, committed rows, and source cleanup.

@@ -12,7 +12,6 @@ import (
 
 	"thai-transcriber-backend/config"
 	"thai-transcriber-backend/internal/application/agentsupervisor"
-	"thai-transcriber-backend/internal/application/captionmoderation"
 	"thai-transcriber-backend/internal/application/roomoperations"
 	"thai-transcriber-backend/internal/application/transcriptaccess"
 	"thai-transcriber-backend/internal/delivery"
@@ -37,8 +36,8 @@ func main() {
 
 	// Load configuration
 	cfg := config.Load()
-	agentSupervisor := agentsupervisor.New(func(provider string, mode captionmoderation.Mode) agentsupervisor.Agent {
-		return agentinfra.New(cfg, provider, mode, handler.TranscriptHub())
+	agentSupervisor := agentsupervisor.New(func(provider string) agentsupervisor.Agent {
+		return agentinfra.New(cfg, provider, handler.TranscriptHub())
 	})
 	roomOperations := roomoperations.New(livekitroom.New(
 		cfg.LiveKitURL,

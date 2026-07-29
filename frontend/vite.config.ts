@@ -15,6 +15,10 @@ export default defineConfig({
   },
   build: {
     sourcemap: false,
+    // livekit-client ships as one prebundled ESM module. Route-level lazy
+    // loading keeps it off Control Room's initial path; the production chunk is
+    // about 530 kB minified and 138 kB gzip.
+    chunkSizeWarningLimit: 550,
     rollupOptions: {
       onwarn(warning, warn) {
         // Ignore sourcemap warnings from vad-react

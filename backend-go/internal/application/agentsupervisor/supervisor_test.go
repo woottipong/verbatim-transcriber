@@ -6,13 +6,11 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"thai-transcriber-backend/internal/application/captionmoderation"
 )
 
 func TestSupervisorRejectsDuplicateWhileStarting(t *testing.T) {
 	agent := newFakeAgent()
-	supervisor := New(func(string, captionmoderation.Mode) Agent { return agent })
+	supervisor := New(func(string) Agent { return agent })
 
 	if err := supervisor.Start(context.Background(), "room-a", "google"); err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -29,57 +27,9 @@ func TestSupervisorRejectsDuplicateWhileStarting(t *testing.T) {
 	waitForSignal(t, agent.finished)
 }
 
-func TestSupervisorPreservesModeratedModeInStatus(t *testing.T) {
-	agent := newFakeAgent()
-	var factoryMode captionmoderation.Mode
-	supervisor := New(func(_ string, mode captionmoderation.Mode) Agent {
-		factoryMode = mode
-		return agent
-	})
-
-	if err := supervisor.Start(context.Background(), "room-a", "google", captionmoderation.ModeModerated); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	waitForSignal(t, agent.started)
-
-	if factoryMode != captionmoderation.ModeModerated {
-		t.Fatalf("factory mode = %q, want moderated", factoryMode)
-	}
-	status := supervisor.Status()
-	if len(status) != 1 || status[0].Mode != captionmoderation.ModeModerated {
-		t.Fatalf("Status() = %#v, want moderated agent", status)
-	}
-
-	if err := supervisor.Stop("room-a", "google"); err != nil {
-		t.Fatalf("Stop() error = %v", err)
-	}
-	waitForSignal(t, agent.finished)
-}
-
-func TestSupervisorDefaultsMissingModeToLive(t *testing.T) {
-	agent := newFakeAgent()
-	var factoryMode captionmoderation.Mode
-	supervisor := New(func(_ string, mode captionmoderation.Mode) Agent {
-		factoryMode = mode
-		return agent
-	})
-
-	if err := supervisor.Start(context.Background(), "room-a", "google"); err != nil {
-		t.Fatalf("Start() error = %v", err)
-	}
-	waitForSignal(t, agent.started)
-	if factoryMode != captionmoderation.ModeLive {
-		t.Fatalf("factory mode = %q, want live", factoryMode)
-	}
-	if err := supervisor.Stop("room-a", "google"); err != nil {
-		t.Fatalf("Stop() error = %v", err)
-	}
-	waitForSignal(t, agent.finished)
-}
-
 func TestSupervisorStopsAgentWhileStarting(t *testing.T) {
 	agent := newFakeAgent()
-	supervisor := New(func(string, captionmoderation.Mode) Agent { return agent })
+	supervisor := New(func(string) Agent { return agent })
 
 	if err := supervisor.Start(context.Background(), "room-a", "google"); err != nil {
 		t.Fatalf("Start() error = %v", err)
@@ -104,7 +54,7 @@ func TestSupervisorStaleStartCompletionDoesNotRemoveReplacement(t *testing.T) {
 	second := newFakeAgent()
 	var factoryMu sync.Mutex
 	factoryCalls := 0
-	supervisor := New(func(string, captionmoderation.Mode) Agent {
+	supervisor := New(func(string) Agent {
 		factoryMu.Lock()
 		defer factoryMu.Unlock()
 		factoryCalls++
@@ -142,7 +92,7 @@ func TestSupervisorStaleStartCompletionDoesNotRemoveReplacement(t *testing.T) {
 func TestSupervisorStopRoomStopsEveryProvider(t *testing.T) {
 	google := newFakeAgent()
 	gemini := newFakeAgent()
-	supervisor := New(func(provider string, _ captionmoderation.Mode) Agent {
+	supervisor := New(func(provider string) Agent {
 		if provider == "google" {
 			return google
 		}
@@ -171,7 +121,7 @@ func TestSupervisorShutdownStopsAndWaitsForAgents(t *testing.T) {
 	agent := newFakeAgent()
 	agent.blockStop = make(chan struct{})
 	agent.stopStarted = make(chan struct{})
-	supervisor := New(func(string, captionmoderation.Mode) Agent { return agent })
+	supervisor := New(func(string) Agent { return agent })
 
 	if err := supervisor.Start(context.Background(), "room-a", "google"); err != nil {
 		t.Fatal(err)
@@ -203,7 +153,7 @@ func TestSupervisorShutdownHonorsContext(t *testing.T) {
 	agent := newFakeAgent()
 	agent.blockStop = make(chan struct{})
 	agent.stopStarted = make(chan struct{})
-	supervisor := New(func(string, captionmoderation.Mode) Agent { return agent })
+	supervisor := New(func(string) Agent { return agent })
 
 	if err := supervisor.Start(context.Background(), "room-a", "google"); err != nil {
 		t.Fatal(err)
@@ -223,7 +173,7 @@ func TestSupervisorRemovesAgentThatStoppedAfterConnecting(t *testing.T) {
 	agent := newCompletedFakeAgent()
 	replacement := newCompletedFakeAgent()
 	factoryCalls := 0
-	supervisor := New(func(string, captionmoderation.Mode) Agent {
+	supervisor := New(func(string) Agent {
 		factoryCalls++
 		if factoryCalls == 1 {
 			return agent

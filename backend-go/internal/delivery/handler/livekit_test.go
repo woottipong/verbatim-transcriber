@@ -12,7 +12,6 @@ import (
 
 	"thai-transcriber-backend/config"
 	"thai-transcriber-backend/internal/application/agentsupervisor"
-	"thai-transcriber-backend/internal/application/captionmoderation"
 	"thai-transcriber-backend/internal/application/roomoperations"
 
 	"github.com/gofiber/fiber/v2"
@@ -105,7 +104,7 @@ func TestHandleCaptionDeskTokenRequiresActiveProvider(t *testing.T) {
 	operations := roomoperations.New(&roomHandlerAdapter{
 		rooms: []roomoperations.RoomRecord{{SID: "RM_room_a", Name: "room-a"}},
 	})
-	supervisor := agentsupervisor.New(func(string, captionmoderation.Mode) agentsupervisor.Agent {
+	supervisor := agentsupervisor.New(func(string) agentsupervisor.Agent {
 		return newCaptionTokenAgent()
 	})
 	app := fiber.New()
@@ -144,12 +143,12 @@ func TestHandleCaptionDeskTokenIssuesServerOwnedOperatorGrant(t *testing.T) {
 		rooms: []roomoperations.RoomRecord{{SID: "RM_room_a", Name: "room-a"}},
 	})
 	created := make(chan *captionTokenAgent, 1)
-	supervisor := agentsupervisor.New(func(string, captionmoderation.Mode) agentsupervisor.Agent {
+	supervisor := agentsupervisor.New(func(string) agentsupervisor.Agent {
 		agent := newCaptionTokenAgent()
 		created <- agent
 		return agent
 	})
-	if err := supervisor.Start(t.Context(), "room-a", "google", captionmoderation.ModeLive); err != nil {
+	if err := supervisor.Start(t.Context(), "room-a", "google"); err != nil {
 		t.Fatal(err)
 	}
 	agent := <-created

@@ -1,6 +1,6 @@
 # Editor Mode Design: Transcript Review Before Broadcast
 
-> Status: historical design proposal. Moderated Caption Desk is now implemented; use `LIVEKIT_FLOW.md` and the code contracts as the current source of truth.
+> Status: historical design proposal, not an implementation contract. Caption Desk now uses a separate approved-caption lane; see `LIVEKIT_FLOW.md` for current behavior.
 
 **Status**: Design Phase (Not Implemented)
 **Updated**: February 7, 2026

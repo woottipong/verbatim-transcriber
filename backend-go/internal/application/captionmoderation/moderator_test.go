@@ -7,33 +7,8 @@ import (
 	"time"
 )
 
-func TestNormalizeModeDefaultsEmptyToLive(t *testing.T) {
-	tests := []struct {
-		input string
-		want  Mode
-	}{
-		{input: "", want: ModeLive},
-		{input: " live ", want: ModeLive},
-		{input: "MODERATED", want: ModeModerated},
-	}
-
-	for _, tt := range tests {
-		got, err := NormalizeMode(tt.input)
-		if err != nil {
-			t.Fatalf("NormalizeMode(%q) error = %v", tt.input, err)
-		}
-		if got != tt.want {
-			t.Fatalf("NormalizeMode(%q) = %q, want %q", tt.input, got, tt.want)
-		}
-	}
-
-	if _, err := NormalizeMode("automatic"); !errors.Is(err, ErrInvalidMode) {
-		t.Fatalf("NormalizeMode(automatic) error = %v, want ErrInvalidMode", err)
-	}
-}
-
 func TestModeratorReplacesDraftAndKeepsFinalsInOrder(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 
 	snapshot := moderator.Ingest(SourceSegment{
 		ID: "google-1", Provider: "google", Text: "ผู้ป่วย", Sequence: 1,
@@ -65,7 +40,7 @@ func TestModeratorReplacesDraftAndKeepsFinalsInOrder(t *testing.T) {
 }
 
 func TestModeratorInterimModeKeepsBacklogAndLatestDraft(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	ingestFinals(moderator, "google-1", "google-2", "google-3")
 
 	snapshot := moderator.SetUseInterim(true)
@@ -90,7 +65,7 @@ func TestModeratorInterimModeKeepsBacklogAndLatestDraft(t *testing.T) {
 }
 
 func TestModeratorPublishesAccumulatedFinalsAndDraftWithRemainder(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	moderator.SetUseInterim(true)
 	ingestFinals(moderator, "google-1", "google-2")
 	moderator.Ingest(SourceSegment{
@@ -117,7 +92,7 @@ func TestModeratorPublishesAccumulatedFinalsAndDraftWithRemainder(t *testing.T) 
 }
 
 func TestModeratorIgnoresOtherProvider(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	snapshot := moderator.Ingest(SourceSegment{
 		ID: "gemini-1", Provider: "gemini", Text: "ไม่ควรเข้า", IsFinal: true, Sequence: 1,
 	})
@@ -128,7 +103,7 @@ func TestModeratorIgnoresOtherProvider(t *testing.T) {
 }
 
 func TestModeratorBoundsPendingSegmentsAtFiveHundred(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	for index := 1; index <= 501; index++ {
 		moderator.Ingest(SourceSegment{
 			ID:       fmt.Sprintf("google-%d", index),
@@ -149,7 +124,7 @@ func TestModeratorBoundsPendingSegmentsAtFiveHundred(t *testing.T) {
 }
 
 func TestModeratorStartReviewWindowDropsOnlyPreJoinTranscriptState(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	ingestFinals(moderator, "google-1", "google-2")
 	moderator.Ingest(SourceSegment{
 		ID: "google-3", Provider: "google", Text: "draft", Sequence: 3,
@@ -170,7 +145,7 @@ func TestModeratorStartReviewWindowDropsOnlyPreJoinTranscriptState(t *testing.T)
 
 func TestModeratorPublishesPendingPrefix(t *testing.T) {
 	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
-	moderator := New("google", ModeModerated, func() time.Time { return now })
+	moderator := New("google", func() time.Time { return now })
 	ingestFinals(moderator, "google-1", "google-2", "google-3")
 
 	publication, replayed, err := moderator.Publish(PublishCommand{
@@ -197,7 +172,7 @@ func TestModeratorPublishesPendingPrefix(t *testing.T) {
 }
 
 func TestModeratorPreservesOperatorFormatting(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	ingestFinals(moderator, "google-1")
 	formatted := "  บรรทัดแรก\\n  บรรทัดถัดไป  "
 
@@ -216,7 +191,7 @@ func TestModeratorPreservesOperatorFormatting(t *testing.T) {
 }
 
 func TestModeratorPublishesDraftAndSuppressesItsFinal(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	moderator.Ingest(SourceSegment{
 		ID: "google-1", Provider: "google", Text: "ข้อความระหว่างถอด", Sequence: 1,
 	})
@@ -237,7 +212,7 @@ func TestModeratorPublishesDraftAndSuppressesItsFinal(t *testing.T) {
 }
 
 func TestModeratorDraftRemainderStaysPendingAndFinalDoesNotReplaceIt(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	moderator.Ingest(SourceSegment{
 		ID: "google-1", Provider: "google", Text: "ส่วนแรก ส่วนที่เหลือ", Sequence: 1,
 	})
@@ -258,7 +233,7 @@ func TestModeratorDraftRemainderStaysPendingAndFinalDoesNotReplaceIt(t *testing.
 }
 
 func TestModeratorRollbackDraftPublicationRestoresDraft(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	moderator.Ingest(SourceSegment{
 		ID: "google-1", Provider: "google", Text: "ข้อความระหว่างถอด", Sequence: 1,
 	})
@@ -319,7 +294,7 @@ func TestModeratorRejectsUnknownNonPrefixAndCrossProviderIDs(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			moderator := New("google", ModeModerated, time.Now)
+			moderator := New("google", time.Now)
 			ingestFinals(moderator, "google-1", "google-2", "google-3")
 			if _, _, err := moderator.Publish(tt.command); !errors.Is(err, tt.wantErr) {
 				t.Fatalf("Publish() error = %v, want %v", err, tt.wantErr)
@@ -329,7 +304,7 @@ func TestModeratorRejectsUnknownNonPrefixAndCrossProviderIDs(t *testing.T) {
 }
 
 func TestModeratorReplaysRequestIDWithoutPublishingTwice(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	ingestFinals(moderator, "google-1", "google-2")
 	command := PublishCommand{
 		RequestID: "request-1", Provider: "google",
@@ -353,7 +328,7 @@ func TestModeratorReplaysRequestIDWithoutPublishingTwice(t *testing.T) {
 }
 
 func TestModeratorRollbackRestoresPublishedPrefix(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	ingestFinals(moderator, "google-1", "google-2", "google-3")
 	if _, _, err := moderator.Publish(PublishCommand{
 		RequestID: "request-1", Provider: "google",
@@ -374,7 +349,7 @@ func TestModeratorRollbackRestoresPublishedPrefix(t *testing.T) {
 }
 
 func TestModeratorPublishesPartAndRetainsRemainderOnSameSource(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	moderator.Ingest(SourceSegment{
 		ID: "google-1", Provider: "google", Text: "ประโยคแรก ประโยคถัดไป", IsFinal: true, Sequence: 1,
 	})
@@ -405,7 +380,7 @@ func TestModeratorPublishesPartAndRetainsRemainderOnSameSource(t *testing.T) {
 }
 
 func TestModeratorRollbackRestoresSourceBeforePartialPublish(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	moderator.Ingest(SourceSegment{
 		ID: "google-1", Provider: "google", Text: "ประโยคแรก ประโยคถัดไป", IsFinal: true, Sequence: 1,
 	})
@@ -427,7 +402,7 @@ func TestModeratorRollbackRestoresSourceBeforePartialPublish(t *testing.T) {
 }
 
 func TestModeratorBoundsProcessedRequestsAtTwoHundredFiftySix(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	for index := 1; index <= 257; index++ {
 		id := fmt.Sprintf("google-%d", index)
 		moderator.Ingest(SourceSegment{
@@ -447,7 +422,7 @@ func TestModeratorBoundsProcessedRequestsAtTwoHundredFiftySix(t *testing.T) {
 }
 
 func TestModeratorConcurrentIngestAndPublish(t *testing.T) {
-	moderator := New("google", ModeModerated, time.Now)
+	moderator := New("google", time.Now)
 	done := make(chan struct{})
 
 	go func() {
@@ -467,10 +442,10 @@ func TestModeratorConcurrentIngestAndPublish(t *testing.T) {
 			ID: id, Provider: "google", Text: id, IsFinal: true, Sequence: uint64(index),
 		})
 		_, _, _ = moderator.Publish(PublishCommand{
-			RequestID: fmt.Sprintf("req-%d", index),
-			Provider:  "google",
+			RequestID:        fmt.Sprintf("req-%d", index),
+			Provider:         "google",
 			SourceSegmentIDs: []string{id},
-			Text:      id,
+			Text:             id,
 		})
 	}
 	<-done

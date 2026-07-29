@@ -14,7 +14,7 @@ The system is designed for operators who need explicit room, audio, provider, an
 - Independent Google, Gemini, Azure, and GPT Realtime Whisper provider agents.
 - Replaceable interim Draft text and committed final transcript rows.
 - Read-only live Transcript view with provider filtering and final-only text export.
-- Live or moderated publishing per room/provider, with a keyboard-first Caption Desk for human review.
+- A keyboard-first Caption Desk that publishes approved captions alongside the raw provider transcript.
 - Separate signed WebSocket feeds for raw provider output and approved plain-text captions.
 - Room, participant, provider, and link management from one Control Room.
 
@@ -75,12 +75,18 @@ Audio never travels through the public backend WebSocket API. The browser publis
 
 ## Transcript lifecycle
 
-Each room/provider agent runs in one of two modes:
+Each room/provider agent always publishes the raw provider transcript to the
+normal Transcript and provider-feed paths. Caption Desk is a separate approval
+lane attached to an active provider: it receives targeted source Draft/final
+packets and publishes operator-approved text on `caption.public` and the
+room-scoped approved-caption WebSocket.
 
-- `live`: existing interim and final transcript packets go directly to viewers.
-- `moderated`: source Draft and final segments go only to the active Caption Desk operator. Final review queues every segment by default; Interim review is an explicit latest-only mode that clears the moderation backlog and lets the operator publish the current Draft before final. Viewers receive approved results on `caption.public`.
-
-Caption Desk uses `Enter` to publish and `Shift+Enter` for a newline. It permits one in-flight publication per source segment; later segments may continue to queue. Publishing an interim consumes that provider segment, so its later final is suppressed from the moderation queue. Pending moderation state is bounded and held in agent memory; restarting the agent clears it.
+Caption Desk reviews final source segments by default and can opt into reviewing
+the active interim Draft. It uses `Enter` to publish and `Shift+Enter` for a
+newline. It permits one in-flight publication per source segment; later segments
+may continue to queue. Publishing an interim consumes that provider segment, so
+its later final is suppressed from the review queue. Pending review state is
+bounded and held in agent memory; restarting the agent clears it.
 
 Provider output stays identifiable and replaceable while it is still changing:
 

@@ -36,12 +36,11 @@ func (s *collectingTranscriptSink) Publish(_ string, message TranscriptMessage) 
 	s.messages = append(s.messages, message)
 }
 
-func TestLiveModeStillBroadcastsProviderTranscript(t *testing.T) {
+func TestProviderTranscriptAlwaysUsesRawLane(t *testing.T) {
 	sink := &collectingTranscriptSink{}
 	var packets []publishedData
 	agent := &Agent{
-		mode:              captionmoderation.ModeLive,
-		moderator:         captionmoderation.New("google", captionmoderation.ModeModerated, time.Now),
+		moderator:         captionmoderation.New("google", time.Now),
 		preferredProvider: "google",
 		transcriptSink:    sink,
 		dataPublisher: func(payload []byte, topic string, reliable bool, destinations []string) error {
@@ -68,7 +67,7 @@ func TestLiveModeStillBroadcastsProviderTranscript(t *testing.T) {
 
 func TestActiveProviderTargetsDraftToOperatorAndKeepsRawLive(t *testing.T) {
 	var packets []publishedData
-	agent := newModeratedTestAgent("google", &packets)
+	agent := newCaptionTestAgent("google", &packets)
 	agent.captionOperatorID = "caption-operator-1"
 
 	agent.handleTranscriptMessage(TranscriptMessage{
@@ -77,7 +76,7 @@ func TestActiveProviderTargetsDraftToOperatorAndKeepsRawLive(t *testing.T) {
 	})
 
 	if len(packets) != 2 {
-		t.Fatalf("packets = %#v, want raw live and operator Draft", packets)
+		t.Fatalf("packets = %#v, want raw transcript and operator Draft", packets)
 	}
 	if packets[0].topic != "" || packets[1].topic != CaptionOperatorTopic || packets[1].reliable {
 		t.Fatalf("packets = %#v", packets)
@@ -87,8 +86,8 @@ func TestActiveProviderTargetsDraftToOperatorAndKeepsRawLive(t *testing.T) {
 	}
 }
 
-func TestModerationFallbackKeepsDraftAndFinalOnSameSegment(t *testing.T) {
-	agent := New(&config.Config{}, "azure", captionmoderation.ModeLive)
+func TestCaptionFallbackKeepsDraftAndFinalOnSameSegment(t *testing.T) {
+	agent := New(&config.Config{}, "azure")
 	draftID := agent.moderationSegmentID(TranscriptMessage{
 		Provider: "azure", Text: "กำลังถอด",
 	}, 10)
@@ -112,7 +111,7 @@ func TestModerationFallbackKeepsDraftAndFinalOnSameSegment(t *testing.T) {
 
 func TestActiveProviderSendsRawFinalAndQueuesOperatorPending(t *testing.T) {
 	var packets []publishedData
-	agent := newModeratedTestAgent("google", &packets)
+	agent := newCaptionTestAgent("google", &packets)
 	agent.captionOperatorID = "caption-operator-1"
 
 	agent.handleTranscriptMessage(TranscriptMessage{
@@ -129,9 +128,9 @@ func TestActiveProviderSendsRawFinalAndQueuesOperatorPending(t *testing.T) {
 	}
 }
 
-func TestModeratedPublishBroadcastsExactlyOnceAndAcknowledgesOperator(t *testing.T) {
+func TestCaptionPublishBroadcastsExactlyOnceAndAcknowledgesOperator(t *testing.T) {
 	var packets []publishedData
-	agent := newModeratedTestAgent("google", &packets)
+	agent := newCaptionTestAgent("google", &packets)
 	agent.captionOperatorID = "caption-operator-1"
 	agent.handleTranscriptMessage(TranscriptMessage{
 		Type: "transcript", Text: "ผู้ป่วยมีอาการ", IsFinal: true, Provider: "google",
@@ -163,9 +162,9 @@ func TestModeratedPublishBroadcastsExactlyOnceAndAcknowledgesOperator(t *testing
 	}
 }
 
-func TestModeratedPublishRestoresPendingWhenPublicTransportFails(t *testing.T) {
+func TestCaptionPublishRestoresPendingWhenPublicTransportFails(t *testing.T) {
 	var packets []publishedData
-	agent := newModeratedTestAgent("google", &packets)
+	agent := newCaptionTestAgent("google", &packets)
 	agent.captionOperatorID = "caption-operator-1"
 	agent.handleTranscriptMessage(TranscriptMessage{
 		Type: "transcript", Text: "ผู้ป่วยมีอาการ", IsFinal: true, Provider: "google",
@@ -196,9 +195,9 @@ func TestModeratedPublishRestoresPendingWhenPublicTransportFails(t *testing.T) {
 	}
 }
 
-func TestModeratedPublishRejectsNonOperatorAndWrongProvider(t *testing.T) {
+func TestCaptionPublishRejectsNonOperatorAndWrongProvider(t *testing.T) {
 	var packets []publishedData
-	agent := newModeratedTestAgent("google", &packets)
+	agent := newCaptionTestAgent("google", &packets)
 	agent.captionOperatorID = "caption-operator-1"
 
 	agent.publishCaptionCommand("caption-operator-2", captionCommandEnvelope{
@@ -221,9 +220,9 @@ func TestModeratedPublishRejectsNonOperatorAndWrongProvider(t *testing.T) {
 	}
 }
 
-func TestModeratedOperatorDisconnectKeepsPendingState(t *testing.T) {
+func TestCaptionOperatorDisconnectKeepsPendingState(t *testing.T) {
 	var packets []publishedData
-	agent := newModeratedTestAgent("google", &packets)
+	agent := newCaptionTestAgent("google", &packets)
 	agent.captionOperatorID = "caption-operator-1"
 	agent.handleTranscriptMessage(TranscriptMessage{
 		Type: "transcript", Text: "ข้อความรอตรวจ", IsFinal: true, Provider: "google",
@@ -239,9 +238,9 @@ func TestModeratedOperatorDisconnectKeepsPendingState(t *testing.T) {
 	}
 }
 
-func TestNewModeratedOperatorStartsWithAnEmptyReviewWindow(t *testing.T) {
+func TestNewCaptionOperatorStartsWithAnEmptyReviewWindow(t *testing.T) {
 	var packets []publishedData
-	agent := newModeratedTestAgent("google", &packets)
+	agent := newCaptionTestAgent("google", &packets)
 	agent.handleTranscriptMessage(TranscriptMessage{
 		Type: "transcript", Text: "ข้อความก่อนเข้าห้อง", IsFinal: true, Provider: "google",
 		Role: domain.TranscriptRoleSource, SegmentID: "google-before",
@@ -267,11 +266,10 @@ func TestNewModeratedOperatorStartsWithAnEmptyReviewWindow(t *testing.T) {
 	}
 }
 
-func newModeratedTestAgent(provider string, packets *[]publishedData) *Agent {
+func newCaptionTestAgent(provider string, packets *[]publishedData) *Agent {
 	return &Agent{
 		preferredProvider: provider,
-		mode:              captionmoderation.ModeModerated,
-		moderator:         captionmoderation.New(provider, captionmoderation.ModeModerated, time.Now),
+		moderator:         captionmoderation.New(provider, time.Now),
 		dataPublisher: func(payload []byte, topic string, reliable bool, destinations []string) error {
 			*packets = append(*packets, publishedData{
 				payload: append([]byte(nil), payload...), topic: topic, reliable: reliable,

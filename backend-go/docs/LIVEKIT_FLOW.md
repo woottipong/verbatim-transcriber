@@ -49,22 +49,27 @@ Audio source changes are allowed only while disconnected. Selecting Chrome Tab o
 3. It tracks connected agents and derives provider names from packets/identities.
 4. It can filter transcript rows by provider.
 
-## Moderated caption flow
+## Approved caption flow
 
 ```text
 ASR source Draft/final
   → active room/provider agent
   ├── raw transcript continues to normal viewers and feeds
   └── targeted `caption.operator` packet
-      → Caption Desk queues finals by default or selects latest-only Interim review
+      → Caption Desk queues finals by default or includes the active Interim Draft
       → reliable `caption.publish` command
       → agent validates ordered source IDs and request idempotency
       → a published Draft consumes its segment and suppresses the later final
-      ├── reliable `caption.public` → Transcript viewers
+      ├── reliable `caption.public` → dedicated LiveKit caption consumers
       └── plain UTF-8 frame → `/ws/caption/:room`
 ```
 
-Only one primary Caption Desk operator owns a room/provider queue. Unapproved text remains in the operator queue and is never auto-published to the approved-caption channel; the provider's raw transcript remains available normally. Gemini translation continues through the existing live path and is not editable in version 1.
+Only one primary Caption Desk operator owns a room/provider queue. Caption Desk
+is an approval lane rather than an agent delivery mode. Unapproved text remains
+in the operator queue and is never auto-published to the approved-caption
+channel; the provider's raw transcript remains available normally. Gemini
+translation continues through the existing raw path and is not editable in
+version 1.
 
 ## HTTP routes
 

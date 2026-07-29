@@ -5,7 +5,6 @@ import { formatProviderName, getProviderPresentation, hasSourceLanguageLabel, pr
 test('preserves the full hyphenated OpenAI provider identity', () => {
     assert.equal(providerFromAgentIdentity('agent-gpt-realtime-whisper'), 'gpt-realtime-whisper');
 });
-
 test('keeps legacy provider identities with suffixes compatible', () => {
     assert.equal(providerFromAgentIdentity('agent-google-123'), 'google');
 });
@@ -46,4 +45,3 @@ test('selectActiveRoomProviders filters active running providers for target room
     assert.deepEqual(selectActiveRoomProviders(agents, 'room-c'), []);
     assert.deepEqual(selectActiveRoomProviders(agents, ''), []);
 });
-

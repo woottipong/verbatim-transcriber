@@ -15,15 +15,7 @@ const (
 	maxConsumedDrafts   = 500
 )
 
-type Mode string
-
-const (
-	ModeLive      Mode = "live"
-	ModeModerated Mode = "moderated"
-)
-
 var (
-	ErrInvalidMode      = errors.New("invalid caption moderation mode")
 	ErrInvalidCommand   = errors.New("invalid caption moderation command")
 	ErrProviderMismatch = errors.New("caption provider mismatch")
 	ErrSourceMismatch   = errors.New("caption source segments do not match pending prefix")
@@ -64,7 +56,6 @@ type Snapshot struct {
 type Moderator struct {
 	mu             sync.Mutex
 	provider       string
-	mode           Mode
 	now            func() time.Time
 	draft          *SourceSegment
 	pending        []SourceSegment
@@ -83,24 +74,12 @@ type processedPublication struct {
 	fromDraft    bool
 }
 
-func NormalizeMode(value string) (Mode, error) {
-	switch strings.ToLower(strings.TrimSpace(value)) {
-	case "", string(ModeLive):
-		return ModeLive, nil
-	case string(ModeModerated):
-		return ModeModerated, nil
-	default:
-		return "", ErrInvalidMode
-	}
-}
-
-func New(provider string, mode Mode, now func() time.Time) *Moderator {
+func New(provider string, now func() time.Time) *Moderator {
 	if now == nil {
 		now = time.Now
 	}
 	return &Moderator{
 		provider:       strings.ToLower(strings.TrimSpace(provider)),
-		mode:           mode,
 		now:            now,
 		pendingIndex:   make(map[string]int),
 		processed:      make(map[string]processedPublication),
@@ -115,7 +94,7 @@ func (m *Moderator) Ingest(segment SourceSegment) Snapshot {
 	segment.ID = strings.TrimSpace(segment.ID)
 	segment.Provider = strings.ToLower(strings.TrimSpace(segment.Provider))
 	segment.Text = strings.TrimSpace(segment.Text)
-	if m.mode != ModeModerated || segment.ID == "" || segment.Text == "" || segment.Provider != m.provider {
+	if segment.ID == "" || segment.Text == "" || segment.Provider != m.provider {
 		return m.snapshotLocked()
 	}
 	if _, consumed := m.consumedDrafts[segment.ID]; consumed {
