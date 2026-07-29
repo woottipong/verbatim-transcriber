@@ -6,7 +6,10 @@ import {
   getCaptionEditorTextUpdate,
   getCaptionReviewInstructions,
 } from '../../lib/captionDeskPresentation';
-import { getContentEditableCaretOffset } from '../../lib/caretUtils';
+import {
+  getContentEditableCaretOffset,
+  replaceContentEditableTextPreservingCaret,
+} from '../../lib/caretUtils';
 
 interface CaptionDeskReviewEditorProps {
   snapshot: CaptionDeskSnapshot;
@@ -52,7 +55,7 @@ export function CaptionDeskReviewEditor({
     if (update.kind === 'append') {
       editor.append(document.createTextNode(update.text));
     } else if (update.kind === 'replace') {
-      editor.textContent = update.text;
+      replaceContentEditableTextPreservingCaret(editor, update.text);
     }
   }, [snapshot.operatorEditsActive, snapshot.reviewText]);
 
