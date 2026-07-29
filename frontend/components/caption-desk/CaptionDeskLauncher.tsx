@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowRight, Check, Radio, RefreshCw } from 'lucide-react';
+import { ArrowRight, Radio, RefreshCw } from 'lucide-react';
 import {
   fetchAgentStatus,
   fetchDetailedRooms,
   type RoomDetails,
   type RunningAgent,
 } from '../../lib/api';
-import { buildCaptionDeskUrl, type CaptionDeskSource } from '../../lib/appRoutes';
+import { buildCaptionDeskUrl } from '../../lib/appRoutes';
 import { formatCaptionDeskError } from '../../lib/captionDeskPresentation';
 import { formatProviderName, selectActiveRoomProviders, type AgentProvider } from '../../lib/providers';
 
@@ -24,7 +24,6 @@ export function CaptionDeskLauncher({
   const [rooms, setRooms] = useState<RoomDetails[]>([]);
   const [roomName, setRoomName] = useState(fixedRoomName);
   const [provider, setProvider] = useState<AgentProvider | ''>('');
-  const [reviewSource, setReviewSource] = useState<CaptionDeskSource>('final');
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,7 +75,7 @@ export function CaptionDeskLauncher({
     if (!roomName || !provider) return;
     setConnecting(true);
     const base = `${window.location.origin}${window.location.pathname}`;
-    window.location.href = buildCaptionDeskUrl(base, roomName, provider, reviewSource);
+    window.location.href = buildCaptionDeskUrl(base, roomName, provider);
   };
 
   return (
@@ -173,26 +172,6 @@ export function CaptionDeskLauncher({
                 ) : null}
               </label>
 
-              <fieldset className="grid gap-2.5">
-                <legend className="text-sm font-medium text-[var(--ink)]">Caption input</legend>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <CaptionSourceOption
-                    value="final"
-                    checked={reviewSource === 'final'}
-                    title="Wait for Final"
-                    description="Confirmed text enters the editor after each spoken turn. Best when stability matters."
-                    onChange={setReviewSource}
-                  />
-                  <CaptionSourceOption
-                    value="live-draft"
-                    checked={reviewSource === 'live-draft'}
-                    title="Edit Live Draft"
-                    description="Text updates while speech continues. Your edits stay protected as new words continue."
-                    onChange={setReviewSource}
-                  />
-                </div>
-              </fieldset>
-
               <button
                 type="button"
                 onClick={connect}
@@ -207,49 +186,5 @@ export function CaptionDeskLauncher({
         </section>
       </main>
     </div>
-  );
-}
-
-function CaptionSourceOption({
-  value,
-  checked,
-  title,
-  description,
-  onChange,
-}: {
-  value: CaptionDeskSource;
-  checked: boolean;
-  title: string;
-  description: string;
-  onChange: (value: CaptionDeskSource) => void;
-}) {
-  return (
-    <label className="relative cursor-pointer">
-      <input
-        type="radio"
-        name="caption-source"
-        value={value}
-        checked={checked}
-        onChange={() => onChange(value)}
-        className="peer sr-only"
-      />
-      <span className={`flex h-full flex-col rounded-xl border p-3.5 text-left transition-all peer-focus-visible:ring-2 peer-focus-visible:ring-[var(--focus-ring)] peer-focus-visible:ring-offset-2 peer-focus-visible:ring-offset-[var(--canvas)] ${
-        checked
-          ? 'border-[var(--accent)] bg-[var(--surface-raised)] ring-1 ring-[var(--accent)]'
-          : 'border-[var(--line)] bg-[var(--control-surface-bg)] hover:border-[var(--line-strong)]'
-      }`}>
-        <span className="flex items-center justify-between gap-3 text-sm font-semibold text-[var(--ink)]">
-          <span>{title}</span>
-          {checked ? (
-            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-slate-950" aria-hidden="true">
-              <Check size={13} strokeWidth={3} />
-            </span>
-          ) : (
-            <span className="h-5 w-5 shrink-0 rounded-full border border-[var(--line-strong)]" aria-hidden="true" />
-          )}
-        </span>
-        <span className="mt-1.5 text-xs leading-relaxed text-[var(--muted)]">{description}</span>
-      </span>
-    </label>
   );
 }

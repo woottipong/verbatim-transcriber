@@ -72,10 +72,9 @@ export type CaptionEditorTextUpdate =
 export function getCaptionEditorTextUpdate(
   currentText: string,
   nextText: string,
-  operatorEditsActive: boolean,
 ): CaptionEditorTextUpdate {
   if (currentText === nextText) return { kind: 'none' };
-  if (operatorEditsActive && nextText.startsWith(currentText)) {
+  if (nextText.startsWith(currentText)) {
     return { kind: 'append', text: nextText.slice(currentText.length) };
   }
   return { kind: 'replace', text: nextText };

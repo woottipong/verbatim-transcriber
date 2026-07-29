@@ -4,8 +4,6 @@ import { useCaptionDesk } from '../hooks/useCaptionDesk';
 import {
   buildCaptionDeskUrl,
   buildCaptionDeskSessionKey,
-  parseCaptionDeskSource,
-  type CaptionDeskSource,
 } from '../lib/appRoutes';
 import { hasCaptionDeskWork } from '../lib/captionDeskPresentation';
 import { isAgentProvider, type AgentProvider } from '../lib/providers';
@@ -30,15 +28,12 @@ export default function CaptionDeskPage({ backendUrl, roomName, providerName }: 
     return <CaptionDeskLauncher backendUrl={backendUrl} initialRoomName={roomName} />;
   }
 
-  const source = parseCaptionDeskSource(window.location.hash);
-
   return (
     <ConnectedCaptionDesk
-      key={buildCaptionDeskSessionKey(roomName, provider, source)}
+      key={buildCaptionDeskSessionKey(roomName, provider)}
       backendUrl={backendUrl}
       roomName={roomName}
       provider={provider}
-      source={source}
     />
   );
 }
@@ -47,12 +42,10 @@ function ConnectedCaptionDesk({
   backendUrl,
   roomName,
   provider,
-  source,
 }: {
   backendUrl: string;
   roomName: string;
   provider: AgentProvider;
-  source: CaptionDeskSource;
 }) {
   const {
     snapshot,
@@ -64,7 +57,7 @@ function ConnectedCaptionDesk({
     edit,
     publish,
     reconnect,
-  } = useCaptionDesk(backendUrl, roomName, provider, source);
+  } = useCaptionDesk(backendUrl, roomName, provider);
 
   const connected = connectionState === ConnectionState.CONNECTED;
   const errorMessage = snapshot.error || error;
@@ -138,7 +131,6 @@ function ConnectedCaptionDesk({
         <div className="caption-desk-workspace grid flex-none gap-4 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,19rem)]">
           <CaptionDeskReviewEditor
             snapshot={snapshot}
-            useInterimInReview={source === 'live-draft'}
             captionConnected={captionConnected}
             agentConnected={agentConnected}
             edit={edit}

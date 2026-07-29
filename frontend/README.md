@@ -98,11 +98,9 @@ Keep provider-independent room and transcript behavior in the shared lifecycle/s
 
 Control Room starts transcription providers normally. Caption Desk lists only the providers already active in the selected room, then connects to that agent with a dedicated server-issued LiveKit identity and one editing buffer:
 
-- **Wait for Final** is the default and keeps the active Draft visually separate from editable finalized text;
-- **Edit Live Draft** places the current Draft in the editor immediately, including the Draft active when Caption Desk joins;
-- provider revisions replace the active Live Draft until the operator makes a real text edit; moving the cursor alone does not protect the text;
-- after an edit, existing operator text is protected while new continuation text still appends;
-- publishing a Draft consumes that segment so its later final does not return to the moderation queue;
+- the active provider Draft remains a read-only preview and never enters a publish command;
+- only provider Final text enters the editable review buffer;
+- Draft revisions replace only the preview, and a matching Final clears it;
 - `Enter` publishes while `Shift+Enter` inserts a newline;
 - IME composition Enter never publishes;
 - only one publication per source segment may wait for acknowledgement at a time;
@@ -110,9 +108,8 @@ Control Room starts transcription providers normally. Caption Desk lists only th
 - one browser session owns each room/provider Desk lane; reconnects within 10 seconds retain its buffer, while a different Desk is rejected;
 - after the reconnect grace period expires, the next Desk starts at the current caption without the previous operator's backlog.
 
-Caption Desk is an approval lane, not an agent delivery mode. The selected input
-behavior is local to the Desk session; there is no backend review-mode command.
-The raw provider transcript continues through its existing viewer/feed paths.
+Caption Desk is an approval lane, not an agent delivery mode. The raw provider
+transcript continues through its existing viewer/feed paths.
 The browser cannot publish approved captions directly; it sends a reliable
 `caption.publish` command to the active agent, which remains authoritative.
 

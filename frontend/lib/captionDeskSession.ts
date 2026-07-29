@@ -7,7 +7,6 @@ import {
   MAX_CAPTION_TEXT_BYTES,
   parseCaptionOperatorPacket,
 } from './captionDeskMessages.ts';
-import type { CaptionDeskSource } from './appRoutes.ts';
 
 export interface WaitingCaption {
   requestId: string;
@@ -21,7 +20,6 @@ export interface CaptionDeskSnapshot {
   rawText: string;
   sourceSegmentIds: string[];
   isDraftActive: boolean;
-  operatorEditsActive: boolean;
   draftPreview: string;
   queuedCount: number;
   waiting: WaitingCaption[];
@@ -31,7 +29,7 @@ export interface CaptionDeskSnapshot {
 
 const EMPTY: CaptionDeskSnapshot = {
   reviewText: '', rawText: '', sourceSegmentIds: [], isDraftActive: false,
-  operatorEditsActive: false, draftPreview: '',
+  draftPreview: '',
   queuedCount: 0, waiting: [], recentlyPublished: [], error: null,
 };
 export const MAX_WAITING_CAPTIONS = 64;
@@ -42,14 +40,10 @@ export class CaptionDeskSession {
   private listeners = new Set<() => void>();
   private edited = false;
   private queued: CaptionSource[] = [];
-  private interimReviewEnabled: boolean;
   private activeIsDraft = false;
   private activeDraftID = '';
-  private activeDraftText = '';
-
-  constructor(source: CaptionDeskSource = 'final') {
-    this.interimReviewEnabled = source === 'live-draft';
-  }
+  private activeDraftSequence = 0;
+  private latestSourceSequence = 0;
 
   getSnapshot = (): CaptionDeskSnapshot => this.snapshot;
   subscribe = (listener: () => void): (() => void) => {
@@ -65,11 +59,6 @@ export class CaptionDeskSession {
   edit(text: string): void {
     this.edited = text !== this.snapshot.rawText;
     this.update({ ...this.snapshot, reviewText: text, error: null });
-  }
-
-  restore(): void {
-    this.edited = false;
-    this.update({ ...this.snapshot, reviewText: this.snapshot.rawText, error: null });
   }
 
   release(provider: string, splitIndex?: number): CaptionPublishCommand | null {
@@ -117,11 +106,6 @@ export class CaptionDeskSession {
       ...(remainingText ? { remainingText } : {}),
     };
     this.edited = remainingText !== '';
-    if (this.interimReviewEnabled) {
-      this.activeIsDraft = false;
-      this.activeDraftID = '';
-      this.activeDraftText = '';
-    }
     const next = remainingText ? undefined : this.queued.shift();
     const remainderSourceId = this.snapshot.sourceSegmentIds.at(-1);
     this.update({
@@ -133,7 +117,7 @@ export class CaptionDeskSession {
         : next
           ? [next.segmentId]
           : [],
-      isDraftActive: this.interimReviewEnabled ? false : this.snapshot.isDraftActive,
+      isDraftActive: this.snapshot.isDraftActive,
       draftPreview: this.snapshot.draftPreview,
       queuedCount: this.queued.length,
       waiting: [...this.snapshot.waiting, waiting],
@@ -186,7 +170,8 @@ export class CaptionDeskSession {
     this.edited = false;
     this.activeIsDraft = false;
     this.activeDraftID = '';
-    this.activeDraftText = '';
+    this.activeDraftSequence = 0;
+    this.latestSourceSequence = 0;
     this.queued = [];
     this.update(EMPTY);
   }
@@ -195,60 +180,20 @@ export class CaptionDeskSession {
     if (message.type === 'caption.published') return this.acknowledge(message);
     if (message.type === 'caption.rejected') return this.reject(message);
     if (message.type === 'caption.draft') {
-      if (!this.interimReviewEnabled) {
-        if (!this.activeIsDraft || this.activeDraftID === message.source.segmentId) {
-          this.activeIsDraft = true;
-          this.activeDraftID = message.source.segmentId;
-          this.activeDraftText = message.source.text;
-          this.update({
-            ...this.snapshot,
-            isDraftActive: true,
-            draftPreview: message.source.text,
-            error: null,
-          });
-        }
-        return;
-      }
-      const isActiveDraft = this.activeIsDraft &&
-        this.snapshot.sourceSegmentIds.at(-1) === message.source.segmentId;
-      if (isActiveDraft) {
-        const rawText = replaceTrailingSource(
-          this.snapshot.rawText,
-          this.activeDraftText,
-          message.source.text,
-        );
-        const reviewText = this.edited
-          ? appendDraftContinuation(
-              this.snapshot.reviewText,
-              this.activeDraftText,
-              message.source.text,
-            )
-          : replaceTrailingSource(this.snapshot.reviewText, this.activeDraftText, message.source.text);
-        this.activeDraftText = message.source.text;
-        this.update({
-          ...this.snapshot,
-          reviewText,
-          rawText,
-          isDraftActive: true,
-          draftPreview: '',
-          error: null,
-        });
-        return;
-      }
-      if (!this.activeIsDraft || this.snapshot.sourceSegmentIds.length === 0) {
+      if (
+        !this.activeIsDraft ||
+        message.source.sequence > this.activeDraftSequence
+      ) {
         this.activeIsDraft = true;
         this.activeDraftID = message.source.segmentId;
-        this.activeDraftText = message.source.text;
+        this.activeDraftSequence = message.source.sequence;
+        this.latestSourceSequence = Math.max(this.latestSourceSequence, message.source.sequence);
         this.update({
           ...this.snapshot,
-          reviewText: appendSourceText(this.snapshot.reviewText, message.source.text),
-          rawText: appendSourceText(this.snapshot.rawText, message.source.text),
-          sourceSegmentIds: [...this.snapshot.sourceSegmentIds, message.source.segmentId],
           isDraftActive: true,
-          draftPreview: '',
+          draftPreview: message.source.text,
           error: null,
         });
-        return;
       }
       return;
     }
@@ -259,18 +204,19 @@ export class CaptionDeskSession {
           .flatMap(item => item.sourceSegmentIds),
       );
       const pending = message.pending.filter(item => !waitingIDs.has(item.segmentId));
-      const reviewDraft = this.interimReviewEnabled &&
-        message.draft &&
-        !waitingIDs.has(message.draft.segmentId)
-        ? message.draft
-        : undefined;
-      const sources = [...pending, ...(reviewDraft ? [reviewDraft] : [])];
+      const sources = pending;
+      const snapshotSequence = Math.max(
+        message.draft?.sequence || 0,
+        ...pending.map(item => item.sequence),
+      );
+      if (snapshotSequence < this.latestSourceSequence) return;
       const knownIDs = new Set(this.snapshot.sourceSegmentIds);
       const incoming = sources.filter(item => !knownIDs.has(item.segmentId));
       const rawText = sources.map(item => item.text).join(' ');
       this.activeIsDraft = Boolean(message.draft);
       this.activeDraftID = message.draft?.segmentId || '';
-      this.activeDraftText = message.draft?.text || '';
+      this.activeDraftSequence = message.draft?.sequence || 0;
+      this.latestSourceSequence = Math.max(this.latestSourceSequence, snapshotSequence);
       this.queued = [];
       this.update({
         ...this.snapshot,
@@ -280,17 +226,18 @@ export class CaptionDeskSession {
         rawText,
         sourceSegmentIds: sources.map(item => item.segmentId),
         isDraftActive: Boolean(message.draft),
-        draftPreview: this.interimReviewEnabled ? '' : message.draft?.text || '',
+        draftPreview: message.draft?.text || '',
         queuedCount: 0,
         error: null,
       });
       return;
     }
     const source = message.source;
-    if (!this.interimReviewEnabled && this.activeIsDraft && this.activeDraftID === source.segmentId) {
+    this.latestSourceSequence = Math.max(this.latestSourceSequence, source.sequence);
+    if (this.activeIsDraft && this.activeDraftID === source.segmentId) {
       this.activeIsDraft = false;
       this.activeDraftID = '';
-      this.activeDraftText = '';
+      this.activeDraftSequence = 0;
       this.update({
         ...this.snapshot,
         reviewText: appendSourceText(this.snapshot.reviewText, source.text),
@@ -303,26 +250,6 @@ export class CaptionDeskSession {
       return;
     }
     if (this.snapshot.sourceSegmentIds.includes(source.segmentId)) {
-      if (this.activeIsDraft) {
-        this.activeIsDraft = false;
-        this.activeDraftID = '';
-        const rawText = replaceTrailingSource(this.snapshot.rawText, this.activeDraftText, source.text);
-        const reviewText = this.edited
-          ? appendDraftContinuation(
-              this.snapshot.reviewText,
-              this.activeDraftText,
-              source.text,
-            )
-          : replaceTrailingSource(this.snapshot.reviewText, this.activeDraftText, source.text);
-        this.activeDraftText = '';
-        this.update({
-          ...this.snapshot,
-          reviewText,
-          rawText,
-          isDraftActive: false,
-          draftPreview: '',
-        });
-      }
       return;
     }
     if (this.queued.some(item => item.segmentId === source.segmentId)) return;
@@ -338,10 +265,7 @@ export class CaptionDeskSession {
   }
 
   private update(next: CaptionDeskSnapshot): void {
-    this.snapshot = {
-      ...next,
-      operatorEditsActive: this.interimReviewEnabled && this.edited,
-    };
+    this.snapshot = next;
     this.listeners.forEach(listener => listener());
   }
 }
@@ -352,32 +276,4 @@ function appendSourceText(current: string, incoming: string): string {
   if (!left) return right;
   if (!right) return left;
   return `${left} ${right}`;
-}
-
-function replaceTrailingSource(current: string, previous: string, incoming: string): string {
-  const text = current.trimEnd();
-  const suffix = previous.trim();
-  if (!suffix || !text.endsWith(suffix)) return text;
-  return appendSourceText(text.slice(0, -suffix.length), incoming);
-}
-
-function appendDraftContinuation(current: string, previous: string, incoming: string): string {
-  if (!previous) return current;
-  if (incoming.startsWith(previous)) {
-    return `${current}${incoming.slice(previous.length)}`;
-  }
-
-  const maxAnchorLength = Math.min(previous.length, 256);
-  const minAnchorLength = Math.min(previous.length, 4);
-  for (let length = maxAnchorLength; length >= minAnchorLength; length -= 1) {
-    const anchor = previous.slice(-length);
-    const anchorIndex = incoming.lastIndexOf(anchor);
-    if (anchorIndex < 0) continue;
-    return `${current}${incoming.slice(anchorIndex + anchor.length)}`;
-  }
-
-  if (incoming.length > previous.length) {
-    return `${current}${incoming.slice(previous.length)}`;
-  }
-  return current;
 }

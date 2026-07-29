@@ -13,7 +13,6 @@ import {
 
 interface CaptionDeskReviewEditorProps {
   snapshot: CaptionDeskSnapshot;
-  useInterimInReview: boolean;
   captionConnected: boolean;
   agentConnected: boolean;
   edit: (text: string) => void;
@@ -24,7 +23,6 @@ const SHORTCUT_HINT_STORAGE_KEY = 'captionlive.caption-desk.shortcut-hint-seen';
 
 export function CaptionDeskReviewEditor({
   snapshot,
-  useInterimInReview,
   captionConnected,
   agentConnected,
   edit,
@@ -50,21 +48,20 @@ export function CaptionDeskReviewEditor({
     const update = getCaptionEditorTextUpdate(
       editor.textContent || '',
       snapshot.reviewText,
-      snapshot.operatorEditsActive,
     );
     if (update.kind === 'append') {
       editor.append(document.createTextNode(update.text));
     } else if (update.kind === 'replace') {
       replaceContentEditableTextPreservingCaret(editor, update.text);
     }
-  }, [snapshot.operatorEditsActive, snapshot.reviewText]);
+  }, [snapshot.reviewText]);
 
   const release = (splitAtCaret = false) => {
     const splitIndex = splitAtCaret ? getContentEditableCaretOffset(editorRef.current) : undefined;
     void publish(splitIndex).finally(() => requestAnimationFrame(() => editorRef.current?.focus()));
   };
 
-  const isDraftActive = !useInterimInReview && snapshot.isDraftActive;
+  const isDraftActive = snapshot.isDraftActive;
 
   return (
     <section className="app-panel caption-desk-review order-1 flex min-h-64 flex-col lg:order-1 lg:h-full lg:min-h-0" aria-labelledby="review-caption-heading">
@@ -76,9 +73,6 @@ export function CaptionDeskReviewEditor({
           </p>
         </div>
         <div className="caption-desk-toolbar__tools">
-          <span className="caption-desk-source-badge" aria-label={`Caption input: ${useInterimInReview ? 'Live Draft' : 'Final only'}`}>
-            {useInterimInReview ? 'Live Draft' : 'Final only'}
-          </span>
           <div className="caption-desk-queue-status text-right text-xs text-[var(--muted)]">
             {hasSegmentIds ? (
               <>{snapshot.sourceSegmentIds.length} segment{snapshot.sourceSegmentIds.length === 1 ? '' : 's'}</>
@@ -86,7 +80,7 @@ export function CaptionDeskReviewEditor({
             {hasSegmentIds ? (
               <SegmentAge segmentKey={snapshot.sourceSegmentIds.join(':')} />
             ) : null}
-            {!useInterimInReview && snapshot.queuedCount > 0 ? (
+            {snapshot.queuedCount > 0 ? (
               <span className="text-[var(--subtle)]"> · Next {snapshot.queuedCount}</span>
             ) : null}
             {snapshot.waiting.length > 0 ? (
@@ -111,7 +105,7 @@ export function CaptionDeskReviewEditor({
               ? 'Connecting to the caption feed…'
               : 'Waiting for the transcriber…'
         }
-        data-draft={!useInterimInReview ? snapshot.draftPreview : ''}
+        data-draft={snapshot.draftPreview}
         onInput={event => edit(event.currentTarget.textContent || '')}
         onKeyDown={event => {
           if (!shouldPublishOnEnter(event.nativeEvent)) return;

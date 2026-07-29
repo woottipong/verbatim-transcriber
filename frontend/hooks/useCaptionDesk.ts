@@ -13,7 +13,6 @@ import {
 } from '../lib/captionDeskMessages';
 import { CaptionDeskSession } from '../lib/captionDeskSession';
 import { formatCaptionDeskError } from '../lib/captionDeskPresentation';
-import type { CaptionDeskSource } from '../lib/appRoutes';
 import type { AgentProvider } from '../lib/providers';
 import { ConnectionState } from '../types';
 
@@ -23,10 +22,9 @@ export function useCaptionDesk(
   backendUrl: string,
   roomName: string,
   provider: AgentProvider,
-  source: CaptionDeskSource,
 ) {
   const sessionRef = useRef<CaptionDeskSession | null>(null);
-  if (!sessionRef.current) sessionRef.current = new CaptionDeskSession(source);
+  if (!sessionRef.current) sessionRef.current = new CaptionDeskSession();
   const session = sessionRef.current;
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   const roomRef = useRef<Room | null>(null);

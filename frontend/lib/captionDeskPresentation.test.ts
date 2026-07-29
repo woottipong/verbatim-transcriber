@@ -68,13 +68,13 @@ test('segment age describes elapsed open time rather than system delay', () => {
   assert.equal(formatCaptionSegmentAge(14), 'Open for 14s');
 });
 
-test('protected editor text appends a new suffix without replacing the live DOM text', () => {
+test('editor text appends a new suffix without replacing the live DOM text', () => {
   assert.deepEqual(
-    getCaptionEditorTextUpdate('ข้อความที่แก้', 'ข้อความที่แก้และคำใหม่', true),
+    getCaptionEditorTextUpdate('ข้อความที่แก้', 'ข้อความที่แก้และคำใหม่'),
     { kind: 'append', text: 'และคำใหม่' },
   );
   assert.deepEqual(
-    getCaptionEditorTextUpdate('ข้อความเดิม', 'ข้อความใหม่', false),
+    getCaptionEditorTextUpdate('ข้อความเดิม', 'ข้อความใหม่'),
     { kind: 'replace', text: 'ข้อความใหม่' },
   );
 });
