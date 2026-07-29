@@ -3,6 +3,7 @@ import type { CaptionDeskSnapshot } from '../../lib/captionDeskSession';
 import { shouldPublishOnEnter } from '../../lib/captionDeskMessages';
 import {
   formatCaptionSegmentAge,
+  formatCaptionDraftAnnouncement,
   getCaptionEditorTextUpdate,
   getCaptionReviewInstructions,
 } from '../../lib/captionDeskPresentation';
@@ -32,6 +33,7 @@ export function CaptionDeskReviewEditor({
   const hasSegmentIds = snapshot.sourceSegmentIds.length > 0;
   const canEdit = captionConnected || hasSegmentIds || snapshot.reviewText.length > 0;
   const [showShortcutHint, setShowShortcutHint] = useState(() => !hasSeenShortcutHint());
+  const [draftAnnouncement, setDraftAnnouncement] = useState('');
 
   const dismissShortcutHint = () => {
     try {
@@ -55,6 +57,17 @@ export function CaptionDeskReviewEditor({
       replaceContentEditableTextPreservingCaret(editor, update.text);
     }
   }, [snapshot.reviewText]);
+
+  useEffect(() => {
+    if (!snapshot.isDraftActive || !snapshot.draftPreview.trim()) {
+      setDraftAnnouncement('');
+      return undefined;
+    }
+    const timer = window.setTimeout(() => {
+      setDraftAnnouncement(formatCaptionDraftAnnouncement(snapshot.draftPreview));
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [snapshot.draftPreview, snapshot.isDraftActive]);
 
   const release = (splitAtCaret = false) => {
     const splitIndex = splitAtCaret ? getContentEditableCaretOffset(editorRef.current) : undefined;
@@ -117,8 +130,8 @@ export function CaptionDeskReviewEditor({
         className="caption-review-editor transcript-paragraph-source w-full flex-1 overflow-y-auto bg-transparent px-4 py-3 text-[var(--ink)] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] aria-disabled:cursor-wait aria-disabled:text-[var(--muted)] sm:px-5 sm:py-4"
       />
 
-      <span className="sr-only" aria-live="polite">
-        {isDraftActive ? 'Draft active, waiting for final' : ''}
+      <span className="sr-only" aria-live="polite" aria-atomic="true">
+        {isDraftActive ? draftAnnouncement : ''}
       </span>
 
       {canEdit && showShortcutHint ? (

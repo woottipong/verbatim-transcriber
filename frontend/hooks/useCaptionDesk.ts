@@ -29,6 +29,7 @@ export function useCaptionDesk(
   const snapshot = useSyncExternalStore(session.subscribe, session.getSnapshot, session.getSnapshot);
   const roomRef = useRef<Room | null>(null);
   const deskSessionIDRef = useRef(crypto.randomUUID());
+  const agentParticipantSIDRef = useRef('');
   const scopeRef = useRef('');
   const [connectionState, setConnectionState] = useState(ConnectionState.DISCONNECTED);
   const [error, setError] = useState<string | null>(null);
@@ -58,6 +59,7 @@ export function useCaptionDesk(
     const scope = `${roomName}:${provider}`;
     if (scopeRef.current !== scope) {
       session.clear();
+      agentParticipantSIDRef.current = '';
       scopeRef.current = scope;
     }
     let disposed = false;
@@ -70,8 +72,9 @@ export function useCaptionDesk(
 
     const matchesAgent = (participant?: RemoteParticipant) =>
       isCaptionAgentIdentity(participant?.identity, provider);
-    const hasAgent = () =>
-      Array.from(room.remoteParticipants.values()).some(participant => matchesAgent(participant));
+    const currentAgent = () =>
+      Array.from(room.remoteParticipants.values()).find(participant => matchesAgent(participant));
+    const hasAgent = () => Boolean(currentAgent());
     const clearSubscribeRetry = () => {
       if (subscribeRetry !== undefined) window.clearTimeout(subscribeRetry);
       subscribeRetry = undefined;
@@ -101,7 +104,17 @@ export function useCaptionDesk(
       clearSubscribeRetry();
     };
     const refreshAgent = () => {
-      const next = hasAgent();
+      const participant = currentAgent();
+      const nextSID = participant?.sid || '';
+      if (
+        nextSID &&
+        agentParticipantSIDRef.current &&
+        agentParticipantSIDRef.current !== nextSID
+      ) {
+        session.beginSourceEpoch();
+      }
+      if (nextSID) agentParticipantSIDRef.current = nextSID;
+      const next = Boolean(participant);
       setAgentConnected(next);
       if (!next) resetSubscription();
       return next;

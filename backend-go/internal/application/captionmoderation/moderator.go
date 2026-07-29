@@ -12,7 +12,6 @@ import (
 const (
 	maxPendingSegments  = 500
 	maxProcessedRequest = 256
-	maxConsumedDrafts   = 500
 )
 
 var (
@@ -62,15 +61,12 @@ type Moderator struct {
 	pendingIndex   map[string]int
 	processed      map[string]processedPublication
 	processedOrder []string
-	consumedDrafts map[string]struct{}
-	consumedOrder  []string
 }
 
 type processedPublication struct {
 	publication  Publication
 	sources      []SourceSegment
 	hasRemainder bool
-	fromDraft    bool
 }
 
 func New(provider string, now func() time.Time) *Moderator {
@@ -78,11 +74,10 @@ func New(provider string, now func() time.Time) *Moderator {
 		now = time.Now
 	}
 	return &Moderator{
-		provider:       strings.ToLower(strings.TrimSpace(provider)),
-		now:            now,
-		pendingIndex:   make(map[string]int),
-		processed:      make(map[string]processedPublication),
-		consumedDrafts: make(map[string]struct{}),
+		provider:     strings.ToLower(strings.TrimSpace(provider)),
+		now:          now,
+		pendingIndex: make(map[string]int),
+		processed:    make(map[string]processedPublication),
 	}
 }
 
@@ -174,8 +169,6 @@ func (m *Moderator) EndReviewWindow() {
 	clear(m.pendingIndex)
 	m.processed = make(map[string]processedPublication)
 	m.processedOrder = nil
-	m.consumedDrafts = make(map[string]struct{})
-	m.consumedOrder = nil
 }
 
 func normalizeSourceSegment(segment SourceSegment) SourceSegment {
@@ -186,11 +179,7 @@ func normalizeSourceSegment(segment SourceSegment) SourceSegment {
 }
 
 func (m *Moderator) acceptsLocked(segment SourceSegment) bool {
-	if segment.ID == "" || segment.Text == "" || segment.Provider != m.provider {
-		return false
-	}
-	_, consumed := m.consumedDrafts[segment.ID]
-	return !consumed
+	return segment.ID != "" && segment.Text != "" && segment.Provider == m.provider
 }
 
 func (m *Moderator) Publish(command PublishCommand) (Publication, bool, error) {
@@ -209,14 +198,7 @@ func (m *Moderator) Publish(command PublishCommand) (Publication, bool, error) {
 		return Publication{}, false, ErrProviderMismatch
 	}
 	sourceIDs := make([]string, len(command.SourceSegmentIDs))
-	fromDraft := m.draft != nil &&
-		len(command.SourceSegmentIDs) > 0 &&
-		strings.TrimSpace(command.SourceSegmentIDs[len(command.SourceSegmentIDs)-1]) == m.draft.ID &&
-		m.draft.Provider == command.Provider
 	pendingCount := len(command.SourceSegmentIDs)
-	if fromDraft {
-		pendingCount--
-	}
 	if pendingCount > len(m.pending) {
 		return Publication{}, false, ErrSourceMismatch
 	}
@@ -226,9 +208,6 @@ func (m *Moderator) Publish(command PublishCommand) (Publication, bool, error) {
 			return Publication{}, false, ErrSourceMismatch
 		}
 		if index < pendingCount && (m.pending[index].ID != id || m.pending[index].Provider != command.Provider) {
-			return Publication{}, false, ErrSourceMismatch
-		}
-		if index == pendingCount && fromDraft && (m.draft == nil || m.draft.ID != id) {
 			return Publication{}, false, ErrSourceMismatch
 		}
 		sourceIDs[index] = id
@@ -242,14 +221,8 @@ func (m *Moderator) Publish(command PublishCommand) (Publication, bool, error) {
 		Text:             command.Text,
 		PublishedAt:      m.now(),
 	}
-	var publishedSources []SourceSegment
-	publishedSources = append(publishedSources, m.pending[:pendingCount]...)
+	publishedSources := append([]SourceSegment(nil), m.pending[:pendingCount]...)
 	m.pending = append([]SourceSegment(nil), m.pending[pendingCount:]...)
-	if fromDraft {
-		publishedSources = append(publishedSources, *m.draft)
-		m.draft = nil
-		m.rememberConsumedDraftLocked(sourceIDs[len(sourceIDs)-1])
-	}
 	if command.RemainingText != "" {
 		remainder := publishedSources[len(publishedSources)-1]
 		remainder.Text = command.RemainingText
@@ -257,7 +230,7 @@ func (m *Moderator) Publish(command PublishCommand) (Publication, bool, error) {
 		m.pending = append([]SourceSegment{remainder}, m.pending...)
 	}
 	m.rebuildPendingIndexLocked()
-	m.rememberPublicationLocked(publication, publishedSources, command.RemainingText != "", fromDraft)
+	m.rememberPublicationLocked(publication, publishedSources, command.RemainingText != "")
 	return clonePublication(publication), false, nil
 }
 
@@ -282,15 +255,7 @@ func (m *Moderator) Rollback(requestID string) bool {
 		m.pending[0].ID == record.sources[len(record.sources)-1].ID {
 		m.pending = m.pending[1:]
 	}
-	if record.fromDraft {
-		last := len(record.sources) - 1
-		m.forgetConsumedDraftLocked(record.sources[last].ID)
-		draft := record.sources[last]
-		m.draft = &draft
-		m.pending = append(append([]SourceSegment(nil), record.sources[:last]...), m.pending...)
-	} else {
-		m.pending = append(append([]SourceSegment(nil), record.sources...), m.pending...)
-	}
+	m.pending = append(append([]SourceSegment(nil), record.sources...), m.pending...)
 	if len(m.pending) > maxPendingSegments {
 		m.pending = m.pending[:maxPendingSegments]
 	}
@@ -323,34 +288,14 @@ func (m *Moderator) rebuildPendingIndexLocked() {
 	}
 }
 
-func (m *Moderator) rememberPublicationLocked(publication Publication, sources []SourceSegment, hasRemainder, fromDraft bool) {
+func (m *Moderator) rememberPublicationLocked(publication Publication, sources []SourceSegment, hasRemainder bool) {
 	m.processedOrder = evictFIFOHead(m.processed, m.processedOrder, maxProcessedRequest)
 	m.processed[publication.RequestID] = processedPublication{
 		publication:  clonePublication(publication),
 		sources:      append([]SourceSegment(nil), sources...),
 		hasRemainder: hasRemainder,
-		fromDraft:    fromDraft,
 	}
 	m.processedOrder = append(m.processedOrder, publication.RequestID)
-}
-
-func (m *Moderator) rememberConsumedDraftLocked(id string) {
-	if _, exists := m.consumedDrafts[id]; exists {
-		return
-	}
-	m.consumedOrder = evictFIFOHead(m.consumedDrafts, m.consumedOrder, maxConsumedDrafts)
-	m.consumedDrafts[id] = struct{}{}
-	m.consumedOrder = append(m.consumedOrder, id)
-}
-
-func (m *Moderator) forgetConsumedDraftLocked(id string) {
-	delete(m.consumedDrafts, id)
-	for index, candidate := range m.consumedOrder {
-		if candidate == id {
-			m.consumedOrder = append(m.consumedOrder[:index], m.consumedOrder[index+1:]...)
-			return
-		}
-	}
 }
 
 func evictFIFOHead[K comparable, V any](store map[K]V, order []K, maxCapacity int) []K {

@@ -183,7 +183,7 @@ func TestCaptionFallbackKeepsDraftAndFinalOnSameSegment(t *testing.T) {
 		t.Fatalf("segment IDs = draft %q, revised %q, final %q", draftID, revisedID, finalID)
 	}
 	if nextDraftID == draftID {
-		t.Fatalf("next draft reused consumed segment ID %q", nextDraftID)
+		t.Fatalf("next draft reused completed segment ID %q", nextDraftID)
 	}
 }
 

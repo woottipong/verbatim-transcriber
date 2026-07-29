@@ -68,32 +68,6 @@ func TestModeratorKeepsBacklogAndLatestDraft(t *testing.T) {
 	}
 }
 
-func TestModeratorPublishesAccumulatedFinalsAndDraftWithRemainder(t *testing.T) {
-	moderator := New("google", time.Now)
-	ingestFinals(moderator, "google-1", "google-2")
-	moderator.Ingest(SourceSegment{
-		ID: "google-3", Provider: "google", Text: "ข้อความสด", Sequence: 3,
-	})
-
-	_, _, err := moderator.Publish(PublishCommand{
-		RequestID: "request-accumulated", Provider: "google",
-		SourceSegmentIDs: []string{"google-1", "google-2", "google-3"},
-		Text:             "ส่วนที่เผยแพร่",
-		RemainingText:    "ส่วนที่เหลือ",
-	})
-	if err != nil {
-		t.Fatalf("Publish(accumulated) error = %v", err)
-	}
-	snapshot := moderator.Snapshot()
-	if snapshot.Draft != nil {
-		t.Fatalf("draft remained after publish: %#v", snapshot.Draft)
-	}
-	if len(snapshot.Pending) != 1 || snapshot.Pending[0].ID != "google-3" ||
-		snapshot.Pending[0].Text != "ส่วนที่เหลือ" {
-		t.Fatalf("remaining pending = %#v", snapshot.Pending)
-	}
-}
-
 func TestModeratorIgnoresOtherProvider(t *testing.T) {
 	moderator := New("google", time.Now)
 	accepted := moderator.Ingest(SourceSegment{
@@ -217,72 +191,22 @@ func TestModeratorPreservesOperatorFormatting(t *testing.T) {
 	}
 }
 
-func TestModeratorPublishesDraftAndSuppressesItsFinal(t *testing.T) {
+func TestModeratorRejectsRawDraftPublication(t *testing.T) {
 	moderator := New("google", time.Now)
 	moderator.Ingest(SourceSegment{
 		ID: "google-1", Provider: "google", Text: "ข้อความระหว่างถอด", Sequence: 1,
 	})
 
-	publication, replayed, err := moderator.Publish(PublishCommand{
+	_, _, err := moderator.Publish(PublishCommand{
 		RequestID: "request-draft", Provider: "google",
 		SourceSegmentIDs: []string{"google-1"}, Text: "ข้อความที่ตรวจแล้ว",
 	})
-	if err != nil || replayed {
-		t.Fatalf("Publish(draft) = (%#v, %v, %v)", publication, replayed, err)
-	}
-	accepted := moderator.Ingest(SourceSegment{
-		ID: "google-1", Provider: "google", Text: "ข้อความ final", IsFinal: true, Sequence: 2,
-	})
-	if accepted {
-		t.Fatal("consumed draft final was accepted")
-	}
-	snapshot := moderator.Snapshot()
-	if snapshot.Draft != nil || len(snapshot.Pending) != 0 {
-		t.Fatalf("consumed draft final was not suppressed: %#v", snapshot)
-	}
-}
-
-func TestModeratorDraftRemainderStaysPendingAndFinalDoesNotReplaceIt(t *testing.T) {
-	moderator := New("google", time.Now)
-	moderator.Ingest(SourceSegment{
-		ID: "google-1", Provider: "google", Text: "ส่วนแรก ส่วนที่เหลือ", Sequence: 1,
-	})
-	if _, _, err := moderator.Publish(PublishCommand{
-		RequestID: "request-draft", Provider: "google",
-		SourceSegmentIDs: []string{"google-1"},
-		Text:             "ส่วนแรก",
-		RemainingText:    "ส่วนที่เหลือ",
-	}); err != nil {
-		t.Fatalf("Publish(draft remainder) error = %v", err)
-	}
-	if moderator.Ingest(SourceSegment{
-		ID: "google-1", Provider: "google", Text: "provider final", IsFinal: true, Sequence: 2,
-	}) {
-		t.Fatal("provider final replaced a consumed draft remainder")
-	}
-	snapshot := moderator.Snapshot()
-	if len(snapshot.Pending) != 1 || snapshot.Pending[0].Text != "ส่วนที่เหลือ" {
-		t.Fatalf("pending remainder = %#v", snapshot.Pending)
-	}
-}
-
-func TestModeratorRollbackDraftPublicationRestoresDraft(t *testing.T) {
-	moderator := New("google", time.Now)
-	moderator.Ingest(SourceSegment{
-		ID: "google-1", Provider: "google", Text: "ข้อความระหว่างถอด", Sequence: 1,
-	})
-	if _, _, err := moderator.Publish(PublishCommand{
-		RequestID: "request-draft", Provider: "google",
-		SourceSegmentIDs: []string{"google-1"}, Text: "ข้อความที่ตรวจแล้ว",
-	}); err != nil {
-		t.Fatalf("Publish(draft) error = %v", err)
-	}
-	if !moderator.Rollback("request-draft") {
-		t.Fatal("Rollback(draft) = false")
+	if !errors.Is(err, ErrSourceMismatch) {
+		t.Fatalf("Publish(draft) error = %v, want ErrSourceMismatch", err)
 	}
 	snapshot := moderator.Snapshot()
 	if snapshot.Draft == nil || snapshot.Draft.ID != "google-1" || len(snapshot.Pending) != 0 {
-		t.Fatalf("snapshot after draft rollback = %#v", snapshot)
+		t.Fatalf("Draft changed after rejected publication: %#v", snapshot)
 	}
 }
 

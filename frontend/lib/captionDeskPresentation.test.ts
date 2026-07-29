@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   formatCaptionDeskError,
+  formatCaptionDraftAnnouncement,
   formatCaptionSegmentAge,
   getCaptionEditorTextUpdate,
   getCaptionDeskOperationalStatus,
@@ -77,4 +78,9 @@ test('editor text appends a new suffix without replacing the live DOM text', () 
     getCaptionEditorTextUpdate('ข้อความเดิม', 'ข้อความใหม่'),
     { kind: 'replace', text: 'ข้อความใหม่' },
   );
+});
+
+test('Draft announcements expose preview text without announcing empty revisions', () => {
+  assert.equal(formatCaptionDraftAnnouncement(' กำลังถอดข้อความ '), 'Draft preview: กำลังถอดข้อความ');
+  assert.equal(formatCaptionDraftAnnouncement('   '), '');
 });

@@ -332,6 +332,45 @@ test('a stale snapshot cannot restore a Draft after its newer Final', () => {
   assert.equal(session.getSnapshot().isDraftActive, false);
 });
 
+test('a delayed Draft packet cannot reactivate a segment after its newer Final', () => {
+  const session = new CaptionDeskSession();
+  session.ingestOperatorPacket(packet({
+    type: 'caption.draft', provider: 'google',
+    source: { segmentId: 'g-1', text: 'ร่างเก่า', provider: 'google', isFinal: false, sequence: 10 },
+  }));
+  session.ingestOperatorPacket(packet({
+    type: 'caption.pending', provider: 'google',
+    source: { segmentId: 'g-1', text: 'ข้อความ final', provider: 'google', isFinal: true, sequence: 11 },
+  }));
+  session.ingestOperatorPacket(packet({
+    type: 'caption.draft', provider: 'google',
+    source: { segmentId: 'g-1', text: 'ร่างเก่าที่มาช้า', provider: 'google', isFinal: false, sequence: 10 },
+  }));
+
+  assert.equal(session.getSnapshot().reviewText, 'ข้อความ final');
+  assert.equal(session.getSnapshot().draftPreview, '');
+  assert.equal(session.getSnapshot().isDraftActive, false);
+});
+
+test('a new source epoch accepts a replacement agent snapshot with reset sequences', () => {
+  const session = new CaptionDeskSession();
+  session.ingestOperatorPacket(packet({
+    type: 'caption.pending', provider: 'google',
+    source: { segmentId: 'old-1', text: 'ข้อความจาก agent เก่า', provider: 'google', isFinal: true, sequence: 90 },
+  }));
+
+  session.beginSourceEpoch();
+  session.ingestOperatorPacket(packet({
+    type: 'caption.snapshot', requestId: 'new-agent', provider: 'google', pending: [],
+    draft: { segmentId: 'new-1', text: 'ข้อความจาก agent ใหม่', provider: 'google', isFinal: false, sequence: 1 },
+  }));
+
+  assert.equal(session.getSnapshot().reviewText, '');
+  assert.deepEqual(session.getSnapshot().sourceSegmentIds, []);
+  assert.equal(session.getSnapshot().draftPreview, 'ข้อความจาก agent ใหม่');
+  assert.equal(session.getSnapshot().isDraftActive, true);
+});
+
 test('partial publication keeps only the backend-owned remainder source for the next release', () => {
   const session = new CaptionDeskSession();
   session.ingestOperatorPacket(pending('g-1', 'หนึ่ง'));

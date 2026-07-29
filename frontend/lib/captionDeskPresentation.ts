@@ -64,6 +64,11 @@ export function formatCaptionSegmentAge(ageSeconds: number): string {
   return `Open for ${Math.max(0, Math.floor(ageSeconds))}s`;
 }
 
+export function formatCaptionDraftAnnouncement(text: string): string {
+  const normalized = text.trim();
+  return normalized ? `Draft preview: ${normalized}` : '';
+}
+
 export type CaptionEditorTextUpdate =
   | { kind: 'none' }
   | { kind: 'append'; text: string }

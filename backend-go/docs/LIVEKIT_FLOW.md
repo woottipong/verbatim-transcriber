@@ -56,20 +56,20 @@ ASR source Draft/final
   → active room/provider agent
   ├── raw transcript continues to normal viewers and feeds
   └── targeted `caption.operator` packet
-      → Caption Desk receives finals plus the active Draft; its selected client workflow decides whether the Draft enters the editor
+      → Caption Desk shows the active Draft as read-only preview and places only finals in the editor
       → reliable `caption.publish` command
       → agent validates ordered source IDs and request idempotency
-      → a published Draft consumes its segment and suppresses the later final
       ├── reliable `caption.public` → dedicated LiveKit caption consumers
       └── plain UTF-8 frame → `/ws/caption/:room`
 ```
 
 Only one primary Caption Desk operator owns a room/provider queue. Caption Desk
-is an approval lane rather than an agent delivery mode. Unapproved text remains
-in the operator queue and is never auto-published to the approved-caption
-channel; the provider's raw transcript remains available normally. Gemini
-translation continues through the existing raw path and is not editable in
-version 1.
+is an approval lane rather than an agent delivery mode. The active Draft is a
+read-only preview; only finalized source segments enter the editable queue or a
+`caption.publish` command. Unapproved text is never auto-published to the
+approved-caption channel, and the provider's raw transcript remains available
+normally. Gemini translation continues through the existing raw path and is
+not editable in version 1.
 
 ## HTTP routes
 

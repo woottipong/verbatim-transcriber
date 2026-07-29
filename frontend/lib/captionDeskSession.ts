@@ -56,6 +56,19 @@ export class CaptionDeskSession {
     if (message) this.ingest(message);
   }
 
+  beginSourceEpoch(): void {
+    this.activeIsDraft = false;
+    this.activeDraftID = '';
+    this.activeDraftSequence = 0;
+    this.latestSourceSequence = 0;
+    this.update({
+      ...this.snapshot,
+      isDraftActive: false,
+      draftPreview: '',
+      error: null,
+    });
+  }
+
   edit(text: string): void {
     this.edited = text !== this.snapshot.rawText;
     this.update({ ...this.snapshot, reviewText: text, error: null });
@@ -180,6 +193,7 @@ export class CaptionDeskSession {
     if (message.type === 'caption.published') return this.acknowledge(message);
     if (message.type === 'caption.rejected') return this.reject(message);
     if (message.type === 'caption.draft') {
+      if (message.source.sequence <= this.latestSourceSequence) return;
       if (
         !this.activeIsDraft ||
         message.source.sequence > this.activeDraftSequence
