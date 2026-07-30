@@ -19,11 +19,12 @@ const (
 	maxCaptionCommandSourceIDs  = 500
 	maxCaptionCommandRequestLen = 128
 
-	captionSnapshotType  = "caption.snapshot"
-	captionDraftType     = "caption.draft"
-	captionPendingType   = "caption.pending"
-	captionPublishedType = "caption.published"
-	captionRejectedType  = "caption.rejected"
+	captionSnapshotType     = "caption.snapshot"
+	captionDraftType        = "caption.draft"
+	captionDraftClearedType = "caption.draft-cleared"
+	captionPendingType      = "caption.pending"
+	captionPublishedType    = "caption.published"
+	captionRejectedType     = "caption.rejected"
 )
 
 var errInvalidCaptionCommand = errors.New("invalid caption command")
@@ -38,12 +39,13 @@ type captionCommandEnvelope struct {
 }
 
 type captionSourceEnvelope struct {
-	SegmentID    string `json:"segmentId"`
-	Text         string `json:"text"`
-	Provider     string `json:"provider"`
-	IsFinal      bool   `json:"isFinal"`
-	Sequence     uint64 `json:"sequence"`
-	LanguageCode string `json:"languageCode,omitempty"`
+	SegmentID        string `json:"segmentId"`
+	Text             string `json:"text"`
+	Provider         string `json:"provider"`
+	IsFinal          bool   `json:"isFinal"`
+	Sequence         uint64 `json:"sequence"`
+	LanguageCode     string `json:"languageCode,omitempty"`
+	JoinWithoutSpace bool   `json:"joinWithoutSpace,omitempty"`
 }
 
 type captionOperatorEnvelope struct {

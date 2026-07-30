@@ -86,6 +86,134 @@ func TestActiveProviderTargetsDraftToOperatorAndKeepsRawLive(t *testing.T) {
 	}
 }
 
+func TestEarlyFinalPolicyPromotesStablePrefixOnlyInModerationLane(t *testing.T) {
+	var packets []publishedData
+	agent := newCaptionTestAgent("google", &packets)
+	agent.captionOperatorID = "caption-operator-1"
+	agent.captionReviewStarted = true
+	agent.captionPolicy = captionmoderation.CaptionPolicyEarlyFinal
+	agent.captionDraftInterval = time.Nanosecond
+	agent.earlyFinalCutter = captionmoderation.NewEarlyFinalCutter(captionmoderation.EarlyFinalConfig{
+		MinimumObservations: 3,
+		MinimumSpan:         time.Nanosecond,
+		MinimumChunkRunes:   10,
+		SafetyTailRunes:     12,
+		MaxObservations:     8,
+	})
+
+	texts := []string{
+		"hello stable phrase mutable tail",
+		"hello stable phrase mutable tail grows",
+		"hello stable phrase mutable tail grows again",
+	}
+	for _, text := range texts {
+		agent.handleTranscriptMessage(TranscriptMessage{
+			Type: "transcript", Text: text, Provider: "google",
+			Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+		})
+	}
+
+	var rawTexts []string
+	var operatorEnvelopes []captionOperatorEnvelope
+	for _, packet := range packets {
+		if packet.topic == "" {
+			var raw dataChannelTranscript
+			if err := json.Unmarshal(packet.payload, &raw); err != nil {
+				t.Fatal(err)
+			}
+			rawTexts = append(rawTexts, raw.Text)
+			continue
+		}
+		if packet.topic == CaptionOperatorTopic {
+			var envelope captionOperatorEnvelope
+			if err := json.Unmarshal(packet.payload, &envelope); err != nil {
+				t.Fatal(err)
+			}
+			operatorEnvelopes = append(operatorEnvelopes, envelope)
+		}
+	}
+	if len(rawTexts) != 3 || rawTexts[2] != texts[2] {
+		t.Fatalf("raw transcript changed = %#v", rawTexts)
+	}
+	var promoted *captionSourceEnvelope
+	var tail *captionSourceEnvelope
+	for _, envelope := range operatorEnvelopes {
+		if envelope.Type == captionPendingType {
+			promoted = envelope.Source
+		}
+		if envelope.Type == captionDraftType && envelope.Source != nil &&
+			envelope.Source.Text == "grows again" {
+			tail = envelope.Source
+		}
+	}
+	if promoted == nil || promoted.Text != texts[0] ||
+		promoted.SegmentID != "google-1:early:1" {
+		t.Fatalf("early-final promotion = %#v", promoted)
+	}
+	if tail == nil || tail.Sequence <= promoted.Sequence || !tail.JoinWithoutSpace {
+		t.Fatalf("tail continuation = %#v, want a newer joined continuation after %#v", tail, promoted)
+	}
+	snapshot := agent.moderator.Snapshot()
+	if len(snapshot.Pending) != 1 || snapshot.Draft == nil ||
+		snapshot.Draft.Text != "grows again" {
+		t.Fatalf("moderation snapshot = %#v", snapshot)
+	}
+}
+
+func TestEarlyFinalPolicyClearsRetractedDraftTail(t *testing.T) {
+	var packets []publishedData
+	agent := newCaptionTestAgent("google", &packets)
+	agent.captionOperatorID = "caption-operator-1"
+	agent.captionReviewStarted = true
+	agent.captionPolicy = captionmoderation.CaptionPolicyEarlyFinal
+	agent.captionDraftInterval = time.Nanosecond
+	agent.earlyFinalCutter = captionmoderation.NewEarlyFinalCutter(captionmoderation.EarlyFinalConfig{
+		MinimumObservations: 3,
+		MinimumSpan:         time.Nanosecond,
+		MinimumChunkRunes:   10,
+		SafetyTailRunes:     12,
+		MaxObservations:     8,
+	})
+	for _, text := range []string{
+		"hello stable phrase mutable tail",
+		"hello stable phrase mutable tail grows",
+		"hello stable phrase mutable tail grows again",
+	} {
+		agent.handleTranscriptMessage(TranscriptMessage{
+			Type: "transcript", Text: text, Provider: "google",
+			Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+		})
+	}
+	packets = nil
+
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "hello stable phrase mutable tail",
+		IsFinal: true, Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+
+	var cleared *captionOperatorEnvelope
+	for _, packet := range packets {
+		if packet.topic != CaptionOperatorTopic {
+			continue
+		}
+		var envelope captionOperatorEnvelope
+		if err := json.Unmarshal(packet.payload, &envelope); err != nil {
+			t.Fatal(err)
+		}
+		if envelope.Type == captionDraftClearedType {
+			cleared = &envelope
+		}
+	}
+	if cleared == nil || cleared.Source == nil || cleared.Source.SegmentID != "google-1" {
+		t.Fatalf("Draft clear packet = %#v", cleared)
+	}
+	snapshot := agent.moderator.Snapshot()
+	if snapshot.Draft != nil || len(snapshot.Pending) != 1 {
+		t.Fatalf("moderation snapshot after clear = %#v", snapshot)
+	}
+}
+
 func TestCaptionDraftDeliveryCoalescesRevisionsAndSendsFinalImmediately(t *testing.T) {
 	operatorPackets := make(chan captionOperatorEnvelope, 8)
 	agent := &Agent{
@@ -349,6 +477,42 @@ func TestCaptionDeskSessionReconnectsDuringGraceAndBlocksOtherSessions(t *testin
 	time.Sleep(30 * time.Millisecond)
 	if got := len(agent.moderator.Snapshot().Pending); got != 1 {
 		t.Fatalf("reconnect grace timer cleared active session pending = %d", got)
+	}
+}
+
+func TestCaptionDeskReconnectCannotChangeFinalizationPolicy(t *testing.T) {
+	var packets []publishedData
+	agent := newCaptionTestAgent("google", &packets)
+	command := captionCommandEnvelope{
+		Type: captionSubscribeType, RequestID: "subscribe-1", Provider: "google",
+	}
+	agent.subscribeCaptionOperatorWithPolicy(
+		"caption-operator-1",
+		"desk-session-a",
+		captionmoderation.CaptionPolicyEarlyFinal,
+		command,
+	)
+	packets = nil
+	command.RequestID = "subscribe-2"
+	agent.subscribeCaptionOperatorWithPolicy(
+		"caption-operator-2",
+		"desk-session-a",
+		captionmoderation.CaptionPolicyProviderFinal,
+		command,
+	)
+
+	if agent.captionOperator() != "caption-operator-1" {
+		t.Fatalf("operator changed after policy mismatch: %q", agent.captionOperator())
+	}
+	if len(packets) != 1 || packets[0].topic != CaptionOperatorTopic {
+		t.Fatalf("policy mismatch packets = %#v", packets)
+	}
+	var rejection captionOperatorEnvelope
+	if err := json.Unmarshal(packets[0].payload, &rejection); err != nil {
+		t.Fatal(err)
+	}
+	if rejection.Type != captionRejectedType || rejection.Code != "operator_policy_mismatch" {
+		t.Fatalf("policy mismatch rejection = %#v", rejection)
 	}
 }
 

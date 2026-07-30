@@ -179,6 +179,8 @@ type Agent struct {
 	moderator                *captionmoderation.Moderator
 	captionOperatorID        string
 	captionOperatorSessionID string
+	captionPolicy            captionmoderation.CaptionPolicy
+	earlyFinalCutter         *captionmoderation.EarlyFinalCutter
 	captionReviewStarted     bool
 	captionReviewEndTimer    *time.Timer
 	captionOperatorGrace     time.Duration
@@ -358,14 +360,18 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 }
 
 func (a *Agent) registerCaptionOperator(participant *lksdk.RemoteParticipant) {
-	if participant == nil ||
-		!a.isAuthorizedCaptionOperator(participant.Metadata(), a.preferredProvider) {
+	if participant == nil {
+		return
+	}
+	credentials, ok := a.captionOperatorCredentials(participant.Metadata(), a.preferredProvider)
+	if !ok {
 		return
 	}
 	log.Printf("✍️ [Caption] Operator connected for provider=%s", a.preferredProvider)
-	a.subscribeCaptionOperator(
+	a.subscribeCaptionOperatorWithPolicy(
 		participant.Identity(),
-		a.captionOperatorSession(participant.Metadata(), a.preferredProvider),
+		credentials.sessionID,
+		credentials.policy,
 		captionCommandEnvelope{
 			Type:      captionSubscribeType,
 			RequestID: "participant-connected",

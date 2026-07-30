@@ -21,9 +21,15 @@ type captionDraftDelivery struct {
 }
 
 type captionOperatorMetadata struct {
-	Role      string `json:"role"`
-	Provider  string `json:"provider"`
-	SessionID string `json:"sessionId"`
+	Role          string `json:"role"`
+	Provider      string `json:"provider"`
+	SessionID     string `json:"sessionId"`
+	CaptionPolicy string `json:"captionPolicy"`
+}
+
+type captionOperatorCredentials struct {
+	sessionID string
+	policy    captionmoderation.CaptionPolicy
 }
 
 func (a *Agent) handleTranscriptMessage(message TranscriptMessage) {
@@ -48,29 +54,64 @@ func (a *Agent) handleTranscriptMessage(message TranscriptMessage) {
 	a.mu.Lock()
 	operatorID := a.captionOperatorID
 	reviewStarted := a.captionReviewStarted
+	policy := a.captionPolicy
+	cutter := a.earlyFinalCutter
 	if operatorID == "" && !reviewStarted {
 		a.moderator.ObserveCurrentDraft(source)
 		a.mu.Unlock()
 		return
 	}
 	a.mu.Unlock()
+
+	if policy == captionmoderation.CaptionPolicyEarlyFinal && cutter != nil {
+		output := cutter.Observe(source, time.Now())
+		for _, pending := range output.Pending {
+			a.deliverModerationSource(pending, operatorID)
+		}
+		if output.Draft != nil {
+			if len(output.Pending) > 0 {
+				output.Draft.Sequence = a.nextTranscriptSequence()
+			}
+			a.deliverModerationSource(*output.Draft, operatorID)
+		}
+		if output.ClearDraft != nil {
+			a.clearModerationDraft(*output.ClearDraft, operatorID)
+		}
+		return
+	}
+	a.deliverModerationSource(source, operatorID)
+}
+
+func (a *Agent) clearModerationDraft(source captionmoderation.SourceSegment, operatorID string) {
+	if !a.moderator.ClearDraft(source) || operatorID == "" {
+		return
+	}
+	envelope := captionOperatorEnvelope{
+		Type:     captionDraftClearedType,
+		Provider: source.Provider,
+		Source:   captionSourceFromModeration(source),
+	}
+	if err := a.publishCaptionOperator(envelope, true, operatorID); err != nil {
+		log.Printf("⚠️ [Caption] Failed to clear operator Draft: %v", err)
+	}
+}
+
+func (a *Agent) deliverModerationSource(source captionmoderation.SourceSegment, operatorID string) {
 	if !a.moderator.Ingest(source) {
 		return
 	}
-
 	if operatorID == "" {
 		return
 	}
 	envelope := captionOperatorEnvelope{
 		Type:     captionDraftType,
-		Provider: message.Provider,
+		Provider: source.Provider,
 		Source:   captionSourceFromModeration(source),
 	}
-	if message.IsFinal {
+	if source.IsFinal {
 		envelope.Type = captionPendingType
-		envelope.Source = captionSourceFromModeration(source)
 	}
-	if err := a.publishCaptionOperator(envelope, message.IsFinal, operatorID); err != nil {
+	if err := a.publishCaptionOperator(envelope, source.IsFinal, operatorID); err != nil {
 		log.Printf("⚠️ [Caption] Failed to deliver %s to operator: %v", envelope.Type, err)
 	}
 }
@@ -91,12 +132,14 @@ func (a *Agent) handleCaptionPacket(payload []byte, senderIdentity, senderMetada
 
 	switch command.Type {
 	case captionSubscribeType:
-		sessionID := a.captionOperatorSession(senderMetadata, command.Provider)
-		if sessionID == "" {
+		credentials, ok := a.captionOperatorCredentials(senderMetadata, command.Provider)
+		if !ok {
 			a.rejectCaptionCommand(senderIdentity, command.RequestID, command.Provider, "operator_unauthorized")
 			return
 		}
-		a.subscribeCaptionOperator(senderIdentity, sessionID, command)
+		a.subscribeCaptionOperatorWithPolicy(
+			senderIdentity, credentials.sessionID, credentials.policy, command,
+		)
 	case captionPublishType:
 		a.publishCaptionCommand(senderIdentity, command)
 	}
@@ -107,10 +150,26 @@ func (a *Agent) subscribeCaptionOperator(
 	sessionID string,
 	command captionCommandEnvelope,
 ) {
+	a.subscribeCaptionOperatorWithPolicy(
+		identity, sessionID, captionmoderation.CaptionPolicyProviderFinal, command,
+	)
+}
+
+func (a *Agent) subscribeCaptionOperatorWithPolicy(
+	identity string,
+	sessionID string,
+	policy captionmoderation.CaptionPolicy,
+	command captionCommandEnvelope,
+) {
 	a.mu.Lock()
 	if a.captionOperatorSessionID != "" && a.captionOperatorSessionID != sessionID {
 		a.mu.Unlock()
 		a.rejectCaptionCommand(identity, command.RequestID, command.Provider, "operator_already_active")
+		return
+	}
+	if a.captionOperatorSessionID == sessionID && a.captionPolicy != "" && a.captionPolicy != policy {
+		a.mu.Unlock()
+		a.rejectCaptionCommand(identity, command.RequestID, command.Provider, "operator_policy_mismatch")
 		return
 	}
 	if a.captionReviewEndTimer != nil {
@@ -123,6 +182,17 @@ func (a *Agent) subscribeCaptionOperator(
 		snapshot = a.moderator.StartReviewWindow()
 		a.captionReviewStarted = true
 		a.captionOperatorSessionID = sessionID
+		a.captionPolicy = policy
+		if policy == captionmoderation.CaptionPolicyEarlyFinal {
+			a.earlyFinalCutter = captionmoderation.NewEarlyFinalCutter(
+				captionmoderation.DefaultEarlyFinalConfig(),
+			)
+			if snapshot.Draft != nil {
+				a.earlyFinalCutter.Observe(*snapshot.Draft, time.Now())
+			}
+		} else {
+			a.earlyFinalCutter = nil
+		}
 	} else {
 		snapshot = a.moderator.Snapshot()
 	}
@@ -225,7 +295,7 @@ func (a *Agent) publishCaptionOperator(
 	if envelope.Type == captionDraftType && !reliable {
 		return a.queueCaptionDraftLocked(envelope, identity)
 	}
-	if envelope.Type == captionPendingType {
+	if envelope.Type == captionPendingType || envelope.Type == captionDraftClearedType {
 		a.discardPendingCaptionDraftLocked()
 	}
 	return a.publishCaptionOperatorNow(envelope, reliable, identity)
@@ -347,6 +417,11 @@ func (a *Agent) expireCaptionOperatorSession(sessionID string) {
 		return
 	}
 	a.captionOperatorSessionID = ""
+	a.captionPolicy = ""
+	if a.earlyFinalCutter != nil {
+		a.earlyFinalCutter.Reset()
+		a.earlyFinalCutter = nil
+	}
 	a.captionReviewStarted = false
 	a.captionReviewEndTimer = nil
 	a.mu.Unlock()
@@ -354,19 +429,42 @@ func (a *Agent) expireCaptionOperatorSession(sessionID string) {
 }
 
 func (a *Agent) isAuthorizedCaptionOperator(metadata, provider string) bool {
-	return a.captionOperatorSession(metadata, provider) != ""
+	_, ok := a.captionOperatorCredentials(metadata, provider)
+	return ok
 }
 
 func (a *Agent) captionOperatorSession(metadata, provider string) string {
+	credentials, ok := a.captionOperatorCredentials(metadata, provider)
+	if !ok {
+		return ""
+	}
+	return credentials.sessionID
+}
+
+func (a *Agent) captionOperatorCredentials(
+	metadata, provider string,
+) (captionOperatorCredentials, bool) {
 	var parsed captionOperatorMetadata
 	if err := json.Unmarshal([]byte(metadata), &parsed); err != nil {
-		return ""
+		return captionOperatorCredentials{}, false
 	}
 	if parsed.Role != "caption-operator" ||
 		!strings.EqualFold(strings.TrimSpace(parsed.Provider), provider) {
-		return ""
+		return captionOperatorCredentials{}, false
 	}
-	return strings.TrimSpace(parsed.SessionID)
+	sessionID := strings.TrimSpace(parsed.SessionID)
+	if sessionID == "" {
+		return captionOperatorCredentials{}, false
+	}
+	policyValue := strings.TrimSpace(parsed.CaptionPolicy)
+	if policyValue == "" {
+		policyValue = string(captionmoderation.CaptionPolicyProviderFinal)
+	}
+	policy, ok := captionmoderation.ParseCaptionPolicy(policyValue)
+	if !ok {
+		return captionOperatorCredentials{}, false
+	}
+	return captionOperatorCredentials{sessionID: sessionID, policy: policy}, true
 }
 
 func (a *Agent) moderationSegmentID(message TranscriptMessage, sequence uint64) string {
@@ -396,12 +494,13 @@ func captionSourceFromModeration(source any) *captionSourceEnvelope {
 	switch value := source.(type) {
 	case captionmoderation.SourceSegment:
 		return &captionSourceEnvelope{
-			SegmentID:    value.ID,
-			Text:         value.Text,
-			Provider:     value.Provider,
-			IsFinal:      value.IsFinal,
-			Sequence:     value.Sequence,
-			LanguageCode: value.LanguageCode,
+			SegmentID:        value.ID,
+			Text:             value.Text,
+			Provider:         value.Provider,
+			IsFinal:          value.IsFinal,
+			Sequence:         value.Sequence,
+			LanguageCode:     value.LanguageCode,
+			JoinWithoutSpace: value.JoinWithoutSpace,
 		}
 	case *captionmoderation.SourceSegment:
 		if value == nil {
@@ -439,6 +538,8 @@ func captionRejectionMessage(code string) string {
 	switch code {
 	case "operator_already_active":
 		return "Another Caption Desk is already active for this provider. Close it or try again later."
+	case "operator_policy_mismatch":
+		return "This Caption Desk session is already using a different finalization policy."
 	case "operator_unauthorized", "operator_not_primary":
 		return "This participant cannot publish captions."
 	case "provider_mismatch", "source_mismatch":

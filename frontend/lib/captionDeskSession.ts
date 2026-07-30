@@ -21,6 +21,7 @@ export interface CaptionDeskSnapshot {
   sourceSegmentIds: string[];
   isDraftActive: boolean;
   draftPreview: string;
+  draftJoinWithoutSpace: boolean;
   queuedCount: number;
   waiting: WaitingCaption[];
   recentlyPublished: Array<{ publicationId: string; text: string; publishedAt: number }>;
@@ -29,7 +30,7 @@ export interface CaptionDeskSnapshot {
 
 const EMPTY: CaptionDeskSnapshot = {
   reviewText: '', rawText: '', sourceSegmentIds: [], isDraftActive: false,
-  draftPreview: '',
+  draftPreview: '', draftJoinWithoutSpace: false,
   queuedCount: 0, waiting: [], recentlyPublished: [], error: null,
 };
 export const MAX_WAITING_CAPTIONS = 64;
@@ -65,6 +66,7 @@ export class CaptionDeskSession {
       ...this.snapshot,
       isDraftActive: false,
       draftPreview: '',
+      draftJoinWithoutSpace: false,
       error: null,
     });
   }
@@ -192,6 +194,26 @@ export class CaptionDeskSession {
   private ingest(message: CaptionOperatorMessage): void {
     if (message.type === 'caption.published') return this.acknowledge(message);
     if (message.type === 'caption.rejected') return this.reject(message);
+    if (message.type === 'caption.draft-cleared') {
+      this.latestSourceSequence = Math.max(this.latestSourceSequence, message.source.sequence);
+      if (
+        this.activeIsDraft &&
+        this.activeDraftID === message.source.segmentId &&
+        message.source.sequence >= this.activeDraftSequence
+      ) {
+        this.activeIsDraft = false;
+        this.activeDraftID = '';
+        this.activeDraftSequence = 0;
+        this.update({
+          ...this.snapshot,
+          isDraftActive: false,
+          draftPreview: '',
+          draftJoinWithoutSpace: false,
+          error: null,
+        });
+      }
+      return;
+    }
     if (message.type === 'caption.draft') {
       if (message.source.sequence <= this.latestSourceSequence) return;
       if (
@@ -206,6 +228,7 @@ export class CaptionDeskSession {
           ...this.snapshot,
           isDraftActive: true,
           draftPreview: message.source.text,
+          draftJoinWithoutSpace: Boolean(message.source.joinWithoutSpace),
           error: null,
         });
       }
@@ -226,7 +249,10 @@ export class CaptionDeskSession {
       if (snapshotSequence < this.latestSourceSequence) return;
       const knownIDs = new Set(this.snapshot.sourceSegmentIds);
       const incoming = sources.filter(item => !knownIDs.has(item.segmentId));
-      const rawText = sources.map(item => item.text).join(' ');
+      const rawText = sources.reduce(
+        (text, item) => appendSourceText(text, item.text, item.joinWithoutSpace),
+        '',
+      );
       this.activeIsDraft = Boolean(message.draft);
       this.activeDraftID = message.draft?.segmentId || '';
       this.activeDraftSequence = message.draft?.sequence || 0;
@@ -235,12 +261,16 @@ export class CaptionDeskSession {
       this.update({
         ...this.snapshot,
         reviewText: this.edited
-          ? incoming.reduce((text, item) => appendSourceText(text, item.text), this.snapshot.reviewText)
+          ? incoming.reduce(
+            (text, item) => appendSourceText(text, item.text, item.joinWithoutSpace),
+            this.snapshot.reviewText,
+          )
           : rawText,
         rawText,
         sourceSegmentIds: sources.map(item => item.segmentId),
         isDraftActive: Boolean(message.draft),
         draftPreview: message.draft?.text || '',
+        draftJoinWithoutSpace: Boolean(message.draft?.joinWithoutSpace),
         queuedCount: 0,
         error: null,
       });
@@ -254,11 +284,12 @@ export class CaptionDeskSession {
       this.activeDraftSequence = 0;
       this.update({
         ...this.snapshot,
-        reviewText: appendSourceText(this.snapshot.reviewText, source.text),
-        rawText: appendSourceText(this.snapshot.rawText, source.text),
+        reviewText: appendSourceText(this.snapshot.reviewText, source.text, source.joinWithoutSpace),
+        rawText: appendSourceText(this.snapshot.rawText, source.text, source.joinWithoutSpace),
         sourceSegmentIds: [...this.snapshot.sourceSegmentIds, source.segmentId],
         isDraftActive: false,
         draftPreview: '',
+        draftJoinWithoutSpace: false,
         queuedCount: 0,
       });
       return;
@@ -269,8 +300,8 @@ export class CaptionDeskSession {
     if (this.queued.some(item => item.segmentId === source.segmentId)) return;
     this.update({
       ...this.snapshot,
-      reviewText: appendSourceText(this.snapshot.reviewText, source.text),
-      rawText: appendSourceText(this.snapshot.rawText, source.text),
+      reviewText: appendSourceText(this.snapshot.reviewText, source.text, source.joinWithoutSpace),
+      rawText: appendSourceText(this.snapshot.rawText, source.text, source.joinWithoutSpace),
       sourceSegmentIds: [...this.snapshot.sourceSegmentIds, source.segmentId],
       isDraftActive: this.snapshot.isDraftActive,
       draftPreview: this.snapshot.draftPreview,
@@ -284,10 +315,10 @@ export class CaptionDeskSession {
   }
 }
 
-function appendSourceText(current: string, incoming: string): string {
+function appendSourceText(current: string, incoming: string, joinWithoutSpace = false): string {
   const left = current.trimEnd();
   const right = incoming.trim();
   if (!left) return right;
   if (!right) return left;
-  return `${left} ${right}`;
+  return joinWithoutSpace ? `${left}${right}` : `${left} ${right}`;
 }

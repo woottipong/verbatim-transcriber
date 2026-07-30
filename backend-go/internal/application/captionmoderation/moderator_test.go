@@ -144,6 +144,27 @@ func TestModeratorEndReviewWindowDropsPendingAndKeepsCurrentDraft(t *testing.T) 
 	}
 }
 
+func TestModeratorClearsOnlyTheMatchingCurrentDraft(t *testing.T) {
+	moderator := New("google", time.Now)
+	moderator.Ingest(SourceSegment{
+		ID: "google-3", Provider: "google", Text: "current draft", Sequence: 3,
+	})
+
+	if moderator.ClearDraft(SourceSegment{
+		ID: "google-2", Provider: "google", IsFinal: true, Sequence: 4,
+	}) {
+		t.Fatal("cleared a different Draft")
+	}
+	if !moderator.ClearDraft(SourceSegment{
+		ID: "google-3", Provider: "google", IsFinal: true, Sequence: 5,
+	}) {
+		t.Fatal("matching Draft was not cleared")
+	}
+	if snapshot := moderator.Snapshot(); snapshot.Draft != nil {
+		t.Fatalf("Draft after clear = %#v", snapshot.Draft)
+	}
+}
+
 func TestModeratorPublishesPendingPrefix(t *testing.T) {
 	now := time.Date(2026, 7, 28, 10, 0, 0, 0, time.UTC)
 	moderator := New("google", func() time.Time { return now })

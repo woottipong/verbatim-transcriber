@@ -9,6 +9,7 @@ import (
 
 	"thai-transcriber-backend/config"
 	"thai-transcriber-backend/internal/application/agentsupervisor"
+	"thai-transcriber-backend/internal/application/captionmoderation"
 	"thai-transcriber-backend/internal/application/roomoperations"
 	"thai-transcriber-backend/models"
 
@@ -114,6 +115,16 @@ func HandleCaptionDeskToken(
 			"error": "Caption Desk session ID is invalid",
 		})
 	}
+	policyValue := strings.TrimSpace(c.Query("policy"))
+	if policyValue == "" {
+		policyValue = string(captionmoderation.CaptionPolicyProviderFinal)
+	}
+	policy, validPolicy := captionmoderation.ParseCaptionPolicy(policyValue)
+	if !validPolicy {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "Caption Desk policy must be early-final or provider-final",
+		})
+	}
 	if _, err := rooms.Find(c.UserContext(), roomName); err != nil {
 		if errors.Is(err, roomoperations.ErrRoomNotFound) {
 			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
@@ -143,6 +154,7 @@ func HandleCaptionDeskToken(
 	}
 	metadata, err := json.Marshal(captionOperatorMetadata{
 		Role: "caption-operator", Provider: provider, SessionID: sessionID,
+		CaptionPolicy: string(policy),
 	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Failed to create operator metadata"})
@@ -162,9 +174,10 @@ func HandleCaptionDeskToken(
 }
 
 type captionOperatorMetadata struct {
-	Role      string `json:"role"`
-	Provider  string `json:"provider"`
-	SessionID string `json:"sessionId"`
+	Role          string `json:"role"`
+	Provider      string `json:"provider"`
+	SessionID     string `json:"sessionId"`
+	CaptionPolicy string `json:"captionPolicy"`
 }
 
 // HandleCreateRoom creates an empty room. Starting an agent remains a separate

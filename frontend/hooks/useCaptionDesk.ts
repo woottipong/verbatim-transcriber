@@ -13,6 +13,7 @@ import {
 } from '../lib/captionDeskMessages';
 import { CaptionDeskSession } from '../lib/captionDeskSession';
 import { formatCaptionDeskError } from '../lib/captionDeskPresentation';
+import type { CaptionPolicy } from '../lib/appRoutes';
 import type { AgentProvider } from '../lib/providers';
 import { ConnectionState } from '../types';
 
@@ -22,6 +23,7 @@ export function useCaptionDesk(
   backendUrl: string,
   roomName: string,
   provider: AgentProvider,
+  captionPolicy: CaptionPolicy,
 ) {
   const sessionRef = useRef<CaptionDeskSession | null>(null);
   if (!sessionRef.current) sessionRef.current = new CaptionDeskSession();
@@ -56,7 +58,7 @@ export function useCaptionDesk(
 
   useEffect(() => {
     if (!roomName || !provider) return;
-    const scope = `${roomName}:${provider}`;
+    const scope = `${roomName}:${provider}:${captionPolicy}`;
     if (scopeRef.current !== scope) {
       session.clear();
       agentParticipantSIDRef.current = '';
@@ -189,6 +191,7 @@ export function useCaptionDesk(
           roomName,
           provider,
           deskSessionIDRef.current,
+          captionPolicy,
         );
         if (disposed) return;
         await room.connect(credentials.wsUrl, credentials.token);
@@ -211,7 +214,7 @@ export function useCaptionDesk(
       void room.disconnect();
       roomRef.current = null;
     };
-  }, [backendUrl, provider, reconnectNonce, replayWaiting, roomName, sendSubscribe, session]);
+  }, [backendUrl, captionPolicy, provider, reconnectNonce, replayWaiting, roomName, sendSubscribe, session]);
 
   useEffect(() => () => session.clear(), [session]);
 

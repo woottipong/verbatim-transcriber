@@ -78,6 +78,7 @@ export default function App() {
         backendUrl={config.backendUrl}
         roomName={route.roomName}
         providerName={route.providerName}
+        captionPolicy={route.captionPolicy}
       />
     </Suspense>;
   }

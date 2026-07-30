@@ -208,8 +208,80 @@ func TestHandleCaptionDeskTokenIssuesServerOwnedOperatorGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	if metadata.Role != "caption-operator" || metadata.Provider != "google" ||
-		metadata.SessionID != "desk-session-12345678" {
+		metadata.SessionID != "desk-session-12345678" ||
+		metadata.CaptionPolicy != "provider-final" {
 		t.Fatalf("operator metadata = %#v", metadata)
+	}
+}
+
+func TestHandleCaptionDeskTokenSignsSelectedCaptionPolicy(t *testing.T) {
+	cfg := captionTokenTestConfig()
+	operations := roomoperations.New(&roomHandlerAdapter{
+		rooms: []roomoperations.RoomRecord{{SID: "RM_room_a", Name: "room-a"}},
+	})
+	created := make(chan *captionTokenAgent, 1)
+	supervisor := agentsupervisor.New(func(string) agentsupervisor.Agent {
+		agent := newCaptionTokenAgent()
+		created <- agent
+		return agent
+	})
+	if err := supervisor.Start(t.Context(), "room-a", "google"); err != nil {
+		t.Fatal(err)
+	}
+	agent := <-created
+	waitForCaptionTokenSignal(t, agent.started)
+	defer func() {
+		_ = supervisor.Stop("room-a", "google")
+		waitForCaptionTokenSignal(t, agent.finished)
+	}()
+
+	app := fiber.New()
+	app.Post("/rooms/:room/caption-token/:provider", func(c *fiber.Ctx) error {
+		return HandleCaptionDeskToken(c, cfg, operations, supervisor)
+	})
+	response, err := app.Test(httptest.NewRequest(
+		http.MethodPost,
+		"/rooms/room-a/caption-token/google?sessionId=desk-session-12345678&policy=early-final",
+		nil,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+	var payload struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := auth.ParseAPIToken(payload.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, grants, err := verifier.Verify(cfg.LiveKitAPISecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var metadata captionOperatorMetadata
+	if err := json.Unmarshal([]byte(grants.Metadata), &metadata); err != nil {
+		t.Fatal(err)
+	}
+	if metadata.CaptionPolicy != "early-final" {
+		t.Fatalf("caption policy = %q", metadata.CaptionPolicy)
+	}
+
+	invalid, err := app.Test(httptest.NewRequest(
+		http.MethodPost,
+		"/rooms/room-a/caption-token/google?sessionId=desk-session-12345678&policy=unknown",
+		nil,
+	))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalid.StatusCode != http.StatusBadRequest {
+		t.Fatalf("invalid policy status = %d, want %d", invalid.StatusCode, http.StatusBadRequest)
 	}
 }
 

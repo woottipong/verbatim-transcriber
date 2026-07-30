@@ -4,11 +4,11 @@ import { useCaptionDesk } from '../hooks/useCaptionDesk';
 import {
   buildCaptionDeskUrl,
   buildCaptionDeskSessionKey,
+  type CaptionPolicy,
 } from '../lib/appRoutes';
 import { hasCaptionDeskWork } from '../lib/captionDeskPresentation';
 import { isAgentProvider, type AgentProvider } from '../lib/providers';
 import { ConnectionState } from '../types';
-import ToastViewport from './ToastViewport';
 import { CaptionDeskHeader } from './caption-desk/CaptionDeskHeader';
 import { CaptionDeskLauncher } from './caption-desk/CaptionDeskLauncher';
 import { CaptionDeskPublishedHistory } from './caption-desk/CaptionDeskPublishedHistory';
@@ -18,9 +18,10 @@ interface CaptionDeskPageProps {
   backendUrl: string;
   roomName: string;
   providerName: string;
+  captionPolicy: CaptionPolicy;
 }
 
-export default function CaptionDeskPage({ backendUrl, roomName, providerName }: CaptionDeskPageProps) {
+export default function CaptionDeskPage({ backendUrl, roomName, providerName, captionPolicy }: CaptionDeskPageProps) {
   const provider = providerName as AgentProvider;
   const validProvider = isAgentProvider(provider);
 
@@ -30,10 +31,11 @@ export default function CaptionDeskPage({ backendUrl, roomName, providerName }: 
 
   return (
     <ConnectedCaptionDesk
-      key={buildCaptionDeskSessionKey(roomName, provider)}
+      key={buildCaptionDeskSessionKey(roomName, provider, captionPolicy)}
       backendUrl={backendUrl}
       roomName={roomName}
       provider={provider}
+      captionPolicy={captionPolicy}
     />
   );
 }
@@ -42,10 +44,12 @@ function ConnectedCaptionDesk({
   backendUrl,
   roomName,
   provider,
+  captionPolicy,
 }: {
   backendUrl: string;
   roomName: string;
   provider: AgentProvider;
+  captionPolicy: CaptionPolicy;
 }) {
   const {
     snapshot,
@@ -57,7 +61,7 @@ function ConnectedCaptionDesk({
     edit,
     publish,
     reconnect,
-  } = useCaptionDesk(backendUrl, roomName, provider);
+  } = useCaptionDesk(backendUrl, roomName, provider, captionPolicy);
 
   const connected = connectionState === ConnectionState.CONNECTED;
   const errorMessage = snapshot.error || error;
@@ -71,8 +75,6 @@ function ConnectedCaptionDesk({
     roomName,
     '',
   );
-  const latestPublished = snapshot.recentlyPublished.at(-1);
-
   useEffect(() => {
     if (!hasWork) return undefined;
     const preventAccidentalExit = (event: BeforeUnloadEvent) => {
@@ -99,22 +101,13 @@ function ConnectedCaptionDesk({
       <CaptionDeskHeader
         roomName={roomName}
         provider={provider}
+        captionPolicy={captionPolicy}
         connectionState={connectionState}
         captionConnected={captionConnected}
         agentConnected={agentConnected}
         subscriptionBlockCode={subscriptionBlockCode}
         onChangeDesk={changeDesk}
       />
-
-      <ToastViewport notices={[
-        latestPublished ? {
-          id: latestPublished.publicationId,
-          tone: 'success',
-          title: 'Caption published',
-          message: summarizeCaption(latestPublished.text),
-          duration: 2600,
-        } : null,
-      ]} />
 
       <main id="main-content" className="caption-desk-main mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6 sm:py-5 lg:overflow-hidden">
         {errorMessage || connectionState === ConnectionState.DISCONNECTED ? (
@@ -152,9 +145,4 @@ function ConnectedCaptionDesk({
       </main>
     </div>
   );
-}
-
-function summarizeCaption(text: string): string {
-  const normalized = text.trim().replace(/\s+/g, ' ');
-  return normalized.length > 80 ? `${normalized.slice(0, 77)}…` : normalized;
 }

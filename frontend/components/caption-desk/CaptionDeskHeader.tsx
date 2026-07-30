@@ -1,10 +1,12 @@
 import { type CaptionDeskStatusTone, getCaptionDeskOperationalStatus } from '../../lib/captionDeskPresentation';
 import { formatProviderName, type AgentProvider } from '../../lib/providers';
 import type { ConnectionState } from '../../types';
+import type { CaptionPolicy } from '../../lib/appRoutes';
 
 interface CaptionDeskHeaderProps {
   roomName: string;
   provider: AgentProvider;
+  captionPolicy: CaptionPolicy;
   connectionState: ConnectionState;
   captionConnected: boolean;
   agentConnected: boolean;
@@ -15,6 +17,7 @@ interface CaptionDeskHeaderProps {
 export function CaptionDeskHeader({
   roomName,
   provider,
+  captionPolicy,
   connectionState,
   captionConnected,
   agentConnected,
@@ -44,6 +47,10 @@ export function CaptionDeskHeader({
               <strong className="truncate font-semibold text-[var(--ink)]">{roomName}</strong>
               <span className="text-[var(--subtle)]" aria-hidden="true">·</span>
               <strong className="truncate font-semibold text-[var(--ink)]">{formatProviderName(provider)}</strong>
+              <span className="text-[var(--subtle)]" aria-hidden="true">·</span>
+              <span className="truncate text-[var(--muted)]">
+                {captionPolicy === 'early-final' ? 'Stable Draft' : 'Provider final'}
+              </span>
             </p>
           </div>
         </div>

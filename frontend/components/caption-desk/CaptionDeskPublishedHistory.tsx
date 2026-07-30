@@ -10,6 +10,7 @@ export function CaptionDeskPublishedHistory({ snapshot }: CaptionDeskPublishedHi
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const isEmpty = snapshot.waiting.length === 0 && snapshot.recentlyPublished.length === 0;
   const latest = snapshot.waiting.at(-1) ?? snapshot.recentlyPublished.at(-1);
+  const latestPublished = snapshot.recentlyPublished.at(-1);
 
   return (
     <>
@@ -24,7 +25,12 @@ export function CaptionDeskPublishedHistory({ snapshot }: CaptionDeskPublishedHi
             <span className="text-sm font-semibold">
               {snapshot.waiting.length > 0 ? 'Sending' : 'Last published'}
             </span>
-            <span className="min-w-0 truncate text-xs text-[var(--muted)]">
+            <span
+              key={latestPublished?.publicationId || 'published-empty'}
+              className={`min-w-0 truncate rounded px-1 text-xs text-[var(--muted)] ${
+                latestPublished ? 'caption-desk-published-pulse' : ''
+              }`}
+            >
               {latest?.text || 'No captions published yet'}
             </span>
           </span>
@@ -66,8 +72,11 @@ function HistoryContent({
               <p className="break-words whitespace-pre-wrap text-sm leading-6 text-[var(--ink)] [overflow-wrap:anywhere]">{item.text}</p>
             </li>
           ))}
-          {[...snapshot.recentlyPublished].reverse().map(item => (
-            <li key={item.publicationId} className="px-4 py-3">
+          {[...snapshot.recentlyPublished].reverse().map((item, index) => (
+            <li
+              key={item.publicationId}
+              className={`px-4 py-3 ${index === 0 ? 'caption-desk-published-pulse' : ''}`}
+            >
               <time className="mb-1 block text-xs text-[var(--subtle)]" dateTime={new Date(item.publishedAt).toISOString()}>
                 {formatPublishedTime(item.publishedAt)}
               </time>

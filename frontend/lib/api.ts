@@ -4,6 +4,7 @@
 
 import { getControlAuthHeaders, toHttpUrl } from './runtime.ts';
 import type { AgentProvider } from './providers.ts';
+import type { CaptionPolicy } from './appRoutes.ts';
 
 export interface ParticipantInfo {
     identity: string;
@@ -148,9 +149,11 @@ export async function createCaptionDeskToken(
     roomName: string,
     provider: AgentProvider,
     sessionId: string,
+    policy: CaptionPolicy,
 ): Promise<CaptionDeskTokenResponse> {
+    const params = new URLSearchParams({ sessionId, policy });
     const response = await fetch(
-        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/caption-token/${encodeURIComponent(provider)}?sessionId=${encodeURIComponent(sessionId)}`,
+        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/caption-token/${encodeURIComponent(provider)}?${params.toString()}`,
         { method: 'POST', headers: getControlAuthHeaders() },
     );
     return parseApiResponse<CaptionDeskTokenResponse>(response, 'Failed to open Caption Desk');

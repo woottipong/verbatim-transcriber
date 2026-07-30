@@ -119,6 +119,7 @@ export function CaptionDeskReviewEditor({
               : 'Waiting for the transcriber…'
         }
         data-draft={snapshot.draftPreview}
+        data-draft-join={snapshot.draftJoinWithoutSpace ? 'true' : 'false'}
         onInput={event => edit(event.currentTarget.textContent || '')}
         onKeyDown={event => {
           if (!shouldPublishOnEnter(event.nativeEvent)) return;

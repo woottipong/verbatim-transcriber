@@ -6,7 +6,7 @@ import {
   type RoomDetails,
   type RunningAgent,
 } from '../../lib/api';
-import { buildCaptionDeskUrl } from '../../lib/appRoutes';
+import { buildCaptionDeskUrl, type CaptionPolicy } from '../../lib/appRoutes';
 import { formatCaptionDeskError } from '../../lib/captionDeskPresentation';
 import { formatProviderName, selectActiveRoomProviders, type AgentProvider } from '../../lib/providers';
 
@@ -24,6 +24,7 @@ export function CaptionDeskLauncher({
   const [rooms, setRooms] = useState<RoomDetails[]>([]);
   const [roomName, setRoomName] = useState(fixedRoomName);
   const [provider, setProvider] = useState<AgentProvider | ''>('');
+  const [captionPolicy, setCaptionPolicy] = useState<CaptionPolicy>('early-final');
   const [loading, setLoading] = useState(true);
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +76,7 @@ export function CaptionDeskLauncher({
     if (!roomName || !provider) return;
     setConnecting(true);
     const base = `${window.location.origin}${window.location.pathname}`;
-    window.location.href = buildCaptionDeskUrl(base, roomName, provider);
+    window.location.href = buildCaptionDeskUrl(base, roomName, provider, captionPolicy);
   };
 
   return (
@@ -171,6 +172,44 @@ export function CaptionDeskLauncher({
                   <span className="text-xs font-normal text-[var(--status-warning-text)]">Start a transcription provider for this room in Control Room.</span>
                 ) : null}
               </label>
+
+              <fieldset className="grid gap-2">
+                <legend className="text-sm font-medium">Finalization</legend>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--line)] bg-[var(--control-surface-bg)] p-3 has-[:checked]:border-[var(--accent)] has-[:checked]:bg-[var(--accent-soft)]">
+                    <input
+                      type="radio"
+                      name="caption-policy"
+                      value="early-final"
+                      checked={captionPolicy === 'early-final'}
+                      onChange={() => setCaptionPolicy('early-final')}
+                      className="mt-1 accent-[var(--accent)]"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold">Stable Draft</span>
+                      <span className="mt-0.5 block text-xs font-normal leading-5 text-[var(--muted)]">
+                        Sends stable phrases to review sooner. Recommended.
+                      </span>
+                    </span>
+                  </label>
+                  <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--line)] bg-[var(--control-surface-bg)] p-3 has-[:checked]:border-[var(--accent)] has-[:checked]:bg-[var(--accent-soft)]">
+                    <input
+                      type="radio"
+                      name="caption-policy"
+                      value="provider-final"
+                      checked={captionPolicy === 'provider-final'}
+                      onChange={() => setCaptionPolicy('provider-final')}
+                      className="mt-1 accent-[var(--accent)]"
+                    />
+                    <span>
+                      <span className="block text-sm font-semibold">Provider final</span>
+                      <span className="mt-0.5 block text-xs font-normal leading-5 text-[var(--muted)]">
+                        Waits for the provider’s original final result.
+                      </span>
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
 
               <button
                 type="button"

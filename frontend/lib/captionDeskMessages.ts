@@ -11,6 +11,7 @@ export interface CaptionSource {
   isFinal: boolean;
   sequence: number;
   languageCode?: string;
+  joinWithoutSpace?: boolean;
 }
 
 export interface CaptionSnapshotMessage {
@@ -29,6 +30,12 @@ export interface CaptionDraftMessage {
 
 export interface CaptionPendingMessage {
   type: 'caption.pending';
+  provider: string;
+  source: CaptionSource;
+}
+
+export interface CaptionDraftClearedMessage {
+  type: 'caption.draft-cleared';
   provider: string;
   source: CaptionSource;
 }
@@ -54,6 +61,7 @@ export interface CaptionRejectedMessage {
 export type CaptionOperatorMessage =
   | CaptionSnapshotMessage
   | CaptionDraftMessage
+  | CaptionDraftClearedMessage
   | CaptionPendingMessage
   | CaptionPublishedMessage
   | CaptionRejectedMessage;
@@ -96,6 +104,11 @@ export function parseCaptionOperatorPacket(payload: Uint8Array): CaptionOperator
         (value.type === 'caption.draft' && source.isFinal) ||
         (value.type === 'caption.pending' && !source.isFinal)
       ) return undefined;
+      return { type: value.type, provider: value.provider, source };
+    }
+    case 'caption.draft-cleared': {
+      const source = parseSource(value.source);
+      if (!source || source.provider !== value.provider || !source.isFinal) return undefined;
       return { type: value.type, provider: value.provider, source };
     }
     case 'caption.published':
@@ -164,6 +177,7 @@ function parseSource(value: unknown): CaptionSource | undefined {
     isFinal: value.isFinal,
     sequence: Number(value.sequence),
     ...(typeof value.languageCode === 'string' ? { languageCode: value.languageCode } : {}),
+    ...(value.joinWithoutSpace === true ? { joinWithoutSpace: true } : {}),
   };
 }
 

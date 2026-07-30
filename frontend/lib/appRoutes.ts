@@ -1,9 +1,11 @@
 export type AppPage = 'admin' | 'stream' | 'viewer' | 'caption-desk';
+export type CaptionPolicy = 'early-final' | 'provider-final';
 
 export interface AppRoute {
   page: AppPage;
   roomName: string;
   providerName: string;
+  captionPolicy: CaptionPolicy;
   autoConnect: boolean;
 }
 
@@ -13,22 +15,26 @@ export function parseAppRoute(hash: string): AppRoute {
   const params = new URLSearchParams(query);
   const roomName = params.get('room')?.trim() || '';
   const providerName = params.get('provider')?.trim().toLowerCase() || '';
+  const captionPolicy = params.get('policy') === 'early-final'
+    ? 'early-final'
+    : 'provider-final';
 
   if (path === 'stream') {
-    return { page: 'stream', roomName, providerName: '', autoConnect: false };
+    return { page: 'stream', roomName, providerName: '', captionPolicy, autoConnect: false };
   }
   if (path === 'viewer') {
     return {
       page: 'viewer',
       roomName,
       providerName: '',
+      captionPolicy,
       autoConnect: params.get('autoconnect') === '1' && roomName.length > 0,
     };
   }
   if (path === 'caption-desk') {
-    return { page: 'caption-desk', roomName, providerName, autoConnect: false };
+    return { page: 'caption-desk', roomName, providerName, captionPolicy, autoConnect: false };
   }
-  return { page: 'admin', roomName: '', providerName: '', autoConnect: false };
+  return { page: 'admin', roomName: '', providerName: '', captionPolicy, autoConnect: false };
 }
 
 export function buildStreamUrl(baseUrl: string, roomName: string): string {
@@ -42,20 +48,23 @@ export function buildViewerUrl(baseUrl: string, roomName: string): string {
 export function buildCaptionDeskSessionKey(
   roomName: string,
   providerName: string,
+  captionPolicy: CaptionPolicy = 'provider-final',
 ): string {
-  return `${roomName}:${providerName}`;
+  return `${roomName}:${providerName}:${captionPolicy}`;
 }
 
 export function buildCaptionDeskUrl(
   baseUrl: string,
   roomName: string,
   providerName: string,
+  captionPolicy: CaptionPolicy = 'provider-final',
 ): string {
   const url = new URL(baseUrl);
   url.hash = '';
   const params = new URLSearchParams();
   if (roomName.trim()) params.set('room', roomName.trim());
   if (providerName.trim()) params.set('provider', providerName.trim().toLowerCase());
+  if (providerName.trim()) params.set('policy', captionPolicy);
   url.hash = `caption-desk?${params.toString()}`;
   return url.toString();
 }

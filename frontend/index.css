@@ -493,6 +493,32 @@ select:focus-visible {
   border-bottom: 1px solid var(--line);
 }
 
+@keyframes caption-desk-published-pulse {
+  0%,
+  100% {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 0 transparent;
+  }
+  35% {
+    background-color: var(--accent-soft);
+    box-shadow: inset 3px 0 0 0 var(--accent);
+  }
+  65% {
+    background-color: color-mix(in srgb, var(--accent-soft) 55%, transparent);
+    box-shadow: inset 3px 0 0 0 color-mix(in srgb, var(--accent) 65%, transparent);
+  }
+}
+
+.caption-desk-published-pulse {
+  animation: caption-desk-published-pulse 900ms ease-out 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .caption-desk-published-pulse {
+    animation: none;
+  }
+}
+
 .caption-desk-shortcut-hint {
   color: var(--status-neutral-text);
   background: var(--status-neutral-bg);
@@ -988,10 +1014,17 @@ select:focus-visible {
 
 .caption-review-editor:not([data-draft=""])::after {
   color: var(--draft-text);
-  content: " " attr(data-draft);
   font-style: italic;
   pointer-events: none;
   white-space: pre-wrap;
+}
+
+.caption-review-editor:not([data-draft=""])[data-draft-join="false"]::after {
+  content: " " attr(data-draft);
+}
+
+.caption-review-editor:not([data-draft=""])[data-draft-join="true"]::after {
+  content: attr(data-draft);
 }
 
 @media (max-width: 767px) {

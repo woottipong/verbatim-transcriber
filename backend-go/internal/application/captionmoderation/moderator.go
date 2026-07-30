@@ -21,12 +21,13 @@ var (
 )
 
 type SourceSegment struct {
-	ID           string
-	Provider     string
-	Text         string
-	IsFinal      bool
-	Sequence     uint64
-	LanguageCode string
+	ID               string
+	Provider         string
+	Text             string
+	IsFinal          bool
+	Sequence         uint64
+	LanguageCode     string
+	JoinWithoutSpace bool
 }
 
 type PublishCommand struct {
@@ -140,6 +141,23 @@ func (m *Moderator) ObserveCurrentDraft(segment SourceSegment) bool {
 	}
 	copy := segment
 	m.draft = &copy
+	return true
+}
+
+// ClearDraft removes a provider Draft after its complete text was already
+// promoted and the provider final contains no remaining suffix.
+func (m *Moderator) ClearDraft(segment SourceSegment) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	segment.ID = strings.TrimSpace(segment.ID)
+	segment.Provider = strings.ToLower(strings.TrimSpace(segment.Provider))
+	if segment.ID == "" || segment.Provider != m.provider || !segment.IsFinal ||
+		m.draft == nil || m.draft.ID != segment.ID ||
+		segment.Sequence < m.draft.Sequence {
+		return false
+	}
+	m.draft = nil
 	return true
 }
 

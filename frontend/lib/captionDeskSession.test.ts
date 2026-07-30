@@ -286,6 +286,84 @@ test('a matching Final clears its Draft preview and enters review once', () => {
   assert.equal(session.getSnapshot().isDraftActive, false);
 });
 
+test('a Draft clear removes a retracted tail without adding caption text', () => {
+  const session = new CaptionDeskSession();
+  session.ingestOperatorPacket(packet({
+    type: 'caption.draft', provider: 'google',
+    source: { segmentId: 'g-1', text: 'stable phrase mutable tail', provider: 'google', isFinal: false, sequence: 10 },
+  }));
+  session.ingestOperatorPacket(packet({
+    type: 'caption.pending', provider: 'google',
+    source: { segmentId: 'g-1:early:1', text: 'stable phrase', provider: 'google', isFinal: true, sequence: 11 },
+  }));
+  session.ingestOperatorPacket(packet({
+    type: 'caption.draft-cleared', provider: 'google',
+    source: { segmentId: 'g-1', text: 'stable phrase', provider: 'google', isFinal: true, sequence: 12 },
+  }));
+
+  assert.equal(session.getSnapshot().reviewText, 'stable phrase');
+  assert.equal(session.getSnapshot().draftPreview, '');
+  assert.equal(session.getSnapshot().isDraftActive, false);
+  assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-1:early:1']);
+});
+
+test('a promoted prefix and its newer Draft tail remain correct in either packet order', () => {
+  for (const order of ['pending-first', 'draft-first'] as const) {
+    const session = new CaptionDeskSession();
+    session.ingestOperatorPacket(packet({
+      type: 'caption.draft', provider: 'google',
+      source: { segmentId: 'g-1', text: 'stable phrase mutable tail', provider: 'google', isFinal: false, sequence: 10 },
+    }));
+    const promoted = {
+      type: 'caption.pending' as const,
+      provider: 'google',
+      source: { segmentId: 'g-1:early:1', text: 'stable phrase', provider: 'google', isFinal: true, sequence: 11 },
+    };
+    const tail = {
+      type: 'caption.draft' as const,
+      provider: 'google',
+      source: {
+        segmentId: 'g-1',
+        text: 'mutable tail',
+        provider: 'google',
+        isFinal: false,
+        sequence: 12,
+        joinWithoutSpace: true,
+      },
+    };
+    for (const message of order === 'pending-first' ? [promoted, tail] : [tail, promoted]) {
+      session.ingestOperatorPacket(packet(message));
+    }
+
+    assert.equal(session.getSnapshot().reviewText, 'stable phrase', order);
+    assert.equal(session.getSnapshot().draftPreview, 'mutable tail', order);
+    assert.equal(session.getSnapshot().draftJoinWithoutSpace, true, order);
+    assert.equal(session.getSnapshot().isDraftActive, true, order);
+  }
+});
+
+test('bounded Thai continuation chunks do not invent spaces', () => {
+  const session = new CaptionDeskSession();
+  session.ingestOperatorPacket(packet({
+    type: 'caption.pending', provider: 'google',
+    source: { segmentId: 'th-1:early:1', text: 'ภาษาไทยก้อนแรก', provider: 'google', isFinal: true, sequence: 1 },
+  }));
+  session.ingestOperatorPacket(packet({
+    type: 'caption.pending', provider: 'google',
+    source: {
+      segmentId: 'th-1:early:2',
+      text: 'ต่อเนื่องก้อนสอง',
+      provider: 'google',
+      isFinal: true,
+      sequence: 2,
+      joinWithoutSpace: true,
+    },
+  }));
+
+  assert.equal(session.getSnapshot().reviewText, 'ภาษาไทยก้อนแรกต่อเนื่องก้อนสอง');
+  assert.equal(session.getSnapshot().rawText, 'ภาษาไทยก้อนแรกต่อเนื่องก้อนสอง');
+});
+
 test('interleaved Draft segment IDs cannot suppress their later Finals', () => {
   const session = new CaptionDeskSession();
   session.ingestOperatorPacket(packet({
