@@ -326,6 +326,8 @@ Start here, then move to the document that owns the detail:
 
 | Document | Use it for |
 | --- | --- |
+| [Interactive System Flow](docs/captionlive-system-flow.html) | Interactive data pipeline step-by-step playback, WebRTC audio, raw and approved transcript lanes |
+| [Interactive Product Surfaces](docs/captionlive-product-surface.html) | Interactive guide to Control Room, Audio Source, Caption Desk, and Transcript surfaces |
 | [Frontend guide](frontend/README.md) | Routes, browser requirements, transcript UI state, frontend environment |
 | [Backend guide](backend-go/README.md) | Provider behavior, environment variables, HTTP/WebSocket contracts |
 | [LiveKit local setup](livekit/README.md) | Containers, ports, verification, and production networking checklist |

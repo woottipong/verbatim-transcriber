@@ -1,0 +1,1248 @@
+<!doctype html>
+<html lang="th">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>สถาปัตยกรรม 4 ส่วนการทำงาน · CaptionLive Product Surfaces</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: #090e17;
+      --canvas-raised: #0b1120;
+      --surface: #111827;
+      --surface-raised: #1f2937;
+      --line: rgba(148, 163, 184, .18);
+      --line-strong: rgba(148, 163, 184, .34);
+      --ink: #f1f5f9;
+      --muted: #94a3b8;
+      --subtle: #64748b;
+      --accent: #2dd4bf;
+      --accent-strong: #0f766e;
+      --audio: #38bdf8;
+      --provider: #fbbf24;
+      --approved: #34d399;
+      --websocket: #a78bfa;
+      --danger: #f87171;
+      --radius-lg: 18px;
+      --radius-md: 12px;
+      --shadow: 0 24px 60px rgba(2, 6, 23, .34);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      min-width: 320px;
+      background: var(--canvas);
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Sarabun", "Noto Sans Thai", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 18% 0%, rgba(45, 212, 191, .12), transparent 40rem),
+        radial-gradient(circle at 82% 100%, rgba(56, 189, 248, .1), transparent 40rem),
+        url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M0 0h40v40H0V0zm1 1h38v38H1V1z' fill='%23ffffff' fill-opacity='0.02' fill-rule='evenodd'/%3E%3C/svg%3E"),
+        var(--canvas);
+    }
+
+    button {
+      min-width: 44px;
+      min-height: 44px;
+      font: inherit;
+    }
+
+    :focus-visible {
+      outline: 3px solid rgba(45, 212, 191, .65);
+      outline-offset: 3px;
+      scroll-margin-block: 1rem;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .skip-link {
+      position: fixed;
+      z-index: 10;
+      top: .75rem;
+      left: .75rem;
+      min-width: 44px;
+      min-height: 44px;
+      padding: .7rem 1rem;
+      color: var(--canvas);
+      background: var(--accent);
+      border-radius: var(--radius-md);
+      transform: translateY(-160%);
+      transition: transform 160ms ease;
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    .presentation {
+      width: min(100% - 2rem, 1600px);
+      min-height: 100vh;
+      margin: 0 auto;
+      padding: 1.25rem 0 2.5rem;
+    }
+
+    .presentation-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 0 0 1.25rem;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: .8rem;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      display: grid;
+      flex: 0 0 auto;
+      width: 2.5rem;
+      height: 2.5rem;
+      place-items: center;
+      overflow: hidden;
+      color: var(--canvas);
+      font-weight: 800;
+      background: var(--accent);
+      border-radius: .7rem;
+    }
+
+    .brand-mark img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      padding: .45rem;
+    }
+
+    .eyebrow {
+      margin: 0 0 .25rem;
+      color: var(--accent);
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(1.4rem, 2.5vw, 1.85rem);
+      line-height: 1.25;
+      font-weight: 800;
+      background: linear-gradient(to right, #fff, #94a3b8);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      letter-spacing: -0.02em;
+    }
+
+    .surfaces-intro {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 1.5rem;
+      padding: 1.5rem 0 1.5rem;
+    }
+
+    .surfaces-intro h2 {
+      margin: 0;
+      font-size: clamp(1.5rem, 2.8vw, 2.2rem);
+      line-height: 1.25;
+      font-weight: 800;
+      background: linear-gradient(to right, #fff, #94a3b8);
+      -webkit-background-clip: text;
+      background-clip: text;
+      color: transparent;
+      letter-spacing: -0.02em;
+    }
+
+    .surfaces-intro>p {
+      max-width: 28rem;
+      margin: 0;
+      color: var(--muted);
+      font-size: .9rem;
+      line-height: 1.6;
+      text-align: right;
+    }
+
+    /* Workflow Sequence Banner */
+    .workflow-sequence {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .5rem;
+      padding: .85rem 1.25rem;
+      margin-bottom: 1.75rem;
+      background: rgba(16, 24, 39, .85);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-md);
+    }
+
+    .workflow-step {
+      display: flex;
+      align-items: center;
+      gap: .65rem;
+      flex: 1 1 0;
+      min-width: 0;
+    }
+
+    .workflow-arrow {
+      flex: 0 0 auto;
+      width: 1.1rem;
+      height: 1.1rem;
+      color: var(--accent);
+      opacity: .65;
+      margin: 0 .25rem;
+    }
+
+    .workflow-number {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.8rem;
+      height: 1.8rem;
+      flex-shrink: 0;
+      background: var(--surface-raised);
+      color: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 50%;
+      font-size: .78rem;
+      font-weight: 800;
+    }
+
+    .workflow-info {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    .workflow-title {
+      font-size: .82rem;
+      font-weight: 700;
+      color: var(--ink);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .workflow-desc {
+      font-size: .71rem;
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Surface Story Cards Grid */
+    .surface-story {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1.25rem;
+      padding: 0;
+      margin: 0;
+      list-style: none;
+    }
+
+    .surface-story-card {
+      display: flex;
+      flex-direction: column;
+      padding: clamp(1.2rem, 2vw, 1.5rem);
+      background: rgba(17, 24, 39, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05), inset 0 1px 1px rgba(255, 255, 255, 0.1), 0 8px 24px rgba(0, 0, 0, 0.4);
+      transition: all 0.3s cubic-bezier(0.2, 0, 0, 1);
+    }
+
+    .surface-story-card:hover {
+      border-color: rgba(45, 212, 191, 0.4);
+      transform: translateY(-4px);
+      box-shadow: 0 0 0 1px rgba(45, 212, 191, 0.3), inset 0 1px 1px rgba(255, 255, 255, 0.2), 0 12px 32px rgba(0, 0, 0, 0.6);
+    }
+
+    .card-header-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: .5rem;
+      flex-wrap: wrap;
+    }
+
+    .surface-index {
+      color: var(--accent);
+      font-size: .75rem;
+      font-weight: 800;
+      letter-spacing: .08em;
+    }
+
+    .route-badge {
+      padding: .2rem .55rem;
+      color: var(--audio);
+      font: 700 .68rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: rgba(56, 189, 248, .12);
+      border-radius: .35rem;
+      border: 1px solid rgba(56, 189, 248, .28);
+      max-width: 100%;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .surface-story-card h3 {
+      margin: .85rem 0 0;
+      font-size: clamp(1.2rem, 1.7vw, 1.55rem);
+      line-height: 1.2;
+      font-weight: 700;
+    }
+
+    .surface-role {
+      margin: .3rem 0 0;
+      color: var(--muted);
+      font-size: .72rem;
+      font-weight: 700;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+    }
+
+    .surface-story-card>p:last-child {
+      margin: 1.15rem 0 0;
+      color: var(--muted);
+      font-size: .88rem;
+      line-height: 1.55;
+    }
+
+    /* Visual Metaphors for surfaces */
+    .surface-metaphor {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 7.5rem;
+      margin: 1rem 0 0;
+      padding: .85rem;
+      background: var(--canvas);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+    }
+
+    /* Metaphor 1: Control Room */
+    .metaphor-control {
+      display: flex;
+      flex-direction: column;
+      gap: .45rem;
+      width: 100%;
+    }
+
+    .metaphor-control-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: .4rem .6rem;
+      background: var(--surface-raised);
+      border-radius: .4rem;
+      font-size: .72rem;
+      font-weight: 700;
+      color: var(--ink);
+    }
+    .metaphor-control-bar span:last-child {
+      animation: pulse-glow 2s infinite;
+      border-radius: 999px;
+      padding: 0 4px;
+    }
+
+    .metaphor-control-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: .4rem;
+    }
+
+    .metaphor-chip {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: .3rem;
+      padding: .35rem;
+      font-size: .67rem;
+      font-weight: 700;
+      background: rgba(45, 212, 191, .1);
+      color: var(--accent);
+      border-radius: .3rem;
+      border: 1px dashed rgba(45, 212, 191, .3);
+    }
+
+    @keyframes wave-bounce {
+      0%, 100% { height: 1.5rem; }
+      50% { height: 3rem; }
+    }
+    @keyframes pulse-glow {
+      0% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0.4); }
+      70% { box-shadow: 0 0 0 6px rgba(45, 212, 191, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(45, 212, 191, 0); }
+    }
+    @keyframes typing-cursor {
+      0%, 100% { border-right-color: transparent; }
+      50% { border-right-color: var(--accent); }
+    }
+
+    /* Metaphor 2: Audio Source Wave */
+    .surface-metaphor--wave {
+      gap: .35rem;
+      justify-content: center;
+    }
+
+    .surface-metaphor--wave::before,
+    .surface-metaphor--wave::after {
+      width: .3rem;
+      content: "";
+      background: var(--audio);
+      border-radius: 999px;
+      box-shadow: .7rem 1.1rem 0 var(--audio), 1.4rem -.85rem 0 var(--audio), 2.1rem .5rem 0 var(--audio), 2.8rem -1.35rem 0 var(--audio), -0.7rem -.7rem 0 var(--audio), -1.4rem 1.3rem 0 var(--audio), -2.1rem -.15rem 0 var(--audio), -2.8rem .75rem 0 var(--audio);
+    }
+
+    .surface-metaphor--wave::before {
+      height: 2.5rem;
+      animation: wave-bounce 1.2s ease-in-out infinite;
+    }
+
+    .surface-metaphor--wave::after {
+      height: .85rem;
+      opacity: .55;
+      transform: translateY(1.4rem);
+      animation: wave-bounce 1.5s ease-in-out infinite 0.2s;
+    }
+
+    .mic-live-tag {
+      position: absolute;
+      bottom: .5rem;
+      right: .5rem;
+      display: flex;
+      align-items: center;
+      gap: .35rem;
+      font-size: .64rem;
+      font-weight: 800;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, .14);
+      padding: .2rem .4rem;
+      border-radius: 999px;
+    }
+
+    .mic-live-tag::before {
+      width: .4rem;
+      height: .4rem;
+      content: "";
+      background: var(--audio);
+      border-radius: 50%;
+      box-shadow: 0 0 8px var(--audio);
+    }
+
+    /* Metaphor 3: Caption Desk Editor */
+    .surface-metaphor--edit {
+      align-items: flex-start;
+      flex-direction: column;
+      gap: .4rem;
+      padding: 1rem;
+      color: var(--ink);
+      background: rgba(11, 17, 32, .85);
+      border-left: 3px solid var(--accent);
+    }
+
+    .surface-metaphor--edit del {
+      color: var(--danger);
+      text-decoration-thickness: 2px;
+    }
+
+    .surface-metaphor--edit ins {
+      color: var(--approved);
+      text-decoration: none;
+      border-right: 2px solid var(--accent);
+      padding-right: 2px;
+      animation: typing-cursor 1s step-end infinite;
+    }
+
+    .surface-metaphor--edit kbd {
+      padding: .2rem .4rem;
+      margin-top: .15rem;
+      color: #d1fae5;
+      font: 700 .65rem/1.2 ui-monospace, SFMono-Regular, Menlo, monospace;
+      background: rgba(52, 211, 153, .14);
+      border-radius: .25rem;
+      border: 1px solid rgba(52, 211, 153, .3);
+    }
+
+    /* Metaphor 4: Transcript Lines */
+    .metaphor-lines-box {
+      display: flex;
+      flex-direction: column;
+      gap: .4rem;
+      width: 100%;
+      text-align: left;
+    }
+
+    .line-item {
+      padding: .35rem .5rem;
+      background: var(--surface);
+      border-radius: .35rem;
+      font-size: .74rem;
+      border-left: 2px solid var(--subtle);
+    }
+
+    .line-item--draft {
+      border-left-color: var(--provider);
+      color: #fde68a;
+    }
+
+    .line-item--final {
+      border-left-color: var(--approved);
+      color: var(--ink);
+    }
+
+    /* Deep Surface Explorer Component (Spacious Single-Flow Design) */
+    .surface-detail-section {
+      margin-top: 2.25rem;
+      padding: 2rem 2.25rem;
+      background: rgba(17, 24, 39, 0.6);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.05);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05), inset 0 1px 1px rgba(255, 255, 255, 0.1), 0 8px 32px rgba(0, 0, 0, 0.5);
+    }
+
+    .surface-detail-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1.5rem;
+      margin-bottom: 1.75rem;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 1.25rem;
+      flex-wrap: wrap;
+    }
+
+    .surface-tabs {
+      display: flex;
+      gap: .4rem;
+      padding: .3rem;
+      background: var(--canvas);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      flex-wrap: wrap;
+    }
+
+    .surface-tab {
+      padding: .55rem 1.1rem;
+      color: var(--muted);
+      font-size: .88rem;
+      font-weight: 600;
+      cursor: pointer;
+      background: transparent;
+      border: 0;
+      border-radius: .45rem;
+      transition: all 180ms ease;
+    }
+
+    .surface-tab[aria-selected="true"] {
+      color: #ffffff;
+      background: var(--accent-strong);
+      box-shadow: 0 4px 14px rgba(15, 118, 110, .4);
+    }
+
+    .surface-tab:hover:not([aria-selected="true"]) {
+      color: var(--ink);
+      background: var(--surface);
+    }
+
+    /* Single Flow Panel Layout */
+    .tab-panel-single {
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .panel-intro-block {
+      display: flex;
+      flex-direction: column;
+      gap: .35rem;
+    }
+
+    .panel-intro-header {
+      display: flex;
+      align-items: center;
+      gap: .75rem;
+      flex-wrap: wrap;
+    }
+
+    .panel-plane-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: .2rem .6rem;
+      font-size: .68rem;
+      font-weight: 800;
+      letter-spacing: .06em;
+      border-radius: 999px;
+      border: 1px solid transparent;
+    }
+
+    .badge--admin {
+      color: var(--accent);
+      background: rgba(45, 212, 191, .12);
+      border-color: rgba(45, 212, 191, .3);
+    }
+
+    .badge--stream {
+      color: var(--audio);
+      background: rgba(56, 189, 248, .12);
+      border-color: rgba(56, 189, 248, .3);
+    }
+
+    .badge--desk {
+      color: var(--approved);
+      background: rgba(52, 211, 153, .12);
+      border-color: rgba(52, 211, 153, .3);
+    }
+
+    .badge--viewer {
+      color: var(--provider);
+      background: rgba(251, 191, 36, .12);
+      border-color: rgba(251, 191, 36, .3);
+    }
+
+    .tab-panel-single h3 {
+      margin: 0;
+      font-size: 1.45rem;
+      color: var(--ink);
+      font-weight: 700;
+      line-height: 1.3;
+    }
+
+    .tab-panel-single p.panel-summary {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.65;
+      font-size: .93rem;
+      max-width: 56rem;
+    }
+
+    /* Top Metadata Bar */
+    .spec-metadata-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.25rem;
+      background: var(--canvas);
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-md);
+      padding: 1.1rem 1.4rem;
+    }
+
+    .spec-meta-cell {
+      display: flex;
+      flex-direction: column;
+      gap: .25rem;
+    }
+
+    .spec-meta-label {
+      font-size: .7rem;
+      font-weight: 700;
+      color: var(--subtle);
+      text-transform: uppercase;
+      letter-spacing: .06em;
+    }
+
+    .spec-meta-val {
+      font-size: .9rem;
+      color: var(--ink);
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    .spec-meta-val code {
+      color: #d1fae5;
+      font: 700 .82rem/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    /* 3 Feature Pillars Grid */
+    .arch-pillars-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1.25rem;
+    }
+
+    .arch-pillar-card {
+      display: flex;
+      flex-direction: column;
+      gap: .45rem;
+      padding: 1.25rem 1.35rem;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-md);
+      transition: border-color 180ms ease, transform 180ms ease;
+    }
+
+    .arch-pillar-card:hover {
+      border-color: rgba(45, 212, 191, .4);
+      transform: translateY(-2px);
+    }
+
+    .arch-pillar-icon {
+      font-size: 1.35rem;
+      line-height: 1;
+      margin-bottom: .15rem;
+    }
+
+    .arch-pillar-title {
+      font-size: .95rem;
+      font-weight: 700;
+      color: var(--ink);
+    }
+
+    .arch-pillar-desc {
+      margin: 0;
+      font-size: .84rem;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .surfaces-note {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding: 1.25rem 0 0;
+      margin-top: 1.5rem;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: .85rem;
+    }
+
+    .surfaces-note p {
+      margin: 0;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 1100px) {
+      .workflow-sequence {
+        flex-wrap: wrap;
+        gap: .85rem;
+      }
+
+      .workflow-arrow {
+        display: none;
+      }
+    }
+
+    @media (max-width: 1024px) {
+      .surface-story {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .spec-metadata-row {
+        grid-template-columns: 1fr;
+        gap: .85rem;
+      }
+
+      .arch-pillars-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 767px) {
+      .presentation-header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .surface-detail-section {
+        padding: 1.25rem;
+      }
+
+      .workflow-sequence {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .surface-story {
+        grid-template-columns: 1fr;
+      }
+
+      .surfaces-note {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <a class="skip-link" href="#presentation">ข้ามไปยังเนื้อหาหลัก</a>
+  <main id="presentation" class="presentation" tabindex="-1">
+    <!-- Main Header -->
+    <header class="presentation-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">
+          <img src="../frontend/public/captionlive-mark.svg" alt=""
+            onerror="this.hidden=true;this.nextElementSibling.hidden=false">
+          <span hidden>CL</span>
+        </span>
+        <div>
+          <p class="eyebrow">CaptionLive Architecture</p>
+          <h1>Product Surfaces Guide</h1>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Section -->
+    <section id="surfaces-view">
+
+      <!-- End-to-End Operating Sequence Banner -->
+      <div class="workflow-sequence" aria-label="ลำดับการทำงานต่อเนื่องในระบบ">
+        <div class="workflow-step">
+          <div class="workflow-number">1</div>
+          <div class="workflow-info">
+            <span class="workflow-title">1. บริหารจัดการห้องและเอเจนต์</span>
+            <span class="workflow-desc">Control Room (`#admin`)</span>
+          </div>
+        </div>
+
+        <svg class="workflow-arrow" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h14M12 5l7 7-7 7" />
+        </svg>
+
+        <div class="workflow-step">
+          <div class="workflow-number">2</div>
+          <div class="workflow-info">
+            <span class="workflow-title">2. สตรีมสัญญาณเสียงสด</span>
+            <span class="workflow-desc">Audio Source (`#stream`)</span>
+          </div>
+        </div>
+
+        <svg class="workflow-arrow" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h14M12 5l7 7-7 7" />
+        </svg>
+
+        <div class="workflow-step">
+          <div class="workflow-number">3</div>
+          <div class="workflow-info">
+            <span class="workflow-title">3. ตรวจทานและอนุมัติแคปชัน</span>
+            <span class="workflow-desc">Caption Desk (`#caption-desk`)</span>
+          </div>
+        </div>
+
+        <svg class="workflow-arrow" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+          stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12h14M12 5l7 7-7 7" />
+        </svg>
+
+        <div class="workflow-step">
+          <div class="workflow-number">4</div>
+          <div class="workflow-info">
+            <span class="workflow-title">4. แสดงผลและส่งออกข้อมูล</span>
+            <span class="workflow-desc">Transcript Viewer (`#viewer`)</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4 Surface Cards Overview Grid -->
+      <ol class="surface-story" aria-label="รายการสี่ส่วนการทำงานหลักของระบบ CaptionLive">
+        <!-- 1. Control Room -->
+        <li class="surface-story-card">
+          <div class="card-header-row">
+            <span class="surface-index">SURFACE 01</span>
+            <span class="route-badge" title="/#admin">#admin</span>
+          </div>
+          <h3>Control Room</h3>
+          <p class="surface-role">Admin &amp; Control</p>
+
+          <div class="surface-metaphor metaphor-control" aria-hidden="true">
+            <div class="metaphor-control-bar">
+              <span>Room: EVENT-01</span>
+              <span style="color:var(--approved)">• ACTIVE</span>
+            </div>
+            <div class="metaphor-control-grid">
+              <div class="metaphor-chip">Google STT</div>
+              <div class="metaphor-chip">Gemini Live</div>
+              <div class="metaphor-chip">Azure Speech</div>
+              <div class="metaphor-chip">GPT Whisper</div>
+            </div>
+          </div>
+
+          <p>บริหารจัดการห้อง LiveKit ควบคุมการทำงานของ Provider Agents และออกโทเคนกำกับสิทธิ์การเข้าถึงระบบ</p>
+        </li>
+
+        <!-- 2. Audio Source -->
+        <li class="surface-story-card">
+          <div class="card-header-row">
+            <span class="surface-index">SURFACE 02</span>
+            <span class="route-badge" title="/#stream?room=<room_name>">#stream?room=...</span>
+          </div>
+          <h3>Audio Source</h3>
+          <p class="surface-role">Audio Stream</p>
+
+          <div class="surface-metaphor surface-metaphor--wave" aria-hidden="true">
+            <span class="mic-live-tag">Opus WebRTC</span>
+          </div>
+
+          <p>สตรีมเสียงพูดสดจากไมโครโฟนหรือ Chrome Tab เข้าสู่ LiveKit Room ผ่าน WebRTC ด้วย Opus Codec</p>
+        </li>
+
+        <!-- 3. Caption Desk -->
+        <li class="surface-story-card">
+          <div class="card-header-row">
+            <span class="surface-index">SURFACE 03</span>
+            <span class="route-badge"
+              title="/#caption-desk?room=<room>&amp;provider=<provider>">#caption-desk?room=...</span>
+          </div>
+          <h3>Caption Desk</h3>
+          <p class="surface-role">Review &amp; Approve</p>
+
+          <div class="surface-metaphor surface-metaphor--edit" aria-hidden="true">
+            <div><del>เจ็บน่าอก</del><ins>เจ็บหน้าอก</ins></div>
+            <kbd>Enter · Publish Caption</kbd>
+          </div>
+
+          <p>พื้นที่ตรวจทานและแก้ไขข้อความถอดเสียง (Final) พร้อมระบบอนุมัติการเผยแพร่แคปชันด้วยคีย์บอร์ดลัด</p>
+        </li>
+
+        <!-- 4. Transcript Viewer -->
+        <li class="surface-story-card">
+          <div class="card-header-row">
+            <span class="surface-index">SURFACE 04</span>
+            <span class="route-badge" title="/#viewer?room=<room_name>&amp;autoconnect=1">#viewer?room=...</span>
+          </div>
+          <h3>Transcript</h3>
+          <p class="surface-role">Viewer &amp; Export</p>
+
+          <div class="surface-metaphor" aria-hidden="true">
+            <div class="metaphor-lines-box">
+              <div class="line-item line-item--draft">Draft: ผู้ป่วยมีอาการ...</div>
+              <div class="line-item line-item--final">Final: ผู้ป่วยมีอาการเจ็บหน้าอก</div>
+            </div>
+          </div>
+
+          <p>แสดงผลข้อความถอดเสียงสด (Read-only) รองรับการแสดงผลแปลสองภาษาขนานกัน (Gemini) และส่งออกไฟล์ .txt</p>
+        </li>
+      </ol>
+
+      <!-- Deep Dive Tabs Section -->
+      <section class="surface-detail-section" aria-labelledby="detail-heading">
+        <div class="surface-detail-header">
+          <div>
+            <p class="eyebrow" style="margin:0 0 .25rem">Interface Details</p>
+            <h3 id="detail-heading" style="margin:0;font-size:1.45rem">รายละเอียดและข้อกำหนดของแต่ละหน้าจอ</h3>
+          </div>
+          <div class="surface-tabs" role="tablist" aria-label="เลือกดูรายละเอียดแต่ละ Surface">
+            <button type="button" role="tab" id="tab-admin" aria-selected="true" aria-controls="panel-admin"
+              data-tab="admin">Control Room</button>
+            <button type="button" role="tab" id="tab-stream" aria-selected="false" aria-controls="panel-stream"
+              data-tab="stream">Audio Source</button>
+            <button type="button" role="tab" id="tab-desk" aria-selected="false" aria-controls="panel-desk"
+              data-tab="desk">Caption Desk</button>
+            <button type="button" role="tab" id="tab-viewer" aria-selected="false" aria-controls="panel-viewer"
+              data-tab="viewer">Transcript Viewer</button>
+          </div>
+        </div>
+
+        <!-- Tab Panels Container -->
+        <div id="tab-content-container">
+          <!-- Panel 1: Control Room -->
+          <div id="panel-admin" role="tabpanel" aria-labelledby="tab-admin" class="tab-panel-grid">
+            <div class="panel-description">
+              <span class="panel-plane-badge badge--admin">CONTROL PLANE</span>
+              <h3>Control Room (ส่วนควบคุมระบบ)</h3>
+              <p>ศูนย์กลางการบริหารจัดการห้องสื่อสารเรียลไทม์ (LiveKit Room) สั่งการวงจรชีวิตของเอเจนต์ถอดเสียง
+                และออกโทเคนกำกับสิทธิ์ดิจิทัลแก่ทุกส่วนงาน</p>
+
+              <ul class="spec-list">
+                <li class="spec-item">
+                  <span class="spec-item-title">เส้นทาง URL (Route)</span>
+                  <span class="spec-item-value"><code>/#admin</code> หรือ <code>/</code></span>
+                </li>
+                <li class="spec-item">
+                  <span class="spec-item-title">โปรโตคอลและความปลอดภัย</span>
+                  <span class="spec-item-value">HTTP REST API (Go Backend Fiber Framework) +
+                    <code>CONTROL_API_KEY</code></span>
+                </li>
+                <li class="spec-item">
+                  <span class="spec-item-title">กลุ่มผู้ใช้งานหลัก</span>
+                  <span class="spec-item-value">Administrator / System Operator</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="panel-architecture-card">
+              <p class="architecture-title">Key System Components</p>
+
+              <div class="arch-feature-box">
+                <div class="arch-feature-title">
+                  <span style="color:var(--accent)">⚡</span> Room Provisioning Manager
+                </div>
+                <p class="arch-feature-desc">สร้าง เปิด หรือปิดห้องสื่อสารเรียลไทม์ ตรวจสอบการเชื่อมต่อของ WebRTC Room
+                </p>
+              </div>
+
+              <div class="arch-feature-box">
+                <div class="arch-feature-title">
+                  <span style="color:var(--accent)">🤖</span> Provider Agent Supervisor
+                </div>
+                <p class="arch-feature-desc">สวิตช์เปิด/ปิดวงจรชีวิตเอเจนต์ถอดเสียง Google STT, Gemini Live, Azure, GPT
+                  Realtime</p>
+              </div>
+
+              <div class="arch-feature-box">
+                <div class="arch-feature-title">
+                  <span style="color:var(--accent)">🔑</span> Signed Token Gateway
+                </div>
+                <p class="arch-feature-desc">ออกโทเคนกำกับสิทธิ์ลงนามดิจิทัล (JWT/Token) คัดลอกส่งให้ Audio Source, Desk
+                  และ Viewer</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel 2: Audio Source -->
+          <div id="panel-stream" role="tabpanel" aria-labelledby="tab-stream" class="tab-panel-grid" hidden>
+            <div class="panel-description">
+              <span class="panel-plane-badge badge--stream">PUBLISHER PLANE</span>
+              <h3>Audio Source (สถานีสตรีมเสียงสด)</h3>
+              <p>ขอสิทธิ์และสตรีมสัญญาณเสียงสดจากไมโครโฟนหรือ Chrome Tab ตรงเข้าสู่ LiveKit Media Room ผ่าน WebRTC ด้วย
+                Opus Codec โดยไม่ผ่าน WebSocket</p>
+
+              <ul class="spec-list">
+                <li class="spec-item">
+                  <span class="spec-item-title">เส้นทาง URL (Route)</span>
+                  <span class="spec-item-value"><code>/#stream?room=&lt;room_name&gt;</code></span>
+                </li>
+                <li class="spec-item">
+                  <span class="spec-item-title">โปรโตคอลและรูปแบบสื่อ</span>
+                  <span class="spec-item-value">WebRTC Peer Connection (48kHz Opus Audio Track) ตรงสู่ LiveKit Media
+                    Server</span>
+                </li>
+                <li class="spec-item">
+                  <span class="spec-item-title">กลุ่มผู้ใช้งานหลัก</span>
+                  <span class="spec-item-value">Publisher / Audio Streamer</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="panel-architecture-card">
+              <p class="architecture-title">Key System Components</p>
+
+              <div class="arch-feature-box">
+                <div class="arch-feature-title">
+                  <span style="color:var(--audio)">🎙️</span> Audio Device Selector
+                </div>
+                <p class="arch-feature-desc">สลับเลือกอุปกรณ์ไมโครโฟน หรือเปิดโหมดจับสัญญาณเสียงจาก Chrome Tab</p>
+              </div>
+
+              <div class="arch-feature-box">
+                <div class="arch-feature-title">
+                  <span style="color:var(--audio)">📊</span> Peak Level Visualizer
+                </div>
+                <p class="arch-feature-desc">มิเตอร์แสดงระดับความดังเสียงเรียลไทม์
+                  ป้องกันปัญหาสัญญาณเสียงเบาเกินไปหรือแตกพร่า</p>
+              </div>
+
+              <div class="arch-feature-box">
+                <div class="arch-feature-title">
+                  <span style="color:var(--audio)">📡</span> WebRTC Direct Publisher
+                </div>
+                <p class="arch-feature-desc">เผยแพร่ Opus audio track ตรงเข้าสู่ LiveKit Room เพื่อให้เอเจนต์ดักจับ PCM
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel 3: Caption Desk -->
+          <div id="panel-desk" role="tabpanel" aria-labelledby="tab-desk" class="tab-panel-grid" hidden>
+            <div class="panel-description">
+              <span class="panel-plane-badge badge--desk">EDITORIAL PLANE</span>
+              <h3>Caption Desk (ส่วนตรวจทานและอนุมัติแคปชัน)</h3>
+              <p>ส่วนงานบรรณาธิการ รับข้อความ Draft และ Final เรียลไทม์ผ่าน LiveKit Data Channel
+                พร้อมโหมดแก้ไขคำผิดและกด Enter อนุมัติการเผยแพร่แคปชัน</p>
+
+              <ul class="spec-list">
+                <li class="spec-item">
+                  <span class="spec-item-title">เส้นทาง URL (Route)</span>
+                  <span
+                    class="spec-item-value"><code>/#caption-desk?room=&lt;room&gt;&amp;provider=&lt;provider&gt;</code></span>
+                </li>
+                <li class="spec-item">
+                  <span class="spec-item-title">โปรโตคอลสื่อสาร</span>
+                  <span class="spec-item-value">LiveKit Data Packets: <code>caption.operator</code> (รับ Draft) &rarr;
+                    <code>caption.publish</code> (ส่งอนุมัติ)</span>
+                </li>
+                <li class="spec-item">
+                  <span class="spec-item-title">กลุ่มผู้ใช้งานหลัก</span>
+                  <span class="spec-item-value">Editor / Verbatim Reviewer</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="panel-architecture-card">
+              <p class="architecture-title">Key System Components</p>
+
+              <div class="arch-feature-box">
+                <div class="arch-feature-title">
+                  <span style="color:var(--approved)">👁️</span> Draft Stream Preview
+                </div>
+                <p class="arch-feature-desc">แสดงข้อความร่างแบบอ่านอย่างเดียวเรียลไทม์
+                  เพื่อให้บรรณาธิการอ่านเตรียมตัวล่วงหน้า</p>
+              </div>
+
+              <div class="arch-feature-box">
+                <div class="arch-feature-title">
+                  <span style="color:var(--approved)">⌨️</span> Keyboard Fast Editor
+                </div>
+                <p class="arch-feature-desc">ข้อความ Final เข้าสู่กล่องบรรณาธิการทันที แก้ไขคำผิดด้วย `Enter`
+                  (ส่งอนุมัติ) และ `Shift+Enter` (ขึ้นบรรทัดใหม่)</p>
+              </div>
+
+              <div class="arch-feature-box">
+                <div class="arch-feature-title">
+                  <span style="color:var(--approved)">🚀</span> Publish Gateway Trigger
+                </div>
+                <p class="arch-feature-desc">เมื่อกด Enter ระบบจะส่งข้อความอนุมัติเข้า Publish Gate เผยแพร่สู่สายภายนอก
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Panel 4: Transcript Viewer -->
+          <div id="panel-viewer" role="tabpanel" aria-labelledby="tab-viewer" class="tab-panel-grid" hidden>
+            <div class="panel-description">
+              <span class="panel-plane-badge badge--viewer">CONSUMER PLANE</span>
+              <h3>Transcript (หน้าจอรับชมถอดเสียงสด)</h3>
+              <p>หน้าจอแสดงผลบทถอดเสียงสดแบบอ่านอย่างเดียว สำหรับผู้รับชมทั่วไป รับข้อมูลจาก LiveKit Data Channel
+                แสดงผลข้อความ Draft และ Final พร้อมคำแปลขนาน</p>
+
+              <ul class="spec-list">
+                <li class="spec-item">
+                  <span class="spec-item-title">เส้นทาง URL (Route)</span>
+                  <span class="spec-item-value"><code>/#viewer?room=&lt;room_name&gt;&amp;autoconnect=1</code></span>
+                </li>
+                <li class="spec-item">
+                  <span class="spec-item-title">โปรโตคอลรับข้อมูล</span>
+                  <span class="spec-item-value">LiveKit Reliable Data Channel Packet Subscription (Read-Only)</span>
+                </li>
+                <li class="spec-item">
+                  <span class="spec-item-title">กลุ่มผู้ใช้งานหลัก</span>
+                  <span class="spec-item-value">Viewer / Audience / Reader</span>
+                </li>
+              </ul>
+            </div>
+
+            <div class="panel-architecture-card">
+              <p class="architecture-title">Key System Components</p>
+
+              <div class="arch-feature-box">
+                <div class="arch-feature-title">
+                  <span style="color:var(--provider)">📑</span> Dual-View Engine
+                </div>
+                <p class="arch-feature-desc">เลือกสลับมุมมองระหว่าง Lines View (ถอดความพร้อมคำแปลสองภาษาขนานกัน) และ
+                  Text View</p>
+              </div>
+
+              <div class="arch-feature-box">
+                <div class="arch-feature-title">
+                  <span style="color:var(--provider)">🔍</span> Provider Stream Filter
+                </div>
+                <p class="arch-feature-desc">เลือกกรองดูเฉพาะเอเจนต์ Provider ที่ต้องการ (เช่น Google, Gemini, GPT)
+                  หรือดูรวมทั้งหมด</p>
+              </div>
+
+              <div class="arch-feature-box">
+                <div class="arch-feature-title">
+                  <span style="color:var(--provider)">💾</span> Sanitized Text Exporter
+                </div>
+                <p class="arch-feature-desc">ส่งออกไฟล์ข้อความบทถอดเสียงเสร็จสมบูรณ์ (`.txt`)
+                  โดยกรองแยกข้อความร่างออกโดยอัตโนมัติ</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Footer navigation links -->
+      <footer class="surfaces-note">
+        <p>ดูรายละเอียดเส้นทางสัญญาณ PCM, WebRTC และ WebSocket ได้ที่ System Flow Diagram</p>
+      </footer>
+    </section>
+  </main>
+
+  <script>
+    const tabs = Array.from(document.querySelectorAll('[role="tab"]'));
+    const panels = {
+      admin: document.querySelector('#panel-admin'),
+      stream: document.querySelector('#panel-stream'),
+      desk: document.querySelector('#panel-desk'),
+      viewer: document.querySelector('#panel-viewer'),
+    };
+
+    function selectTab(targetTabId, { focus = false } = {}) {
+      tabs.forEach(tab => {
+        const isSelected = tab.dataset.tab === targetTabId;
+        tab.setAttribute('aria-selected', String(isSelected));
+        tab.setAttribute('tabindex', isSelected ? '0' : '-1');
+        if (isSelected && focus) tab.focus();
+      });
+
+      Object.keys(panels).forEach(key => {
+        if (panels[key]) {
+          panels[key].hidden = key !== targetTabId;
+        }
+      });
+    }
+
+    tabs.forEach((tab, index) => {
+      tab.addEventListener('click', () => {
+        selectTab(tab.dataset.tab);
+      });
+
+      tab.addEventListener('keydown', (event) => {
+        let targetIndex = index;
+        if (event.key === 'ArrowRight') {
+          targetIndex = (index + 1) % tabs.length;
+        } else if (event.key === 'ArrowLeft') {
+          targetIndex = (index - 1 + tabs.length) % tabs.length;
+        } else if (event.key === 'Home') {
+          targetIndex = 0;
+        } else if (event.key === 'End') {
+          targetIndex = tabs.length - 1;
+        } else {
+          return;
+        }
+        event.preventDefault();
+        selectTab(tabs[targetIndex].dataset.tab, { focus: true });
+      });
+    });
+  </script>
+</body>
+
+</html>
