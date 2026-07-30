@@ -21,10 +21,12 @@
       --audio: #38bdf8;
       --provider: #fbbf24;
       --approved: #34d399;
+      --websocket: #a78bfa;
       --danger: #f87171;
       --radius-lg: 18px;
       --radius-md: 12px;
       --radius-sm: 8px;
+      --shadow-elegant: 0 10px 30px -10px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.03);
     }
 
     * { box-sizing: border-box; }
@@ -33,7 +35,9 @@
       margin: 0; min-height: 100vh;
       font-family: "Sarabun", "Noto Sans Thai", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       color: var(--ink);
-      background: var(--canvas);
+      background-color: var(--canvas);
+      background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+      background-size: 24px 24px;
     }
 
     button { font: inherit; cursor: pointer; }
@@ -69,7 +73,7 @@
       padding: 2rem;
       border-radius: var(--radius-lg);
       border: 1px solid var(--line);
-      box-shadow: var(--shadow-sm);
+      box-shadow: var(--shadow-elegant);
       display: grid;
       /* 4 Nodes (min 220px), 3 Horizontal Pipes (min 60px) */
       grid-template-columns: minmax(220px, 1fr) minmax(60px, 80px) minmax(220px, 1fr) minmax(60px, 80px) minmax(220px, 1fr) minmax(60px, 80px) minmax(220px, 1fr);
@@ -96,6 +100,8 @@
       background: var(--surface-raised);
       border-color: var(--accent);
       z-index: 10;
+      transform: translateY(-4px);
+      box-shadow: 0 20px 40px -8px rgba(0, 0, 0, 0.8);
     }
     .js .node.is-dimmed { 
       opacity: 0.3; 
@@ -104,12 +110,12 @@
     }
 
     .node-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.25rem; }
-    .node-role { font-size: 0.6rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--subtle); }
+    .node-role { display: flex; align-items: center; gap: 0.35rem; font-size: 0.6rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--subtle); }
     .node-status { width: 8px; height: 8px; border-radius: 50%; background: var(--subtle); }
     .node.is-active .node-status { background: var(--accent); }
 
-    .node h3 { margin: 0; font-size: 1.1rem; font-weight: 700; color: var(--ink); letter-spacing: -0.01em; }
-    .node p { margin: 0; font-size: 0.8rem; color: var(--muted); line-height: 1.5; }
+    .node h3 { margin: 0; font-size: 1.1rem; font-weight: 700; color: var(--ink); letter-spacing: -0.02em; }
+    .node p { margin: 0; font-size: 0.8rem; color: var(--muted); line-height: 1.5; font-weight: 400; }
 
     /* Mini Transcripts inside Nodes */
     .mini-transcript {
@@ -133,7 +139,7 @@
     .mini-label { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--subtle); display: block; margin-bottom: 0.35rem; }
     .mini-text { font-size: 0.85rem; font-weight: 500; color: var(--ink); margin: 0; line-height: 1.4; }
     .mini-text.draft { color: #fde68a; }
-    .mini-text code { font-family: ui-monospace, monospace; font-size: 0.8rem; color: var(--muted); }
+    .mini-text code { font-family: ui-monospace, monospace; font-size: 0.8rem; color: var(--muted); overflow-wrap: anywhere; }
     
     del { color: var(--danger); text-decoration-thickness: 1.5px; opacity: 0.8; }
     ins { color: var(--approved); text-decoration: none; font-weight: 600; }
@@ -272,13 +278,13 @@
       align-items: stretch;
       margin-top: 2rem; /* Align with first node */
     }
-    .playback-controls { display: flex; flex-direction: column; gap: 0.5rem; padding-bottom: 1.5rem; border-bottom: 1px solid rgba(255, 255, 255, 0.05); }
+    .playback-controls { display: flex; flex-direction: column; gap: 0.5rem; padding-top: 1.5rem; border-top: 1px solid rgba(255, 255, 255, 0.05); }
     .playback-controls button {
-      background: var(--surface);
-      border: 1px solid var(--line); 
-      color: var(--ink);
-      padding: 0.75rem 1.25rem; 
-      border-radius: var(--radius-sm); 
+      background: transparent;
+      border: 1px solid rgba(255,255,255,0.1); 
+      color: var(--muted);
+      padding: 0.6rem 1.25rem; 
+      border-radius: 999px; 
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
       font-size: 0.75rem; 
       font-weight: 700;
@@ -287,9 +293,9 @@
       letter-spacing: 0.1em;
     }
     .playback-controls button:hover { 
-      background: var(--surface-raised); 
-      border-color: var(--line-strong); 
-      color: #fff;
+      background: var(--surface); 
+      border-color: var(--accent); 
+      color: var(--accent);
     }
 
     .step-rail { 
@@ -409,23 +415,23 @@
     <div class="presentation-body">
       <!-- Left Sidebar: Timeline -->
       <aside class="timeline-bar">
-        <div class="playback-controls">
-          <button type="button" id="play-pause">Pause</button>
-        </div>
         <ol class="step-rail">
           <li><button type="button" data-flow-step="0" aria-current="step"><span>01</span> Capture</button></li>
           <li><button type="button" data-flow-step="1"><span>02</span> Transport</button></li>
           <li><button type="button" data-flow-step="2"><span>03</span> Transcribe</button></li>
           <li><button type="button" data-flow-step="3"><span>04</span> Draft</button></li>
           <li><button type="button" data-flow-step="4"><span>05</span> Final</button></li>
-          <li><button type="button" data-flow-step="5"><span>06</span> Desk</button></li>
+          <li><button type="button" data-flow-step="5"><span>06</span> Caption Desk</button></li>
           <li><button type="button" data-flow-step="6"><span>07</span> Deliver</button></li>
         </ol>
+        <div class="playback-controls">
+          <button type="button" id="play-pause">Pause</button>
+        </div>
       </aside>
 
       <!-- Right Content Area -->
       <div class="flow-content">
-        <div style="display: flex; justify-content: flex-end; margin-top: -0.5rem; margin-bottom: -0.5rem;">
+        <div style="display: flex; justify-content: flex-start; margin-bottom: 0.75rem;">
           <ul class="legend">
             <li><i class="legend-line" style="background: var(--audio)"></i> Audio</li>
             <li><i class="legend-line" style="background: var(--provider)"></i> Provider</li>
@@ -457,19 +463,19 @@
 
           <!-- === NODES === -->
           <article class="node node--audio" data-step="0">
-            <div class="node-header"><span class="node-role">Publisher</span><i class="node-status"></i></div>
+            <div class="node-header"><span class="node-role"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" x2="12" y1="19" y2="22"/></svg> Publisher</span><i class="node-status"></i></div>
             <h3>Audio Source</h3><p>รับและส่งสัญญาณเสียงจากไมโครโฟนหรือแท็บเบราว์เซอร์</p>
             <div class="node-tooltip">Device: Mic / Chrome Tab<br>Protocol: WebRTC (Opus)</div>
           </article>
 
           <article class="node node--room" data-step="1">
-            <div class="node-header"><span class="node-role">Media Room</span><i class="node-status"></i></div>
+            <div class="node-header"><span class="node-role"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"/><rect width="20" height="8" x="2" y="14" rx="2" ry="2"/><line x1="6" x2="6.01" y1="6" y2="6"/><line x1="6" x2="6.01" y1="18" y2="18"/></svg> Media Room</span><i class="node-status"></i></div>
             <h3>LiveKit Room</h3><p>กระจายสัญญาณเสียงแบบเรียลไทม์ผ่านสถาปัตยกรรม SFU</p>
             <div class="node-tooltip">Role: SFU<br>Audio: 48kHz PCM<br>Transport: WebRTC</div>
           </article>
 
           <article class="node node--agent" data-step="1 2 3 4">
-            <div class="node-header"><span class="node-role">Subscriber</span><i class="node-status"></i></div>
+            <div class="node-header"><span class="node-role"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></svg> Subscriber</span><i class="node-status"></i></div>
             <h3>Room Agent</h3><p>แปลงและประมวลผลสัญญาณเสียงเป็นรูปแบบ PCM เพื่อส่งเข้าระบบถอดความ</p>
             <div class="mini-transcript mini-transcript--draft">
               <span class="mini-label">Internal State</span>
@@ -479,19 +485,19 @@
           </article>
 
           <article class="node node--prov" data-step="2 3 4">
-            <div class="node-header"><span class="node-role">AI Engine</span><i class="node-status"></i></div>
+            <div class="node-header"><span class="node-role"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg> AI Engine</span><i class="node-status"></i></div>
             <h3>ASR Provider</h3><p>บริการโมเดลปัญญาประดิษฐ์ประมวลผลเสียงพูดเป็นข้อความ</p>
-            <div class="node-tooltip">Engine: Google / Gemini / Azure</div>
+            <div class="node-tooltip">Engine: Google / Gemini / Azure / GPT</div>
           </article>
 
           <article class="node node--stable" data-step="3 4">
-            <div class="node-header"><span class="node-role">Interceptor</span><i class="node-status"></i></div>
+            <div class="node-header"><span class="node-role"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg> Interceptor</span><i class="node-status"></i></div>
             <h3>Stable Interim</h3><p>พักข้อความชั่วคราวเพื่อรอให้ประโยคนิ่ง (ลดอาการคำดิ้น)</p>
             <div class="node-tooltip">Debounce Logic<br>Flicker Reduction</div>
           </article>
           
           <article class="node node--desk" data-step="3 4 5">
-            <div class="node-header"><span class="node-role">Operator</span><i class="node-status"></i></div>
+            <div class="node-header"><span class="node-role"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg> Operator</span><i class="node-status"></i></div>
             <h3>Caption Desk</h3><p>ส่วนปฏิบัติการสำหรับตรวจสอบ แก้ไข และอนุมัติข้อความก่อนเผยแพร่</p>
             <div class="mini-transcript mini-transcript--editor">
               <span class="mini-label">Editor</span>
@@ -502,7 +508,7 @@
 
 
           <article class="node node--view" data-step="6">
-            <div class="node-header"><span class="node-role">Public App</span><i class="node-status"></i></div>
+            <div class="node-header"><span class="node-role"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg> Public App</span><i class="node-status"></i></div>
             <h3>Transcript</h3><p>ส่วนแสดงผลข้อความคำบรรยายแบบเรียลไทม์สำหรับผู้ชม</p>
             <div class="mini-transcript mini-transcript--viewer">
               <span class="mini-label">Approved</span>
@@ -512,13 +518,13 @@
           </article>
 
           <article class="node node--hub" data-step="3 4 6">
-            <div class="node-header"><span class="node-role">External API</span><i class="node-status"></i></div>
+            <div class="node-header"><span class="node-role"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></svg> External API</span><i class="node-status"></i></div>
             <h3>Transcript Hub</h3><p>ศูนย์กลางส่งออกข้อมูลดิบแยกตามโมเดลสู่ระบบภายนอกผ่าน WebSocket</p>
             <div class="mini-transcript mini-transcript--socket">
               <span class="mini-label">Socket Frame</span>
-              <p class="mini-text"><code>{"text":"ผู้ป่วยมี..."}</code></p>
+              <p class="mini-text"><code>{"text":"...","isFinal":false}</code></p>
             </div>
-            <div class="node-tooltip">Output: Secure WebSocket<br>Format: Lean JSON</div>
+            <div class="node-tooltip">Scope: Signed & Provider-specific<br>Output: Read-only WebSocket</div>
           </article>
         </div>
       </div>
