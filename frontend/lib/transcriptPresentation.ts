@@ -31,6 +31,17 @@ export function snapshotCurrentSubtitle(
     };
 }
 
+export function buildFinalSubtitleAnnouncement(
+    segment: TranscriptSegment | undefined,
+    showTranslation: boolean,
+): string {
+    if (!segment?.isFinal) return '';
+    const translation = showTranslation && segment.translation?.isFinal
+        ? segment.translation.text
+        : '';
+    return [segment.text, translation].filter(Boolean).join('. ');
+}
+
 const PROVIDER_ORDER = ['google', 'gemini', 'azure', 'gpt-realtime-whisper'];
 
 export function buildProviderTranscriptPresentations(
@@ -109,7 +120,9 @@ export function selectCurrentSubtitle(
         return {
             transcripts: [{
                 ...latestTranscript,
-                text: joinSubtitleCueText(previousTranscript.text, latestTranscript.text),
+                text: latestTranscript.provider === 'caption-desk'
+                    ? previousTranscript.text + latestTranscript.text
+                    : joinSubtitleCueText(previousTranscript.text, latestTranscript.text),
                 translation: joinSubtitleTranslations(previousTranscript.translation, latestTranscript.translation),
             }],
             interims: [],

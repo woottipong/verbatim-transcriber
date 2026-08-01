@@ -34,6 +34,7 @@ export interface AgentInfo {
 export interface UseRoomViewerOptions {
     tokenEndpoint: string;  // Backend token endpoint
     fallbackTokenEndpoint?: string;
+    onPublicCaption?: (publication: { id: string; text: string }) => void;
 }
 
 export interface UseRoomViewerReturn {
@@ -119,6 +120,8 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     }
     const publicCaptionSession = publicCaptionSessionRef.current;
     const publicCaptionActiveRef = useRef(false);
+    const publicCaptionCallbackRef = useRef(options.onPublicCaption);
+    publicCaptionCallbackRef.current = options.onPublicCaption;
     const { transcripts, interimTranscripts } = useSyncExternalStore(
         transcriptSession.subscribe,
         transcriptSession.getSnapshot,
@@ -268,6 +271,13 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             if (publicCaptionActiveRef.current) {
                 publicCaptionSession.ingest(payload, participant?.identity || 'caption-desk', {
                     publicCaptionMode: true,
+                    onPublicCaptionAccepted: message => {
+                        if (!message.publicationId) return;
+                        publicCaptionCallbackRef.current?.({
+                            id: message.publicationId,
+                            text: message.text,
+                        });
+                    },
                 });
             }
             return;
@@ -315,6 +325,10 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     // Connect to LiveKit room as viewer
     const connect = useCallback(async (roomName: string) => {
         try {
+            // A manual join starts a new viewing session. Never allow finalized
+            // captions from a previous room or failed attempt to reappear.
+            transcriptSession.clear();
+            publicCaptionSession.clear();
             setConnectionState(ConnectionState.CONNECTING);
             setError(null);
             setCurrentRoomName(roomName);
@@ -358,8 +372,8 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
                         onEnded: (reason) => {
                             setRoom(null);
                             setAgents([]);
-                            transcriptSession.reset();
-                            publicCaptionSession.reset(true);
+                            transcriptSession.clear();
+                            publicCaptionSession.clear();
                             cleanupAudioElements();
                             setAudioParticipants([]);
                             if (reason !== 'replaced') setConnectionState(ConnectionState.DISCONNECTED);
@@ -400,16 +414,16 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
 
     // Disconnect from room
     const disconnect = useCallback(() => {
-        transcriptSession.reset();
-        publicCaptionSession.reset(true);
+        transcriptSession.clear();
+        publicCaptionSession.clear();
         publicCaptionActiveRef.current = false;
         roomLifecycle.disconnect();
     }, [publicCaptionSession, roomLifecycle, transcriptSession]);
 
     // Clear transcripts
     const clearTranscripts = useCallback(() => {
-        transcriptSession.reset(true);
-        publicCaptionSession.reset(true);
+        transcriptSession.clear();
+        publicCaptionSession.clear();
     }, [publicCaptionSession, transcriptSession]);
 
     const activatePublicCaptions = useCallback(() => {
@@ -425,8 +439,8 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
     // Cleanup on unmount
     useEffect(() => {
         return () => {
-            transcriptSession.reset();
-            publicCaptionSession.reset(true);
+            transcriptSession.clear();
+            publicCaptionSession.clear();
             publicCaptionActiveRef.current = false;
             roomLifecycle.dispose();
             cleanupAudioElements();

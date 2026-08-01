@@ -111,6 +111,17 @@ test('accepts an approved public caption when isFinal is omitted', () => {
     assert.deepEqual(session.getSnapshot().transcripts.map(item => item.text), ['เผยแพร่แล้ว']);
 });
 
+test('preserves approved caption whitespace exactly as published', () => {
+    const { session } = createSession('desk');
+    const text = '  บรรทัดแรก\nบรรทัด  ถัดไป  ';
+
+    session.ingest(payload({ text, publicationId: 'p-whitespace' }), 'caption-desk', {
+        publicCaptionMode: true,
+    });
+
+    assert.equal(session.getSnapshot().transcripts[0]?.text, text);
+});
+
 test('deduplicates approved public captions by publicationId', () => {
     const { session } = createSession('desk');
     const approved = payload({
@@ -122,6 +133,23 @@ test('deduplicates approved public captions by publicationId', () => {
     session.ingest(approved, 'agent-gemini', { publicCaptionMode: true });
 
     assert.deepEqual(session.getSnapshot().transcripts.map(item => item.text), ['แสดงครั้งเดียว']);
+});
+
+test('notifies live playback once for every unique approved publication', () => {
+    const { session } = createSession('desk');
+    const accepted: string[] = [];
+    const options = {
+        publicCaptionMode: true,
+        onPublicCaptionAccepted: (message: { publicationId?: string }) => {
+            if (message.publicationId) accepted.push(message.publicationId);
+        },
+    };
+
+    session.ingest(payload({ text: 'หนึ่ง', publicationId: 'p1' }), 'caption-desk', options);
+    session.ingest(payload({ text: 'หนึ่งซ้ำ', publicationId: 'p1' }), 'caption-desk', options);
+    session.ingest(payload({ text: 'สอง', publicationId: 'p2' }), 'caption-desk', options);
+
+    assert.deepEqual(accepted, ['p1', 'p2']);
 });
 
 test('rejects ordinary provider packets from the public caption session', () => {
@@ -232,6 +260,19 @@ test('removes only transient state for a disconnected source and can clear the f
     );
 
     session.reset(true);
+    assert.equal(session.getSnapshot().transcripts.length, 0);
+    assert.equal(session.getSnapshot().interimTranscripts.size, 0);
+});
+
+test('clear removes committed and transient viewer state without relying on reset flags', () => {
+    const { session, flushNext } = createSession();
+    session.ingest(payload({ text: 'ข้อความเก่า', isFinal: true, provider: 'google' }), 'agent-google');
+    session.ingest(payload({ text: 'ข้อความสด', isFinal: false, provider: 'azure' }), 'agent-azure');
+    flushNext();
+
+    const clear = (session as TranscriptSession & { clear?: () => void }).clear;
+    clear?.call(session);
+
     assert.equal(session.getSnapshot().transcripts.length, 0);
     assert.equal(session.getSnapshot().interimTranscripts.size, 0);
 });

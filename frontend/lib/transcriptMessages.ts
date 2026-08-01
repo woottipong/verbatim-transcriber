@@ -246,8 +246,8 @@ export function parsePublicCaptionMessage(value: unknown): TranscriptMessage | u
         : '';
     if (typeof candidate.text !== 'string' || !publicationId) return undefined;
 
-    const text = candidate.text.replace(/\s+/g, ' ').trim();
-    if (!text) return undefined;
+    const text = candidate.text;
+    if (!text.trim()) return undefined;
 
     return {
         type: 'transcript',

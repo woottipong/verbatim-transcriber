@@ -12,10 +12,14 @@ import {
     hasSourceLanguageLabel,
 } from '../lib/providers';
 import TranslationBlock from './TranslationBlock';
+import { useProgressiveText } from '../hooks/useProgressiveText';
+import { synchronizeTranslationTarget } from '../lib/progressiveText';
 import {
     alignSubtitlePagePairs,
-    calculateSubtitlePageDurationMs,
+    calculateQueuedSubtitlePageDurationMs,
+    fitsNbtcCaptionLine,
     resolveSubtitlePageIndex,
+    splitSubtitleTextIntoLines,
     splitSubtitleTextIntoRollingWindows,
 } from '../lib/subtitlePaging';
 
@@ -25,7 +29,13 @@ interface TranscriptRowsProps {
     variant: 'numbered' | 'detailed' | 'subtitle';
     onSubtitlePageAdvance?: () => void;
     onSubtitlePageDuration?: (durationMs: number) => void;
+    onSubtitleCueComplete?: () => void;
+    subtitleHasBacklog?: boolean;
     subtitlePaused?: boolean;
+    subtitleFollowLiveEdge?: boolean;
+    subtitlePlaybackRate?: number;
+    subtitleShowTranslation?: boolean;
+    subtitleLayoutKey?: string;
 }
 
 export const TranscriptRows = memo(function TranscriptRows({
@@ -34,7 +44,13 @@ export const TranscriptRows = memo(function TranscriptRows({
     variant,
     onSubtitlePageAdvance,
     onSubtitlePageDuration,
+    onSubtitleCueComplete,
+    subtitleHasBacklog = false,
     subtitlePaused = false,
+    subtitleFollowLiveEdge = false,
+    subtitlePlaybackRate = 1,
+    subtitleShowTranslation = true,
+    subtitleLayoutKey = '',
 }: TranscriptRowsProps) {
     if (variant === 'subtitle') {
         return (
@@ -43,7 +59,13 @@ export const TranscriptRows = memo(function TranscriptRows({
                 interims={interims}
                 onPageAdvance={onSubtitlePageAdvance}
                 onPageDuration={onSubtitlePageDuration}
+                onCueComplete={onSubtitleCueComplete}
+                hasBacklog={subtitleHasBacklog}
                 paused={subtitlePaused}
+                followLiveEdge={subtitleFollowLiveEdge}
+                playbackRate={subtitlePlaybackRate}
+                showTranslation={subtitleShowTranslation}
+                layoutKey={subtitleLayoutKey}
             />
         );
     }
@@ -75,19 +97,74 @@ function SubtitleRows({
     interims,
     onPageAdvance,
     onPageDuration,
+    onCueComplete,
+    hasBacklog,
     paused,
+    followLiveEdge,
+    playbackRate,
+    showTranslation,
+    layoutKey,
 }: {
     transcripts: readonly TranscriptSegment[];
     interims: readonly InterimTranscript[];
     onPageAdvance?: () => void;
     onPageDuration?: (durationMs: number) => void;
+    onCueComplete?: () => void;
+    hasBacklog: boolean;
     paused: boolean;
+    followLiveEdge: boolean;
+    playbackRate: number;
+    showTranslation: boolean;
+    layoutKey: string;
 }) {
-    const current = interims.at(-1) ?? transcripts.at(-1);
-    const currentIdentity = getSubtitleCueIdentity(current);
+    const rawCurrent = interims.at(-1) ?? transcripts.at(-1);
+    const currentIdentity = getSubtitleCueIdentity(rawCurrent);
+    const progressivelyRevealProvider = Boolean(rawCurrent && rawCurrent.provider !== 'caption-desk');
+    const progressiveSourceText = useProgressiveText(
+        rawCurrent?.text ?? '',
+        `${currentIdentity}:source`,
+        paused,
+        progressivelyRevealProvider,
+        playbackRate,
+    );
+    const translationTarget = showTranslation ? rawCurrent?.translation?.text ?? '' : '';
+    const synchronizedTranslationTarget = synchronizeTranslationTarget(
+        progressiveSourceText,
+        rawCurrent?.text ?? '',
+        translationTarget,
+    );
+    const progressiveTranslationText = useProgressiveText(
+        synchronizedTranslationTarget,
+        `${currentIdentity}:translation`,
+        paused,
+        progressivelyRevealProvider,
+        playbackRate,
+    );
+    const visibleTranslation = showTranslation && rawCurrent?.translation
+        ? {
+            ...rawCurrent.translation,
+            text: progressivelyRevealProvider
+                ? progressiveTranslationText
+                : rawCurrent.translation.text,
+        }
+        : undefined;
+    const current = rawCurrent ? {
+        ...rawCurrent,
+        text: progressivelyRevealProvider ? progressiveSourceText : rawCurrent.text,
+        ...(visibleTranslation ? {
+            // Translation follows the source cue instead of running a second
+            // character clock, so it remains live without moving source pages.
+            translation: visibleTranslation,
+        } : { translation: undefined }),
+    } : undefined;
+    const shouldFollowLiveEdge = followLiveEdge || progressivelyRevealProvider;
     const currentContent = current
         ? `${current.text}\u0000${current.translation?.text ?? ''}`
         : '';
+    const preserveSourceWhitespace = current?.provider === 'caption-desk';
+    const sourceLanguageCode = current?.languageCode ?? '';
+    const translationLanguageCode = current?.translation?.languageCode ?? '';
+    const translationIsFinal = current?.translation?.isFinal ?? false;
     const isDraft = current ? !('isFinal' in current) || current.isFinal === false : false;
     const sourceMeasureRef = useRef<HTMLSpanElement>(null);
     const translationMeasureRef = useRef<HTMLDivElement>(null);
@@ -109,6 +186,7 @@ function SubtitleRows({
                 createLineFitChecker(translationMeasureRef.current),
                 current.translation,
                 current.languageCode,
+                preserveSourceWhitespace,
             );
             setPages(previous => subtitlePagesEqual(previous, nextPages) ? previous : nextPages);
         };
@@ -124,7 +202,7 @@ function SubtitleRows({
             disposed = true;
             resizeObserver.disconnect();
         };
-    }, [current, currentContent]);
+    }, [currentContent, currentIdentity, layoutKey, preserveSourceWhitespace, sourceLanguageCode, translationIsFinal, translationLanguageCode]);
 
     useEffect(() => {
         const isSameCue = previousIdentityRef.current === currentIdentity;
@@ -133,24 +211,38 @@ function SubtitleRows({
             pageCount: pages.length,
             isDraft,
             isSameCue,
+            followLiveEdge: shouldFollowLiveEdge,
         }));
         previousIdentityRef.current = currentIdentity;
-    }, [currentContent, currentIdentity, isDraft, pages.length]);
+    }, [currentContent, currentIdentity, isDraft, pages.length, shouldFollowLiveEdge]);
+
+    const activePage = pages[Math.min(pageIndex, Math.max(0, pages.length - 1))];
+    const activePageDurationMs = activePage
+        ? calculateQueuedSubtitlePageDurationMs(
+            activePage.sourceText,
+            activePage.translation?.text,
+            hasBacklog,
+        )
+        : 0;
+    const hasNextPage = pageIndex < pages.length - 1;
 
     useEffect(() => {
-        if (!current || pages.length === 0) return;
+        if (!current || !activePage) return;
 
-        const page = pages[Math.min(pageIndex, pages.length - 1)];
-        const pageDurationMs = calculateSubtitlePageDurationMs(page.sourceText, page.translation?.text);
+        const pageDurationMs = activePageDurationMs;
         onPageDuration?.(pageDurationMs);
-        if (paused || pages.length <= 1 || pageIndex >= pages.length - 1) return;
+        if (paused || (!hasNextPage && !onCueComplete)) return;
 
         const timeoutId = window.setTimeout(() => {
-            setPageIndex(index => Math.min(index + 1, pages.length - 1));
-            onPageAdvance?.();
+            if (hasNextPage) {
+                setPageIndex(index => Math.min(index + 1, pages.length - 1));
+                onPageAdvance?.();
+            } else {
+                onCueComplete?.();
+            }
         }, pageDurationMs);
         return () => window.clearTimeout(timeoutId);
-    }, [current, onPageAdvance, onPageDuration, pageIndex, pages, paused]);
+    }, [activePage?.sourceText, activePage?.translation?.text, activePageDurationMs, currentIdentity, hasNextPage, onCueComplete, onPageAdvance, onPageDuration, pageIndex, paused]);
 
     if (!current) return null;
 
@@ -161,7 +253,10 @@ function SubtitleRows({
             <div className="transcript-subtitle-row">
                 <div className="transcript-subtitle-slot transcript-subtitle-slot--source">
                     <p className="transcript-source-line transcript-subtitle-row__source">
-                        <span ref={sourceMeasureRef} className="transcript-source-line__text" />
+                        <span
+                            ref={sourceMeasureRef}
+                            className={`transcript-source-line__text ${preserveSourceWhitespace ? 'transcript-source-line__text--verbatim' : ''}`}
+                        />
                     </p>
                 </div>
                 <div className="transcript-subtitle-slot transcript-subtitle-slot--translation">
@@ -174,21 +269,31 @@ function SubtitleRows({
     );
 
     if (!page) return measurement;
-    const sourceSegment = { ...current, text: page.sourceText };
     return (
         <>
             {measurement}
-            <div
-                key={`${currentIdentity}:${pageIndex}`}
-                className={`transcript-subtitle-row transcript-subtitle-row--current ${isDraft ? 'transcript-subtitle-row--draft' : ''}`}
-            >
+            <div className={`transcript-subtitle-row transcript-subtitle-row--current ${isDraft ? 'transcript-subtitle-row--draft' : ''}`}>
                 <div className="transcript-subtitle-slot transcript-subtitle-slot--source">
                     {page.sourceText && (
-                        <TranscriptSource
-                            segment={sourceSegment}
-                            className="transcript-subtitle-row__source"
-                            showLanguageLabel={false}
-                        />
+                        <p
+                            className="transcript-source-line transcript-subtitle-row__source"
+                            lang={normalizeLanguageTag(current.languageCode)}
+                            dir="auto"
+                        >
+                            <span
+                                key={`${page.sourcePageIndex}:source-lines`}
+                                className={`transcript-subtitle-lines ${page.sourcePageIndex > 0 ? 'transcript-subtitle-lines--rolling' : ''}`}
+                            >
+                                {page.sourceLines.map((line, index) => (
+                                    <span
+                                        key={`${page.sourcePageIndex}:source-line:${index}`}
+                                        className={`transcript-subtitle-line ${preserveSourceWhitespace ? 'transcript-subtitle-line--verbatim' : ''}`}
+                                    >
+                                        {line}
+                                    </span>
+                                ))}
+                            </span>
+                        </p>
                     )}
                 </div>
                 <div className={`transcript-subtitle-slot transcript-subtitle-slot--translation ${page.translation ? '' : 'transcript-subtitle-slot--empty'}`}>
@@ -210,6 +315,8 @@ function getSubtitleCueIdentity(current?: TranscriptSegment | InterimTranscript)
 
 interface SubtitlePage {
     sourceText: string;
+    sourceLines: string[];
+    sourcePageIndex: number;
     translation?: NonNullable<TranscriptSegment['translation']>;
 }
 
@@ -219,27 +326,60 @@ function buildSubtitlePages(
     translationFits: (candidate: string) => boolean,
     translation?: TranscriptSegment['translation'] | InterimTranscript['translation'],
     sourceLanguageCode?: string,
+    preserveSourceWhitespace = false,
 ): SubtitlePage[] {
-    const sourcePages = splitSubtitleTextIntoRollingWindows(sourceText, sourceFits, sourceLanguageCode);
+    const sourceFitsNbtcLine = (candidate: string) => (
+        fitsNbtcCaptionLine(candidate) && sourceFits(candidate)
+    );
+    const sourcePages = splitSubtitleTextIntoRollingWindows(
+        sourceText,
+        sourceFitsNbtcLine,
+        sourceLanguageCode,
+        preserveSourceWhitespace,
+    );
     const translationPages = splitSubtitleTextIntoRollingWindows(
         translation?.text ?? '',
         translationFits,
         translation?.languageCode,
     );
     const alignedPages = alignSubtitlePagePairs(sourcePages, translationPages);
+    const pageCount = alignedPages.length;
 
-    return alignedPages.map(page => ({
-        sourceText: page.sourceText,
-        ...(page.translationText
-            ? {
-                translation: {
-                    text: page.translationText,
-                    languageCode: translation?.languageCode ?? '',
-                    isFinal: translation?.isFinal ?? false,
-                },
-            }
-            : {}),
-    }));
+    return alignedPages.map((page, pageIndex) => {
+        const sourcePageIndex = pageIndexAtProgress(sourcePages, pageIndex, pageCount);
+        const sourceFragments = splitSubtitleTextIntoLines(
+            page.sourceText,
+            sourceFitsNbtcLine,
+            sourceLanguageCode,
+            preserveSourceWhitespace,
+        );
+        return {
+            sourceText: page.sourceText,
+            sourcePageIndex,
+            sourceLines: sourceFragments.map((fragment, index) => (
+                index < sourceFragments.length - 1
+                    ? fragment.text + fragment.separatorAfter
+                    : fragment.text
+            )),
+            ...(page.translationText
+                ? {
+                    translation: {
+                        text: page.translationText,
+                        languageCode: translation?.languageCode ?? '',
+                        isFinal: translation?.isFinal ?? false,
+                    },
+                }
+                : {}),
+        };
+    });
+}
+
+function pageIndexAtProgress(pages: string[], index: number, pageCount: number): number {
+    if (pages.length === 0) return 0;
+    return Math.min(
+        pages.length - 1,
+        Math.floor(((index + 0.5) * pages.length) / pageCount),
+    );
 }
 
 function createLineFitChecker(element: HTMLElement): (candidate: string) => boolean {
@@ -254,6 +394,9 @@ function createLineFitChecker(element: HTMLElement): (candidate: string) => bool
 function subtitlePagesEqual(left: SubtitlePage[], right: SubtitlePage[]): boolean {
     return left.length === right.length && left.every((page, index) => (
         page.sourceText === right[index]?.sourceText
+        && page.sourcePageIndex === right[index]?.sourcePageIndex
+        && page.sourceLines.length === right[index]?.sourceLines.length
+        && page.sourceLines.every((line, lineIndex) => line === right[index]?.sourceLines[lineIndex])
         && page.translation?.text === right[index]?.translation?.text
         && page.translation?.isFinal === right[index]?.translation?.isFinal
     ));
@@ -443,7 +586,9 @@ function TranscriptSource({
                     <span className="language-label__text">{formatLanguageLabel(segment.languageCode)}</span>
                 </span>
             )}
-            <span className="transcript-source-line__text">{segment.text}</span>
+            <span className={`transcript-source-line__text ${segment.provider === 'caption-desk' ? 'transcript-source-line__text--verbatim' : ''}`}>
+                {segment.text}
+            </span>
         </p>
     );
 }

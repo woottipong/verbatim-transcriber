@@ -45,6 +45,7 @@ export interface TranscriptIngestOptions {
     resolveProvider?: (sourceIdentity: string) => string;
     onProviderObserved?: (sourceIdentity: string, provider: string) => void;
     publicCaptionMode?: boolean;
+    onPublicCaptionAccepted?: (message: TranscriptMessage) => void;
 }
 
 interface TranscriptSessionOptions {
@@ -156,7 +157,7 @@ export class TranscriptSession {
         if (!options.publicCaptionMode && parsed.provider) {
             options.onProviderObserved?.(sourceIdentity, parsed.provider);
         }
-
+        if (options.publicCaptionMode) options.onPublicCaptionAccepted?.(message);
         const bufferedMessage: BufferedTranscriptMessage = {
             ...message,
             key: getTranscriptKey(message),
@@ -203,6 +204,10 @@ export class TranscriptSession {
             return;
         }
         this.publish(transcripts, new Map());
+    }
+
+    clear(): void {
+        this.reset(true);
     }
 
     private applyGemini(message: BufferedTranscriptMessage): void {

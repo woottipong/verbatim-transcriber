@@ -3,6 +3,10 @@ const SUBTITLE_MIN_PAGE_MS = 2_000;
 const SUBTITLE_MAX_PAGE_MS = 6_800;
 const SUBTITLE_IDLE_CLEAR_MS = 5_000;
 const SUBTITLE_PAGE_TRANSITION_GRACE_MS = 200;
+const SUBTITLE_BACKLOG_READING_SPEED_CPS = 34;
+const SUBTITLE_BACKLOG_MIN_PAGE_MS = 900;
+const SUBTITLE_BACKLOG_MAX_PAGE_MS = 1_800;
+export const NBTC_MAX_CAPTION_LINE_CHARACTERS = 35;
 
 type SegmenterConstructor = new (
     locales?: string | string[],
@@ -11,9 +15,17 @@ type SegmenterConstructor = new (
     segment(input: string): Iterable<{ segment: string; index: number; isWordLike?: boolean }>;
 };
 
+const segmenters = new Map<string, InstanceType<SegmenterConstructor>>();
+
 function getSegmenter(granularity: 'grapheme' | 'word', locale?: string) {
     const Segmenter = (Intl as typeof Intl & { Segmenter?: SegmenterConstructor }).Segmenter;
-    return Segmenter ? new Segmenter(locale || undefined, { granularity }) : null;
+    if (!Segmenter) return null;
+    const key = `${granularity}:${locale ?? ''}`;
+    const cached = segmenters.get(key);
+    if (cached) return cached;
+    const segmenter = new Segmenter(locale || undefined, { granularity });
+    segmenters.set(key, segmenter);
+    return segmenter;
 }
 
 export function countSubtitleCharacters(text: string): number {
@@ -27,6 +39,18 @@ export function countSubtitleCharacters(text: string): number {
     return graphemes.filter(grapheme => !/^\s+$/u.test(grapheme)).length;
 }
 
+export function countSubtitleLineCharacters(text: string): number {
+    if (!text) return 0;
+    const segmenter = getSegmenter('grapheme');
+    return segmenter
+        ? Array.from(segmenter.segment(text)).length
+        : Array.from(text).length;
+}
+
+export function fitsNbtcCaptionLine(text: string): boolean {
+    return countSubtitleLineCharacters(text) <= NBTC_MAX_CAPTION_LINE_CHARACTERS;
+}
+
 export function calculateSubtitlePageDurationMs(sourceText: string, translationText = ''): number {
     const readableCharacters = Math.max(
         countSubtitleCharacters(sourceText),
@@ -34,6 +58,23 @@ export function calculateSubtitlePageDurationMs(sourceText: string, translationT
     );
     const readingTimeMs = Math.ceil((readableCharacters / SUBTITLE_READING_SPEED_CPS) * 1_000);
     return Math.min(SUBTITLE_MAX_PAGE_MS, Math.max(SUBTITLE_MIN_PAGE_MS, readingTimeMs));
+}
+
+export function calculateQueuedSubtitlePageDurationMs(
+    sourceText: string,
+    translationText = '',
+    hasBacklog = false,
+): number {
+    if (!hasBacklog) return calculateSubtitlePageDurationMs(sourceText, translationText);
+    const readableCharacters = Math.max(
+        countSubtitleCharacters(sourceText),
+        countSubtitleCharacters(translationText),
+    );
+    const readingTimeMs = Math.ceil((readableCharacters / SUBTITLE_BACKLOG_READING_SPEED_CPS) * 1_000);
+    return Math.min(
+        SUBTITLE_BACKLOG_MAX_PAGE_MS,
+        Math.max(SUBTITLE_BACKLOG_MIN_PAGE_MS, readingTimeMs),
+    );
 }
 
 export function calculateSubtitleIdleTimeoutMs(pageDurationMs: number): number {
@@ -45,16 +86,21 @@ export function resolveSubtitlePageIndex({
     pageCount,
     isDraft,
     isSameCue,
+    followLiveEdge = false,
 }: {
     previousIndex: number;
     pageCount: number;
     isDraft: boolean;
     isSameCue: boolean;
+    followLiveEdge?: boolean;
 }): number {
     if (pageCount <= 0) return 0;
-    if (isDraft) return pageCount - 1;
+    if (followLiveEdge) return pageCount - 1;
+    const firstTwoLines = Math.min(1, pageCount - 1);
+    if (!isSameCue) return firstTwoLines;
+    if (previousIndex === 0 && pageCount > 1) return 1;
     if (isSameCue) return Math.min(previousIndex, pageCount - 1);
-    return 0;
+    return firstTwoLines;
 }
 
 export function splitSubtitleTextByFit(
@@ -62,54 +108,42 @@ export function splitSubtitleTextByFit(
     fits: (candidate: string) => boolean,
     locale?: string,
 ): string[] {
-    return splitSubtitleFragmentsByFit(text, fits, locale).map(fragment => fragment.text);
+    return splitSubtitleTextIntoLines(text, fits, locale).map(fragment => fragment.text);
 }
 
 export function splitSubtitleTextIntoRollingWindows(
     text: string,
     fitsOneLine: (candidate: string) => boolean,
     locale?: string,
+    preserveWhitespace = false,
 ): string[] {
-    const lines = splitSubtitleFragmentsByFit(text, fitsOneLine, locale);
+    const lines = splitSubtitleTextIntoLines(text, fitsOneLine, locale, preserveWhitespace);
     return lines.map((_, index) => joinSubtitleFragments(lines.slice(Math.max(0, index - 1), index + 1)));
 }
 
-interface SubtitleFragment {
+export interface SubtitleLineFragment {
     text: string;
     separatorAfter: string;
 }
 
-function splitSubtitleFragmentsByFit(
+export function splitSubtitleTextIntoLines(
     text: string,
     fits: (candidate: string) => boolean,
     locale?: string,
-): SubtitleFragment[] {
+    preserveWhitespace = false,
+): SubtitleLineFragment[] {
+    if (preserveWhitespace) return splitVerbatimSubtitleTextIntoLines(text, fits, locale);
     let remaining = text.trim();
     if (!remaining) return [];
 
-    const fragments: SubtitleFragment[] = [];
+    const fragments: SubtitleLineFragment[] = [];
     while (remaining) {
         if (fits(remaining)) {
             fragments.push({ text: remaining, separatorAfter: '' });
             break;
         }
 
-        const graphemeBoundaries = getGraphemeBoundaries(remaining, locale);
-        let low = 1;
-        let high = graphemeBoundaries.length;
-        let fittingBoundary = graphemeBoundaries[0] ?? 1;
-
-        while (low <= high) {
-            const middle = Math.floor((low + high) / 2);
-            const boundary = graphemeBoundaries[middle - 1];
-            if (fits(remaining.slice(0, boundary))) {
-                fittingBoundary = boundary;
-                low = middle + 1;
-            } else {
-                high = middle - 1;
-            }
-        }
-
+        const fittingBoundary = findFittingBoundary(remaining, fits, locale);
         const breakAt = findNaturalBreak(remaining, fittingBoundary, locale);
         const rawPage = remaining.slice(0, breakAt);
         const page = rawPage.trim();
@@ -128,7 +162,61 @@ function splitSubtitleFragmentsByFit(
     return fragments;
 }
 
-function joinSubtitleFragments(fragments: SubtitleFragment[]): string {
+function splitVerbatimSubtitleTextIntoLines(
+    text: string,
+    fits: (candidate: string) => boolean,
+    locale?: string,
+): SubtitleLineFragment[] {
+    let remaining = text;
+    const fragments: SubtitleLineFragment[] = [];
+    while (remaining) {
+        const newline = /\r\n|\r|\n/u.exec(remaining);
+        const beforeNewline = newline ? remaining.slice(0, newline.index) : remaining;
+        if (newline && fits(beforeNewline)) {
+            fragments.push({ text: beforeNewline, separatorAfter: newline[0] });
+            remaining = remaining.slice(newline.index + newline[0].length);
+            continue;
+        }
+        if (!newline && fits(remaining)) {
+            fragments.push({ text: remaining, separatorAfter: '' });
+            break;
+        }
+
+        const candidate = newline ? beforeNewline : remaining;
+        const fittingBoundary = findFittingBoundary(candidate, fits, locale);
+        const breakAt = findNaturalBreak(candidate, fittingBoundary, locale);
+        const page = remaining.slice(0, Math.max(1, breakAt));
+        fragments.push({ text: page, separatorAfter: '' });
+        remaining = remaining.slice(page.length);
+    }
+    return fragments;
+}
+
+function findFittingBoundary(
+    text: string,
+    fits: (candidate: string) => boolean,
+    locale?: string,
+): number {
+    const graphemeBoundaries = getGraphemeBoundaries(text, locale);
+    let low = 1;
+    let high = graphemeBoundaries.length;
+    let fittingBoundary = graphemeBoundaries[0] ?? 1;
+
+    while (low <= high) {
+        const middle = Math.floor((low + high) / 2);
+        const boundary = graphemeBoundaries[middle - 1];
+        if (fits(text.slice(0, boundary))) {
+            fittingBoundary = boundary;
+            low = middle + 1;
+        } else {
+            high = middle - 1;
+        }
+    }
+
+    return fittingBoundary;
+}
+
+function joinSubtitleFragments(fragments: SubtitleLineFragment[]): string {
     return fragments.map((fragment, index) => (
         index < fragments.length - 1 ? fragment.text + fragment.separatorAfter : fragment.text
     )).join('');

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+    buildFinalSubtitleAnnouncement,
     buildProviderTranscriptPresentations,
     collectTranscriptProviders,
     selectCurrentSubtitle,
@@ -96,6 +97,15 @@ test('rolls consecutive finals forward instead of blanking the completed interim
     assert.deepEqual(current.interims, []);
 });
 
+test('concatenates Caption Desk publications without changing whitespace', () => {
+    const current = selectCurrentSubtitle([
+        { id: 'desk-1', text: '  หนึ่ง\n', timestamp: 1_000, provider: 'caption-desk', role: 'source', isFinal: true },
+        { id: 'desk-2', text: '  สอง  ', timestamp: 1_100, provider: 'caption-desk', role: 'source', isFinal: true },
+    ], []);
+
+    assert.equal(current.transcripts[0]?.text, '  หนึ่ง\n  สอง  ');
+});
+
 test('starts a fresh subtitle cue after five seconds without continuation', () => {
     const current = selectCurrentSubtitle([
         { id: 'stale', text: 'ข้อความเก่า', isFinal: true, timestamp: 1_000, provider: 'google', role: 'source' },
@@ -127,4 +137,18 @@ test('collects providers from agents, committed rows, and drafts without duplica
         collectTranscriptProviders(transcripts, interims, ['google']),
         ['google', 'gemini', 'azure'],
     );
+});
+
+test('announces finalized source and only finalized translation to screen readers', () => {
+    const source: TranscriptSegment = {
+        id: 'final', text: 'ข้อความยืนยัน', isFinal: true, timestamp: 1,
+        provider: 'gemini', role: 'source',
+        translation: { text: 'draft translation', languageCode: 'en', isFinal: false },
+    };
+
+    assert.equal(buildFinalSubtitleAnnouncement(source, true), 'ข้อความยืนยัน');
+    assert.equal(buildFinalSubtitleAnnouncement({
+        ...source,
+        translation: { text: 'final translation', languageCode: 'en', isFinal: true },
+    }, true), 'ข้อความยืนยัน. final translation');
 });
