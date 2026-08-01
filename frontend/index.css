@@ -1318,25 +1318,55 @@ select:focus-visible {
   max-width: min(28rem, 48vw);
   align-items: center;
   gap: 0.4rem;
-  border: 1px solid oklch(72% 0.12 180 / 0.24);
+  border: 1px solid var(--line);
   border-radius: 999px;
   padding: 0.1875rem 0.5rem;
-  color: oklch(82% 0.12 175);
-  background: oklch(35% 0.08 175 / 0.14);
+  color: var(--muted);
+  background: oklch(18% 0.025 274 / 0.38);
   font-size: 0.6875rem;
   line-height: 1rem;
 }
 
-.viewer-queue-status--clear {
-  border-color: var(--line);
+.viewer-queue-status--empty {
   color: var(--subtle);
   background: transparent;
+}
+
+.viewer-queue-status--waiting {
+  border-color: oklch(78% 0.12 80 / 0.32);
+  color: oklch(86% 0.1 82);
+  background: oklch(35% 0.07 75 / 0.16);
+}
+
+.viewer-queue-status__indicator {
+  width: 0.375rem;
+  height: 0.375rem;
+  flex: none;
+  border-radius: 999px;
+  background: var(--subtle);
+}
+
+.viewer-queue-status--waiting .viewer-queue-status__indicator {
+  background: var(--warning);
+  box-shadow: 0 0 0 0.1875rem oklch(75% 0.14 75 / 0.12);
 }
 
 .viewer-queue-status__count {
   flex: none;
   font-variant-numeric: tabular-nums;
   font-weight: 700;
+}
+
+.viewer-queue-status__characters {
+  flex: none;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.viewer-queue-status__characters::before {
+  margin-right: 0.4rem;
+  color: var(--subtle);
+  content: "·";
 }
 
 .viewer-queue-status__preview {
@@ -1375,7 +1405,7 @@ body.viewer-output-transparent {
 }
 
 .viewer-subtitle-scroller--size-small {
-  --viewer-subtitle-font-scale: 0.84;
+  --viewer-subtitle-font-scale: 0.72;
 }
 
 .viewer-subtitle-scroller--size-standard {
@@ -1383,7 +1413,7 @@ body.viewer-output-transparent {
 }
 
 .viewer-subtitle-scroller--size-large {
-  --viewer-subtitle-font-scale: 1.3;
+  --viewer-subtitle-font-scale: 1.16;
 }
 
 @media (max-width: 639px) {
@@ -1478,8 +1508,9 @@ body.viewer-output-transparent {
 
 .transcript-subtitle-row {
   --subtitle-source-slot-height: clamp(8rem, 14vh, 11rem);
-  --subtitle-translation-slot-height: clamp(5.5rem, 10vh, 8rem);
+  --subtitle-translation-slot-height: clamp(6.25rem, 11vh, 9rem);
   --subtitle-source-font-size: calc(clamp(1.75rem, 3vw, 2.75rem) * var(--viewer-subtitle-font-scale, 1));
+  --subtitle-translation-font-size: calc(clamp(1.25rem, 2vw, 1.85rem) * var(--viewer-subtitle-font-scale, 1));
   display: grid;
   max-inline-size: 72ch;
   width: 100%;
@@ -1631,8 +1662,8 @@ body.viewer-output-transparent {
 
 .transcript-subtitle-slot--translation .translation-block__text {
   color: oklch(83% 0.035 288);
-  font-size: calc(clamp(1rem, 1.45vw, 1.35rem) * var(--viewer-subtitle-font-scale, 1));
-  line-height: 1.55;
+  font-size: var(--subtitle-translation-font-size);
+  line-height: 1.45;
 }
 
 .transcript-paragraph-source {

@@ -113,6 +113,30 @@ transcript continues through its existing viewer/feed paths.
 The browser cannot publish approved captions directly; it sends a reliable
 `caption.publish` command to the active agent, which remains authoritative.
 
+### Approved-caption playback in Transcript
+
+Selecting **Caption Desk** in the Transcript source list subscribes to the
+room-scoped `caption.public` lane. Every accepted publication is appended to a
+browser-local FIFO playback queue exactly as published; this surface does not
+infer wording, combine providers, or normalize the operator's whitespace.
+
+- The visible output is a rolling, two-line subtitle window. A line is bounded
+  to 35 grapheme clusters before the next line rolls in, so Thai combining
+  marks remain attached to their base character.
+- Normal motion reveals text at the selected pace (10–20 visible characters per
+  second; 17 by default). The playback buffer retains the visible tail and
+  continues releasing queued text when its internal limit is reached—there is
+  no intentional pause at that boundary.
+- A delayed animation frame preserves its elapsed reveal progress; the next
+  render can cross a rolling boundary without dropping or reordering queued
+  text.
+- With `prefers-reduced-motion`, the Viewer disables the roll animation and
+  advances through one readable two-line window at a time. It does not skip to
+  the newest text or discard the remainder.
+- The subtitle toolbar reports `Queue empty` when everything is displayed, or
+  `Waiting: <cues> · <characters>` when captions remain pending. `Clear` clears
+  both the current caption and this local playback queue.
+
 - Every packet is validated with `parseTranscriptMessage`.
 - `TranscriptSession` owns decoding, provider resolution, interim buffering, Gemini source/translation pairing, committed rows, and source cleanup.
 - Non-final source values are replaceable Draft entries keyed by provider. Gemini keys Drafts by provider, `turnId`, and role, and pairs source/translation by provider plus `turnId`.

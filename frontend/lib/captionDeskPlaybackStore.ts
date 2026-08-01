@@ -4,6 +4,7 @@ import {
     enqueueCaptionPublications,
     getVisibleCaptionText,
     progressiveRevealRate,
+    retainVisibleCaptionTail,
     revealCaptionGraphemes,
     SUBTITLE_PLAYBACK_RATE_MAX,
     SUBTITLE_PLAYBACK_RATE_MIN,
@@ -13,9 +14,10 @@ import {
 
 type PlaybackListener = () => void;
 const PLAYBACK_RENDER_INTERVAL_MS = 40;
-// Keep DOM measurement bounded to four two-line caption windows. Overflow
-// remains in the FIFO queue and advances only after the active cue is read.
+// Keep DOM measurement bounded to four two-line caption windows. When full,
+// retain the visible two-line tail and continue releasing the FIFO queue.
 const MAX_ACTIVE_CUE_GRAPHEMES = 35 * 2 * 4;
+const ROLLING_WINDOW_GRAPHEMES = 35 * 2;
 
 export interface CaptionDeskPlaybackClock {
     requestFrame: (callback: (now: number) => void) => number;
@@ -79,6 +81,36 @@ export function createCaptionDeskPlaybackStore(
         notify();
     };
 
+    const revealWithRollingWindow = (requestedCount: number) => {
+        let remaining = Math.min(requestedCount, playback.pendingGraphemeCount);
+        let consumed = 0;
+        while (remaining > 0) {
+            if (playback.visibleGraphemeCount >= MAX_ACTIVE_CUE_GRAPHEMES) {
+                playback = retainVisibleCaptionTail(playback, ROLLING_WINDOW_GRAPHEMES);
+                cueComplete = false;
+            }
+            const availableCapacity = MAX_ACTIVE_CUE_GRAPHEMES - playback.visibleGraphemeCount;
+            const beforePendingCount = playback.pendingGraphemeCount;
+            playback = revealCaptionGraphemes(
+                playback,
+                Math.min(remaining, availableCapacity),
+                MAX_ACTIVE_CUE_GRAPHEMES,
+            );
+            const revealed = beforePendingCount - playback.pendingGraphemeCount;
+            if (revealed <= 0) break;
+            consumed += revealed;
+            remaining -= revealed;
+        }
+        if (
+            playback.pendingGraphemeCount > 0
+            && playback.visibleGraphemeCount >= MAX_ACTIVE_CUE_GRAPHEMES
+        ) {
+            playback = retainVisibleCaptionTail(playback, ROLLING_WINDOW_GRAPHEMES);
+            cueComplete = false;
+        }
+        return consumed;
+    };
+
     const animate = (now: number) => {
         frameId = null;
         if (!active || paused) return;
@@ -90,12 +122,7 @@ export function createCaptionDeskPlaybackStore(
         previousTime = now;
         const revealCount = Math.floor(carry);
         if (revealCount > 0 && now - previousPublishTime >= PLAYBACK_RENDER_INTERVAL_MS) {
-            carry -= revealCount;
-            playback = revealCaptionGraphemes(
-                playback,
-                revealCount,
-                MAX_ACTIVE_CUE_GRAPHEMES,
-            );
+            carry -= revealWithRollingWindow(revealCount);
             previousPublishTime = now;
             publishVisibleText();
         }
@@ -113,9 +140,13 @@ export function createCaptionDeskPlaybackStore(
         if (remaining <= 0 || playback.visibleGraphemeCount >= MAX_ACTIVE_CUE_GRAPHEMES) return;
 
         if (clock.prefersReducedMotion()) {
+            const availableWindowCapacity = Math.max(
+                0,
+                ROLLING_WINDOW_GRAPHEMES - playback.visibleGraphemeCount,
+            );
             playback = revealCaptionGraphemes(
                 playback,
-                remaining,
+                Math.min(remaining, availableWindowCapacity),
                 MAX_ACTIVE_CUE_GRAPHEMES,
             );
             publishVisibleText();
@@ -132,7 +163,7 @@ export function createCaptionDeskPlaybackStore(
         playback = completeVisibleCaption(playback);
         cueComplete = false;
         const initialRevealCount = clock.prefersReducedMotion()
-            ? playback.pendingGraphemeCount
+            ? Math.min(playback.pendingGraphemeCount, ROLLING_WINDOW_GRAPHEMES)
             : 1;
         playback = revealCaptionGraphemes(
             playback,
@@ -140,7 +171,7 @@ export function createCaptionDeskPlaybackStore(
             MAX_ACTIVE_CUE_GRAPHEMES,
         );
         publishVisibleText();
-        startAnimation();
+        if (!clock.prefersReducedMotion()) startAnimation();
         return true;
     };
 
@@ -176,7 +207,22 @@ export function createCaptionDeskPlaybackStore(
         hasPendingText: () => playback.pendingGraphemeCount > 0,
         hasContent: () => Boolean(playback.visibleText) || playback.pendingGraphemeCount > 0,
         getPendingGraphemeCount: () => playback.pendingGraphemeCount,
-        getPendingCueCount: () => Math.ceil(playback.pendingGraphemeCount / MAX_ACTIVE_CUE_GRAPHEMES),
+        getPendingCueCount() {
+            const pendingCount = playback.pendingGraphemeCount;
+            if (pendingCount <= 0) return 0;
+            const reducedMotion = clock.prefersReducedMotion();
+            const initialCapacity = Math.max(
+                0,
+                (reducedMotion ? ROLLING_WINDOW_GRAPHEMES : MAX_ACTIVE_CUE_GRAPHEMES)
+                - playback.visibleGraphemeCount,
+            );
+            if (pendingCount <= initialCapacity) return 1;
+            const subsequentCapacity = reducedMotion
+                ? ROLLING_WINDOW_GRAPHEMES
+                : MAX_ACTIVE_CUE_GRAPHEMES - ROLLING_WINDOW_GRAPHEMES;
+            return (initialCapacity > 0 ? 1 : 0)
+                + Math.ceil((pendingCount - initialCapacity) / subsequentCapacity);
+        },
         getPendingPreview(maximumGraphemes = 48) {
             const preview: string[] = [];
             let remaining = Math.max(0, maximumGraphemes);

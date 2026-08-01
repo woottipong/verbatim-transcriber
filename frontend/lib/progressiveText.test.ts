@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import * as progressiveText from './progressiveText.ts';
 import {
     completeVisibleCaption,
     createCaptionPlaybackState,
@@ -26,6 +27,27 @@ test('keeps visible progress when an interim becomes a corrected final', () => {
         reconcileProgressiveTarget(visible, final, true, interim),
         splitTextGraphemes(final).slice(0, splitTextGraphemes(visible).length).join(''),
     );
+});
+
+test('continues from the retained final when the rolling cue drops its oldest text', () => {
+    const previousTarget = 'ประโยคก่อนหน้า ข้อความที่อ่านจบแล้ว';
+    const visible = 'ประโยคก่อนหน้า ข้อความที่อ่านจบแล้ว';
+    const nextTarget = 'ข้อความที่อ่านจบแล้ว ข้อความใหม่กำลังเข้ามา';
+
+    assert.equal(
+        reconcileProgressiveTarget(visible, nextTarget, true, previousTarget),
+        'ข้อความที่อ่านจบแล้ว',
+    );
+});
+
+test('requests a roll only when a new cue retains the previous tail', () => {
+    const shouldRoll = (progressiveText as typeof progressiveText & {
+        shouldRollProgressiveTarget?: (previous: string, next: string) => boolean;
+    }).shouldRollProgressiveTarget;
+
+    assert.equal(shouldRoll?.('ประโยคก่อนหน้า ข้อความที่อ่านจบแล้ว', 'ข้อความที่อ่านจบแล้ว ข้อความใหม่') ?? false, true);
+    assert.equal(shouldRoll?.('ข้อความกำลังมา', 'ข้อความกำลังมาต่อ') ?? false, false);
+    assert.equal(shouldRoll?.('ข้อความเดิม', 'ประโยคใหม่') ?? false, false);
 });
 
 test('caps live translation progress at the visible source progress', () => {

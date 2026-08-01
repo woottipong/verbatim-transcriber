@@ -23,13 +23,42 @@ export function reconcileProgressiveTarget(
     previousTargetText = '',
 ): string {
     if (targetText.startsWith(visibleText)) return visibleText;
+    const visibleGraphemes = splitTextGraphemes(visibleText);
     const targetGraphemes = splitTextGraphemes(targetText);
+    const retainedPrefixLength = findRetainedPrefixLength(visibleGraphemes, targetGraphemes);
+    if (retainedPrefixLength > 0) {
+        return targetGraphemes.slice(0, retainedPrefixLength).join('');
+    }
     if (identityChanged && !isLikelyTranscriptRevision(previousTargetText, targetText)) {
         return targetGraphemes[0] ?? '';
     }
     return targetGraphemes
-        .slice(0, Math.min(splitTextGraphemes(visibleText).length, targetGraphemes.length))
+        .slice(0, Math.min(visibleGraphemes.length, targetGraphemes.length))
         .join('');
+}
+
+export function shouldRollProgressiveTarget(previousText: string, nextText: string): boolean {
+    if (!previousText || !nextText || nextText.startsWith(previousText)) return false;
+    return findRetainedPrefixLength(
+        splitTextGraphemes(previousText),
+        splitTextGraphemes(nextText),
+    ) > 0;
+}
+
+function findRetainedPrefixLength(visible: string[], target: string[]): number {
+    const maximumLength = Math.min(visible.length, target.length);
+    for (let length = maximumLength; length >= 4; length -= 1) {
+        const visibleStart = visible.length - length;
+        let matches = true;
+        for (let index = 0; index < length; index += 1) {
+            if (visible[visibleStart + index] !== target[index]) {
+                matches = false;
+                break;
+            }
+        }
+        if (matches) return length;
+    }
+    return 0;
 }
 
 function isLikelyTranscriptRevision(previousText: string, nextText: string): boolean {
@@ -166,6 +195,20 @@ export function revealCaptionGraphemes(
 export function completeVisibleCaption(state: CaptionPlaybackState): CaptionPlaybackState {
     if (!state.visibleText) return state;
     return { ...state, visibleText: '', visibleGraphemeCount: 0 };
+}
+
+export function retainVisibleCaptionTail(
+    state: CaptionPlaybackState,
+    retainedGraphemeCount: number,
+): CaptionPlaybackState {
+    const visible = splitTextGraphemes(state.visibleText);
+    const retainedCount = Math.max(0, Math.min(visible.length, retainedGraphemeCount));
+    if (retainedCount === visible.length) return state;
+    return {
+        ...state,
+        visibleText: visible.slice(visible.length - retainedCount).join(''),
+        visibleGraphemeCount: retainedCount,
+    };
 }
 
 export function getVisibleCaptionText(state: CaptionPlaybackState): string {

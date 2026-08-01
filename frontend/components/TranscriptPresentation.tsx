@@ -13,7 +13,7 @@ import {
 } from '../lib/providers';
 import TranslationBlock from './TranslationBlock';
 import { useProgressiveText } from '../hooks/useProgressiveText';
-import { synchronizeTranslationTarget } from '../lib/progressiveText';
+import { shouldRollProgressiveTarget, synchronizeTranslationTarget } from '../lib/progressiveText';
 import {
     alignSubtitlePagePairs,
     calculateQueuedSubtitlePageDurationMs,
@@ -172,6 +172,22 @@ function SubtitleRows({
     const [pages, setPages] = useState<SubtitlePage[]>([]);
     const [pageIndex, setPageIndex] = useState(0);
     const previousIdentityRef = useRef('');
+    const previousRollingTargetRef = useRef('');
+    const previousRollingIdentityRef = useRef('');
+    const [rollingCueIdentity, setRollingCueIdentity] = useState('');
+
+    useLayoutEffect(() => {
+        const previousTarget = previousRollingTargetRef.current;
+        const previousIdentity = previousRollingIdentityRef.current;
+        const nextTarget = rawCurrent?.text ?? '';
+        if (shouldRollProgressiveTarget(previousTarget, nextTarget)) {
+            setRollingCueIdentity(currentIdentity);
+        } else if (previousIdentity !== currentIdentity) {
+            setRollingCueIdentity('');
+        }
+        previousRollingTargetRef.current = nextTarget;
+        previousRollingIdentityRef.current = currentIdentity;
+    }, [currentIdentity, rawCurrent?.text]);
 
     useLayoutEffect(() => {
         if (!current || !sourceMeasureRef.current || !translationMeasureRef.current) {
@@ -248,6 +264,7 @@ function SubtitleRows({
 
     const page = pages[Math.min(pageIndex, Math.max(0, pages.length - 1))];
     const translation = current.translation;
+    const isRollingCueTransition = rollingCueIdentity === currentIdentity && Boolean(currentIdentity);
     const measurement = (
         <div ref={measureContainerRef} className="transcript-subtitle-measure" aria-hidden="true">
             <div className="transcript-subtitle-row">
@@ -281,8 +298,8 @@ function SubtitleRows({
                             dir="auto"
                         >
                             <span
-                                key={`${page.sourcePageIndex}:source-lines`}
-                                className={`transcript-subtitle-lines ${page.sourcePageIndex > 0 ? 'transcript-subtitle-lines--rolling' : ''}`}
+                                key={`${rollingCueIdentity}:${page.sourcePageIndex}:source-lines`}
+                                className={`transcript-subtitle-lines ${page.sourcePageIndex > 0 || isRollingCueTransition ? 'transcript-subtitle-lines--rolling' : ''}`}
                             >
                                 {page.sourceLines.map((line, index) => (
                                     <span

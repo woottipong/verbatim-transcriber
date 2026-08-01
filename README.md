@@ -117,6 +117,23 @@ Caption Desk additionally exposes one room-scoped approved-caption feed. It emit
 
 It emits no JSON, Drafts, ready event, replay, or client commands. Raw and approved tokens carry different signed feed purposes and cannot be used interchangeably.
 
+### Approved-caption playback
+
+When **Transcript** follows the approved Caption Desk output, it presents text
+as a two-line live-caption window rather than rendering every publication as a
+static transcript row. Publications remain FIFO and preserve the operator's
+published whitespace. Text reveals at the selected reading pace, then rolls
+the lower line upward as more text arrives; reaching the internal display
+buffer never discards the queue or introduces a deliberate hold. The Viewer
+shows whether that queue is empty or waiting so an operator can distinguish
+displayed text from pending text.
+
+The default pace is 17 visible characters per second, adjustable from 10 to
+20 characters per second for readability. With the operating system's
+**Reduce Motion** preference enabled, the same content advances as discrete,
+readable two-line windows without the roll animation; it still preserves order
+and does not skip queued text.
+
 Interim and final text originates from the selected ASR provider. CaptionLive routes provider results, accumulates provider deltas into full snapshots where required, and applies deterministic spacing normalization. Google Thai additionally removes provider-added spaces between Thai words; other providers retain the shared policy. CaptionLive does not invent interim wording.
 
 Important output rules:

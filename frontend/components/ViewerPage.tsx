@@ -135,18 +135,26 @@ function CaptionDeskQueueStatus({ playback }: { playback: CaptionDeskPlaybackSto
     const visiblePreview = preview.replace(/\r\n|\r|\n/gu, ' ↵ ').replace(/\s+/gu, ' ');
 
     if (pendingCount === 0) {
-        return <span className="viewer-queue-status viewer-queue-status--clear">Queue clear</span>;
+        return (
+            <span className="viewer-queue-status viewer-queue-status--empty" aria-label="Caption queue is empty">
+                <span className="viewer-queue-status__indicator" aria-hidden="true" />
+                Queue empty
+            </span>
+        );
     }
 
     return (
         <span
-            className="viewer-queue-status"
+            className="viewer-queue-status viewer-queue-status--waiting"
             title={`Waiting to display: ${preview}`}
             aria-label={`${pendingCount} characters waiting in approximately ${pendingCueCount} subtitle cues`}
+            aria-live="polite"
         >
+            <span className="viewer-queue-status__indicator" aria-hidden="true" />
             <span className="viewer-queue-status__count">
-                Queued {pendingCount} · {pendingCueCount} {pendingCueCount === 1 ? 'cue' : 'cues'}
+                Waiting: {pendingCueCount} {pendingCueCount === 1 ? 'cue' : 'cues'}
             </span>
+            <span className="viewer-queue-status__characters">{pendingCount.toLocaleString()} chars</span>
             <span className="viewer-queue-status__preview" aria-hidden="true">
                 “{visiblePreview}”
             </span>
