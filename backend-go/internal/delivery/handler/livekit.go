@@ -95,6 +95,55 @@ func HandleLiveKitToken(c *fiber.Ctx, cfg *config.Config, rooms *roomoperations.
 	return c.JSON(models.TokenResponse{Token: token, WsURL: cfg.LiveKitURL})
 }
 
+// HandleViewerToken issues a server-owned, subscribe-only room token.
+func HandleViewerToken(c *fiber.Ctx, cfg *config.Config, rooms *roomoperations.Operations) error {
+	var req models.ViewerTokenRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error":   "Invalid request body",
+			"details": err.Error(),
+		})
+	}
+	if err := validateRoomName(req.RoomName); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+	}
+	if _, err := rooms.Find(c.UserContext(), req.RoomName); err != nil {
+		if errors.Is(err, roomoperations.ErrRoomNotFound) {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"code":  "room_not_found",
+				"error": "Room does not exist or is no longer available",
+			})
+		}
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
+			"error": "Failed to verify room availability",
+		})
+	}
+
+	canPublish := false
+	canSubscribe := true
+	canPublishData := false
+	grant := &auth.VideoGrant{
+		RoomJoin:       true,
+		Room:           req.RoomName,
+		CanPublish:     &canPublish,
+		CanSubscribe:   &canSubscribe,
+		CanPublishData: &canPublishData,
+	}
+	identity := "viewer-" + uuid.NewString()
+	token, err := auth.NewAccessToken(cfg.LiveKitAPIKey, cfg.LiveKitAPISecret).
+		SetVideoGrant(grant).
+		SetIdentity(identity).
+		SetValidFor(time.Duration(cfg.LiveKitConfig.TokenExpiry) * time.Second).
+		ToJWT()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "Failed to create viewer token",
+		})
+	}
+
+	return c.JSON(models.TokenResponse{Token: token, WsURL: cfg.LiveKitURL})
+}
+
 func HandleCaptionDeskToken(
 	c *fiber.Ctx,
 	cfg *config.Config,

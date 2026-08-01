@@ -21,6 +21,7 @@ import type { InterimTranscript } from '../lib/transcriptMessages';
 import { providerFromAgentIdentity } from '../lib/providers';
 import { TranscriptSession } from '../lib/transcriptSession';
 import { LiveKitRoomLifecycle } from '../lib/liveKitRoomLifecycle';
+import { buildLegacyViewerTokenRequest, shouldFallbackViewerToken } from '../lib/viewerToken';
 
 // Agent info with provider
 export interface AgentInfo {
@@ -31,6 +32,7 @@ export interface AgentInfo {
 
 export interface UseRoomViewerOptions {
     tokenEndpoint: string;  // Backend token endpoint
+    fallbackTokenEndpoint?: string;
 }
 
 export interface UseRoomViewerReturn {
@@ -50,8 +52,38 @@ export interface UseRoomViewerReturn {
     audioParticipants: string[];  // Participants with audio tracks
 }
 
+const VIEWER_TOKEN_TIMEOUT_MS = 10_000;
+const VIEWER_CONNECTION_TIMEOUT_MS = 12_000;
+const VIEWER_ATTEMPT_TIMEOUT_MS = 15_000;
+
+function resolveViewerLiveKitUrl(serverUrl: string): string {
+    if (typeof window === 'undefined') return serverUrl;
+
+    try {
+        const url = new URL(serverUrl);
+        const pageHost = window.location.hostname;
+        const isLoopbackServer = isLoopbackHost(url.hostname);
+        const isLoopbackPage = isLoopbackHost(pageHost);
+
+        if (isLoopbackServer && !isLoopbackPage) {
+            url.hostname = pageHost;
+            url.protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        } else if (window.location.protocol === 'https:' && url.protocol === 'ws:') {
+            url.protocol = 'wss:';
+        }
+
+        return url.toString().replace(/\/$/, '');
+    } catch {
+        return serverUrl;
+    }
+}
+
+function isLoopbackHost(hostname: string): boolean {
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1';
+}
+
 export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerReturn {
-    const { tokenEndpoint } = options;
+    const { tokenEndpoint, fallbackTokenEndpoint } = options;
 
     // State
     const [connectionState, setConnectionState] = useState<ConnectionState>(ConnectionState.DISCONNECTED);
@@ -103,30 +135,47 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
 
     // Fetch token from backend (as viewer, not publishing)
     const fetchToken = useCallback(async (roomName: string): Promise<{ token: string; wsUrl?: string }> => {
-        const identity = `viewer-${Date.now()}`;
+        const controller = new AbortController();
+        const timeoutId = window.setTimeout(() => controller.abort(), VIEWER_TOKEN_TIMEOUT_MS);
+        try {
+            let response = await fetch(tokenEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
+                body: JSON.stringify({
+                    roomName,
+                }),
+                signal: controller.signal,
+            });
 
-        const response = await fetch(tokenEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
-            body: JSON.stringify({
-                identity,
-                roomName,
-                canPublish: false,  // Viewer doesn't publish audio
-                canSubscribe: true,
-            }),
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => ({}));
-            throw new Error(errorData.error || `Failed to get token: ${response.status}`);
+            let data = await response.json().catch(() => ({}));
+            if (shouldFallbackViewerToken(response.status, data, Boolean(fallbackTokenEndpoint))) {
+                response = await fetch(fallbackTokenEndpoint!, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getControlAuthHeaders() },
+                    body: JSON.stringify(buildLegacyViewerTokenRequest(roomName)),
+                    signal: controller.signal,
+                });
+                data = await response.json().catch(() => ({}));
+            }
+            if (!response.ok) {
+                throw new Error(data.error || `Failed to get token: ${response.status}`);
+            }
+            if (typeof data.token !== 'string' || data.token.length === 0) {
+                throw new Error('The backend returned an invalid viewer token.');
+            }
+            return {
+                token: data.token,
+                wsUrl: data.wsUrl || data.ws_url,
+            };
+        } catch (error) {
+            if (controller.signal.aborted) {
+                throw new Error('The viewer token request timed out. Check that the backend is running.');
+            }
+            throw error;
+        } finally {
+            window.clearTimeout(timeoutId);
         }
-
-        const data = await response.json();
-        return {
-            token: data.token,
-            wsUrl: data.wsUrl || data.ws_url,
-        };
-    }, [tokenEndpoint]);
+    }, [fallbackTokenEndpoint, tokenEndpoint]);
 
     // Handle audio track subscription
     const handleTrackSubscribed = useCallback((
@@ -247,46 +296,56 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             setError(null);
             setCurrentRoomName(roomName);
 
-            const connectedRoom = await roomLifecycle.connect({
-                prepare: async () => {
-                    const credentials = await fetchToken(roomName);
-                    console.log('[Viewer] 🎫 Token received for room:', roomName);
-                    return credentials;
-                },
-                getToken: async credentials => credentials.token,
-                serverUrl: credentials => (
-                    credentials.wsUrl || import.meta.env.VITE_LIVEKIT_URL || 'ws://localhost:7880'
-                ),
-                roomOptions: {
-                    adaptiveStream: true,
-                    dynacast: true,
-                },
-                createRoom: roomOptions => new Room(roomOptions),
-                registerAdapterEvents: lifecycleRoom => {
-                    lifecycleRoom.on(RoomEvent.DataReceived, handleDataReceived);
-                    lifecycleRoom.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
-                    lifecycleRoom.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
-                    lifecycleRoom.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
-                    lifecycleRoom.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
-                },
-                callbacks: {
-                    onConnected: () => {
-                        console.log('[Viewer] ✅ Connected to room:', roomName);
-                        setConnectionState(ConnectionState.CONNECTED);
+            const connectedRoom = await withTimeout<Room | null>(
+                roomLifecycle.connect({
+                    prepare: async () => {
+                        const credentials = await fetchToken(roomName);
+                        console.log('[Viewer] 🎫 Token received for room:', roomName);
+                        return credentials;
                     },
-                    onReconnecting: () => setConnectionState(ConnectionState.CONNECTING),
-                    onReconnected: () => setConnectionState(ConnectionState.CONNECTED),
-                    onEnded: (reason) => {
-                        setRoom(null);
-                        setAgents([]);
-                        transcriptSession.reset();
-                        cleanupAudioElements();
-                        setAudioParticipants([]);
-                        if (reason !== 'replaced') setConnectionState(ConnectionState.DISCONNECTED);
-                        if (reason === 'manual' || reason === 'disposed') setCurrentRoomName(null);
+                    getToken: async credentials => credentials.token,
+                    serverUrl: credentials => resolveViewerLiveKitUrl(
+                        import.meta.env.VITE_LIVEKIT_URL || credentials.wsUrl || 'ws://localhost:7880',
+                    ),
+                    connectOptions: {
+                        autoSubscribe: true,
+                        maxRetries: 0,
+                        peerConnectionTimeout: VIEWER_CONNECTION_TIMEOUT_MS,
+                        websocketTimeout: VIEWER_CONNECTION_TIMEOUT_MS,
                     },
-                },
-            });
+                    roomOptions: {
+                        adaptiveStream: true,
+                        dynacast: true,
+                    },
+                    createRoom: roomOptions => new Room(roomOptions),
+                    registerAdapterEvents: lifecycleRoom => {
+                        lifecycleRoom.on(RoomEvent.DataReceived, handleDataReceived);
+                        lifecycleRoom.on(RoomEvent.ParticipantConnected, handleParticipantConnected);
+                        lifecycleRoom.on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected);
+                        lifecycleRoom.on(RoomEvent.TrackSubscribed, handleTrackSubscribed);
+                        lifecycleRoom.on(RoomEvent.TrackUnsubscribed, handleTrackUnsubscribed);
+                    },
+                    callbacks: {
+                        onConnected: () => {
+                            console.log('[Viewer] ✅ Connected to room:', roomName);
+                            setConnectionState(ConnectionState.CONNECTED);
+                        },
+                        onReconnecting: () => setConnectionState(ConnectionState.CONNECTING),
+                        onReconnected: () => setConnectionState(ConnectionState.CONNECTED),
+                        onEnded: (reason) => {
+                            setRoom(null);
+                            setAgents([]);
+                            transcriptSession.reset();
+                            cleanupAudioElements();
+                            setAudioParticipants([]);
+                            if (reason !== 'replaced') setConnectionState(ConnectionState.DISCONNECTED);
+                            if (reason === 'manual' || reason === 'disposed') setCurrentRoomName(null);
+                        },
+                    },
+                }),
+                VIEWER_ATTEMPT_TIMEOUT_MS,
+                'Viewer connection timed out. Check the LiveKit server and try again.',
+            );
             if (!connectedRoom || !roomLifecycle.isCurrent(connectedRoom)) return;
             setRoom(connectedRoom);
 
@@ -308,6 +367,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             }
 
         } catch (err) {
+            roomLifecycle.disconnect();
             console.error('[Viewer] Connection failed:', err);
             setError(err instanceof Error ? err.message : 'Connection failed');
             setConnectionState(ConnectionState.ERROR);
@@ -350,4 +410,20 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         toggleAudioMute,
         audioParticipants,
     };
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timeoutId = window.setTimeout(() => reject(new Error(message)), timeoutMs);
+        promise.then(
+            value => {
+                window.clearTimeout(timeoutId);
+                resolve(value);
+            },
+            error => {
+                window.clearTimeout(timeoutId);
+                reject(error);
+            },
+        );
+    });
 }

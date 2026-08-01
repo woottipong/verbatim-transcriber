@@ -23,6 +23,12 @@ type TokenRequest struct {
 	CanPublishData *bool `json:"canPublishData,omitempty"`
 }
 
+// ViewerTokenRequest is intentionally permission-free. Viewer grants are
+// server-owned and always subscribe-only.
+type ViewerTokenRequest struct {
+	RoomName string `json:"roomName"`
+}
+
 // TokenResponse represents the response with token and connection info.
 type TokenResponse struct {
 	Token string `json:"token"`

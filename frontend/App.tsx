@@ -59,6 +59,8 @@ export default function App() {
         backendUrl={config.backendUrl}
         initialRoomName={route.roomName}
         autoConnect={route.autoConnect}
+        initialProviderName={route.providerName}
+        cleanOutput={route.cleanOutput === true}
       />
     </Suspense>;
   }

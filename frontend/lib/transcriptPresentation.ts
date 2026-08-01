@@ -9,6 +9,11 @@ export interface ProviderTranscriptPresentation {
     exportText: string;
 }
 
+export interface CurrentSubtitlePresentation {
+    transcripts: TranscriptSegment[];
+    interims: InterimTranscript[];
+}
+
 const PROVIDER_ORDER = ['google', 'gemini', 'azure', 'gpt-realtime-whisper'];
 
 export function buildProviderTranscriptPresentations(
@@ -49,15 +54,24 @@ export function selectTranscriptPresentation(
     interimTranscripts: ReadonlyMap<string, InterimTranscript>,
     provider: string,
 ): Pick<ProviderTranscriptPresentation, 'transcripts' | 'interims'> {
-    const matching = provider === 'all'
-        ? transcripts
-        : transcripts.filter(segment => segment.provider === provider);
-    const interims = Array.from(interimTranscripts.values());
+    const matching = provider
+        ? transcripts.filter(segment => segment.provider === provider)
+        : [];
     return {
         transcripts: groupFinalTranscriptRows(matching),
-        interims: provider === 'all'
-            ? interims
-            : interims.filter(interim => interim.provider === provider),
+        interims: Array.from(interimTranscripts.values()).filter(interim => interim.provider === provider),
+    };
+}
+
+export function selectCurrentSubtitle(
+    transcripts: readonly TranscriptSegment[],
+    interims: readonly InterimTranscript[],
+): CurrentSubtitlePresentation {
+    const latestInterim = interims.at(-1);
+    const latestTranscript = transcripts.at(-1);
+    return {
+        transcripts: latestInterim || !latestTranscript ? [] : [latestTranscript],
+        interims: latestInterim ? [latestInterim] : [],
     };
 }
 

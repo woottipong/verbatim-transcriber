@@ -32,6 +32,17 @@ test('parseAppRoute reads stream and viewer room parameters', () => {
   assert.equal(parseAppRoute('#viewer?room=daily-briefing&autoconnect=true').autoConnect, false);
 });
 
+test('parseAppRoute enables clean Viewer output and keeps its provider scope', () => {
+  assert.deepEqual(parseAppRoute('#viewer?room=stage&provider=Gemini&autoconnect=1&output=1'), {
+    page: 'viewer',
+    roomName: 'stage',
+    providerName: 'gemini',
+    captionPolicy: 'provider-final',
+    autoConnect: true,
+    cleanOutput: true,
+  });
+});
+
 test('parseAppRoute reads Caption Desk room and provider', () => {
   assert.deepEqual(parseAppRoute('#caption-desk?room=daily-briefing&provider=Google'), {
     page: 'caption-desk',

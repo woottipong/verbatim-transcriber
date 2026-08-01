@@ -99,6 +99,61 @@ func TestHandleLiveKitTokenRejectsPublisherForMissingRoom(t *testing.T) {
 	}
 }
 
+func TestHandleViewerTokenIssuesServerOwnedReadOnlyGrant(t *testing.T) {
+	cfg := &config.Config{
+		LiveKitAPIKey:    "api-key",
+		LiveKitAPISecret: "api-secret",
+		LiveKitURL:       "ws://livekit.test",
+		LiveKitConfig:    config.LiveKitConfig{TokenExpiry: 3600},
+	}
+	operations := roomoperations.New(&roomHandlerAdapter{
+		rooms: []roomoperations.RoomRecord{{SID: "RM_room_a", Name: "room-a"}},
+	})
+	app := fiber.New()
+	app.Post("/viewer-token", func(c *fiber.Ctx) error {
+		return HandleViewerToken(c, cfg, operations)
+	})
+
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/viewer-token",
+		strings.NewReader(`{"roomName":"room-a","canPublish":true,"canPublishData":true}`),
+	)
+	request.Header.Set(fiber.HeaderContentType, fiber.MIMEApplicationJSON)
+	response, err := app.Test(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", response.StatusCode, http.StatusOK)
+	}
+	var payload struct {
+		Token string `json:"token"`
+		WsURL string `json:"wsUrl"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := auth.ParseAPIToken(payload.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, grants, err := verifier.Verify(cfg.LiveKitAPISecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(grants.Identity, "viewer-") || grants.Video == nil ||
+		!grants.Video.RoomJoin || grants.Video.Room != "room-a" ||
+		grants.Video.CanPublish == nil || *grants.Video.CanPublish ||
+		grants.Video.CanSubscribe == nil || !*grants.Video.CanSubscribe ||
+		grants.Video.CanPublishData == nil || *grants.Video.CanPublishData {
+		t.Fatalf("viewer grants = %#v", grants)
+	}
+	if payload.WsURL != cfg.LiveKitURL {
+		t.Fatalf("wsUrl = %q, want %q", payload.WsURL, cfg.LiveKitURL)
+	}
+}
+
 func TestHandleCaptionDeskTokenRequiresActiveProvider(t *testing.T) {
 	cfg := captionTokenTestConfig()
 	operations := roomoperations.New(&roomHandlerAdapter{

@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
     buildProviderTranscriptPresentations,
     collectTranscriptProviders,
+    selectCurrentSubtitle,
     selectTranscriptPresentation,
 } from './transcriptPresentation.ts';
 import type { TranscriptSegment } from '../types.ts';
@@ -39,14 +40,31 @@ test('builds provider presentations in product order with export text', () => {
     assert.equal(groups[1][1].interims[0].text, 'Gemini draft');
 });
 
-test('selects one provider or the combined transcript presentation', () => {
+test('selects one provider and never combines providers', () => {
     const azure = selectTranscriptPresentation(transcripts, interims, 'azure');
     assert.deepEqual(azure.transcripts.map(segment => segment.text), ['Azure final']);
     assert.equal(azure.interims.length, 0);
 
     const all = selectTranscriptPresentation(transcripts, interims, 'all');
-    assert.equal(all.transcripts.length, 2);
-    assert.equal(all.interims.length, 1);
+    assert.equal(all.transcripts.length, 0);
+    assert.equal(all.interims.length, 0);
+
+    const none = selectTranscriptPresentation(transcripts, interims, '');
+    assert.equal(none.transcripts.length, 0);
+    assert.equal(none.interims.length, 0);
+});
+
+test('keeps one subtitle block on the latest draft or final', () => {
+    const google = selectTranscriptPresentation(transcripts, interims, 'google');
+    const draft = selectCurrentSubtitle(google.transcripts, [
+        { key: 'google:latest', text: 'Google draft', provider: 'google', sourceIdentity: 'agent-google' },
+    ]);
+    assert.deepEqual(draft.transcripts, []);
+    assert.deepEqual(draft.interims.map(interim => interim.text), ['Google draft']);
+
+    const final = selectCurrentSubtitle(google.transcripts, []);
+    assert.deepEqual(final.transcripts.map(segment => segment.text), ['Google final']);
+    assert.deepEqual(final.interims, []);
 });
 
 test('collects providers from agents, committed rows, and drafts without duplicates', () => {

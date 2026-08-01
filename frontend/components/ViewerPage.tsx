@@ -1,55 +1,52 @@
 /**
  * ViewerPage Component
  * A dedicated page for viewing LiveKit room transcriptions
- * - Lists available rooms
- * - Shows active ASR agents
- * - Filters transcripts by provider
- * - Read-only (no microphone)
+ * - Connects to the room supplied by the viewer URL
+ * - Lets the viewer choose which provider to follow
+ * - Presents the transcript as a read-only subtitle surface
  */
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { RefreshCw, Users, Radio, Trash2, X, Bot, Volume2, VolumeX } from 'lucide-react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { AlertTriangle, ArrowLeft, Bot, LoaderCircle, LogOut, Pause, Play, Radio, Trash2, Volume2, VolumeX } from 'lucide-react';
 import { useRoomViewer } from '../hooks/useRoomViewer';
 import { ConnectionState } from '../types';
 import { toHttpUrl } from '../lib/runtime';
 import { shouldAutoConnectViewer } from '../lib/viewerLaunch';
 import ConnectionBadge from './ConnectionBadge';
-import { buildViewerUrl } from '../lib/appRoutes';
 import { formatProviderName, getProviderPresentation } from '../lib/providers';
 import ToastViewport from './ToastViewport';
 import { TranscriptRows } from './TranscriptPresentation';
-import { useTranscriptViewport } from '../hooks/useTranscriptViewport';
-import { collectTranscriptProviders, selectTranscriptPresentation } from '../lib/transcriptPresentation';
-
-interface RoomInfo {
-    name: string;
-    numParticipants: number;
-    creationTime: number;
-}
+import { collectTranscriptProviders, selectCurrentSubtitle, selectTranscriptPresentation } from '../lib/transcriptPresentation';
+import { calculateSubtitleIdleTimeoutMs } from '../lib/subtitlePaging';
 
 interface ViewerPageProps {
     onBack?: () => void;
     backendUrl: string;
     initialRoomName?: string;
     autoConnect?: boolean;
+    initialProviderName?: string;
+    cleanOutput?: boolean;
 }
 
-export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', autoConnect = false }: ViewerPageProps) {
-    // Room list state
-    const [rooms, setRooms] = useState<RoomInfo[]>([]);
-    const [isLoadingRooms, setIsLoadingRooms] = useState(false);
-    const [roomsError, setRoomsError] = useState<string | null>(null);
-
-    // Provider filter - simple select: 'all' or specific provider name
-    const [filterProvider, setFilterProvider] = useState<string>('all');
+export default function ViewerPage({
+    onBack,
+    backendUrl,
+    initialRoomName = '',
+    autoConnect = false,
+    initialProviderName = '',
+    cleanOutput = false,
+}: ViewerPageProps) {
+    const [filterProvider, setFilterProvider] = useState<string>(initialProviderName);
+    const [subtitleVisible, setSubtitleVisible] = useState(false);
+    const [subtitlePageTick, setSubtitlePageTick] = useState(0);
+    const [subtitlePageDurationMs, setSubtitlePageDurationMs] = useState(5_000);
+    const [subtitlePaused, setSubtitlePaused] = useState(false);
     const autoConnectAttemptedRef = useRef<string | null>(null);
 
-    // Convert backend URL to HTTP
     const httpBackendUrl = toHttpUrl(backendUrl);
-
-    // Room viewer hook
     const viewer = useRoomViewer({
-        tokenEndpoint: `${httpBackendUrl}/livekit/token`,
+        tokenEndpoint: `${httpBackendUrl}/livekit/viewer-token`,
+        fallbackTokenEndpoint: `${httpBackendUrl}/livekit/token`,
     });
 
     useEffect(() => {
@@ -63,46 +60,18 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
             return;
         }
 
-        autoConnectAttemptedRef.current = initialRoomName;
-        void viewer.connect(initialRoomName);
+        // Defer the first attempt until after React Strict Mode's development
+        // mount check. Starting it synchronously lets that check dispose the
+        // lifecycle, leaving the URL-launched viewer stuck in CONNECTING.
+        const timerId = window.setTimeout(() => {
+            if (autoConnectAttemptedRef.current === initialRoomName) return;
+            autoConnectAttemptedRef.current = initialRoomName;
+            void viewer.connect(initialRoomName);
+        }, 0);
+
+        return () => window.clearTimeout(timerId);
     }, [autoConnect, initialRoomName, viewer.connect, viewer.connectionState]);
 
-    // Fetch available rooms
-    const fetchRooms = useCallback(async () => {
-        setIsLoadingRooms(true);
-        setRoomsError(null);
-
-        try {
-            const response = await fetch(`${httpBackendUrl}/livekit/rooms`);
-            if (!response.ok) {
-                throw new Error(`Failed to fetch rooms: ${response.status}`);
-            }
-            const data = await response.json();
-            setRooms(data.rooms || []);
-        } catch (err) {
-            console.error('[Viewer] Failed to fetch rooms:', err);
-            setRoomsError(err instanceof Error ? err.message : 'Failed to fetch rooms');
-        } finally {
-            setIsLoadingRooms(false);
-        }
-    }, [httpBackendUrl]);
-
-    // Fetch rooms on mount and periodically
-    useEffect(() => {
-        let disposed = false;
-        let nextPoll: number | undefined;
-        const poll = async () => {
-            await fetchRooms();
-            if (!disposed) nextPoll = window.setTimeout(poll, 10000);
-        };
-        void poll();
-        return () => {
-            disposed = true;
-            if (nextPoll !== undefined) window.clearTimeout(nextPoll);
-        };
-    }, [fetchRooms]);
-
-    // Get unique providers from agents
     const availableProviders = useMemo(() => {
         return collectTranscriptProviders(
             viewer.transcripts,
@@ -110,6 +79,16 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
             viewer.agents.map(agent => agent.provider),
         );
     }, [viewer.agents, viewer.interimTranscripts, viewer.transcripts]);
+
+    useEffect(() => {
+        setFilterProvider(currentProvider => {
+            if (availableProviders.length === 0) return currentProvider;
+            if (currentProvider && availableProviders.includes(currentProvider)) return currentProvider;
+
+            const activeProvider = viewer.agents.find(agent => availableProviders.includes(agent.provider))?.provider;
+            return activeProvider ?? availableProviders[0];
+        });
+    }, [availableProviders, viewer.agents]);
 
     const { transcripts: filteredTranscripts, interims: filteredInterims } = useMemo(() => {
         return selectTranscriptPresentation(
@@ -119,291 +98,295 @@ export default function ViewerPage({ onBack, backendUrl, initialRoomName = '', a
         );
     }, [filterProvider, viewer.interimTranscripts, viewer.transcripts]);
 
-    const {
-        containerRef: transcriptScrollRef,
-        isFollowingLatest,
-        handleScroll,
-        jumpToLatest,
-    } = useTranscriptViewport({
-        committed: filteredTranscripts,
-        interim: filteredInterims,
-    });
+    const roomName = viewer.currentRoomName || initialRoomName;
+    const hasTranscript = filteredTranscripts.length > 0 || filteredInterims.length > 0;
+    const hasAnyTranscript = viewer.transcripts.length > 0 || viewer.interimTranscripts.size > 0;
+    const isConnected = viewer.connectionState === ConnectionState.CONNECTED;
+    const { transcripts: subtitleTranscripts, interims: subtitleInterims } = selectCurrentSubtitle(
+        filteredTranscripts,
+        filteredInterims,
+    );
+    const latestSubtitle = subtitleInterims.at(-1) ?? subtitleTranscripts.at(-1);
+    const latestSubtitleAnnouncement = [
+        latestSubtitle?.text,
+        latestSubtitle?.translation?.text,
+    ].filter(Boolean).join('. ');
+    const handleSubtitlePageAdvance = useCallback(() => {
+        setSubtitlePageTick(tick => tick + 1);
+    }, []);
+    const subtitleActivityKey = useMemo(() => [
+        ...subtitleTranscripts.map(segment => [
+            segment.id,
+            segment.text,
+            segment.translation?.text ?? '',
+            segment.translation?.isFinal ?? '',
+        ].join(':')),
+        ...subtitleInterims.map(interim => [
+            interim.key,
+            interim.text,
+            interim.translation?.text ?? '',
+            interim.translation?.isFinal ?? '',
+        ].join(':')),
+    ].join('|'), [subtitleInterims, subtitleTranscripts]);
+
+    useEffect(() => {
+        if (!isConnected || !hasTranscript || !filterProvider) {
+            setSubtitleVisible(false);
+            return;
+        }
+
+        setSubtitleVisible(true);
+        if (subtitlePaused) return;
+        const timeoutId = window.setTimeout(() => {
+            setSubtitleVisible(false);
+        }, calculateSubtitleIdleTimeoutMs(subtitlePageDurationMs));
+        return () => window.clearTimeout(timeoutId);
+    }, [filterProvider, hasTranscript, isConnected, subtitleActivityKey, subtitlePageDurationMs, subtitlePageTick, subtitlePaused]);
+
+    const subtitleSurface = (
+        <div
+            className={`viewer-subtitle-scroller transcript-scroller relative overflow-hidden px-4 sm:px-8 ${cleanOutput ? 'viewer-subtitle-scroller--clean' : ''}`}
+        >
+            <span className="sr-only" aria-live="polite" aria-atomic="true">{latestSubtitleAnnouncement}</span>
+            {!isConnected ? (
+                <ViewerEmptyState connectionState={viewer.connectionState} roomName={roomName} onConnect={() => roomName && void viewer.connect(roomName)} />
+            ) : !filterProvider ? (
+                <div className="viewer-subtitle-empty" role="status">
+                    <span className="viewer-subtitle-empty__icon viewer-subtitle-empty__icon--neutral" aria-hidden="true"><Radio size={22} /></span>
+                    <p className="text-base font-semibold text-slate-200">Choose a transcript source</p>
+                    <p className="mt-1 text-sm text-slate-600">Select a provider from the Transcript view.</p>
+                </div>
+            ) : !hasTranscript ? (
+                <div className="viewer-subtitle-empty" role="status">
+                    <span className="viewer-subtitle-empty__icon viewer-subtitle-empty__icon--neutral" aria-hidden="true"><Bot size={22} /></span>
+                    <p className="text-base font-semibold text-slate-200">Waiting for subtitle text</p>
+                    <p className="mt-1 text-sm text-slate-500">
+                        {viewer.agents.length === 0 ? 'No transcription provider is connected yet.' : 'Text will appear here as the room speaks.'}
+                    </p>
+                </div>
+            ) : (
+                <div
+                    className={`viewer-subtitle-stage ${subtitleVisible ? '' : 'viewer-subtitle-stage--expired'}`}
+                    aria-hidden={!subtitleVisible}
+                >
+                    <TranscriptRows
+                        transcripts={subtitleTranscripts}
+                        interims={subtitleInterims}
+                        variant="subtitle"
+                        onSubtitlePageAdvance={handleSubtitlePageAdvance}
+                        onSubtitlePageDuration={setSubtitlePageDurationMs}
+                        subtitlePaused={subtitlePaused}
+                    />
+                </div>
+            )}
+        </div>
+    );
+
+    if (cleanOutput) {
+        return (
+            <main id="main-content" className="viewer-clean-output" aria-label="Clean subtitle output">
+                {subtitleSurface}
+            </main>
+        );
+    }
 
     return (
         <div className="app-shell">
+            <a href="#main-content" className="app-skip-link">Skip to content</a>
             <ToastViewport notices={[
-                roomsError && { id: `rooms-error-${roomsError}`, tone: 'error', title: 'Rooms unavailable', message: roomsError, onDismiss: () => setRoomsError(null) },
                 viewer.error && { id: `viewer-error-${viewer.error}`, tone: 'error', title: 'Connection error', message: viewer.error },
             ]} />
-            <span className="sr-only" aria-live="polite" aria-atomic="true">{viewer.transcripts.at(-1)?.text ?? ''}</span>
-            {/* Header */}
             <header className="app-header">
-                <div className="app-header__content max-w-7xl mx-auto px-4 sm:px-6 py-3 flex justify-between items-center">
-                    <div className="flex items-center gap-3">
+                <div className="app-header__content viewer-navbar mx-auto w-full max-w-7xl px-4 py-3 sm:px-6">
+                    <div className="viewer-navbar__brand flex min-w-0 items-center gap-3">
                         {onBack && (
                             <button
+                                type="button"
                                 onClick={onBack}
                                 className="control-button control-button--quiet !min-h-11 !px-2.5"
-                                title="Close Viewer"
+                                title="Close Transcript"
+                                aria-label="Close Transcript"
                             >
-                                <X size={20} />
+                                <ArrowLeft size={18} aria-hidden="true" />
                             </button>
                         )}
                         <img src="/captionlive-mark.svg" alt="" className="h-10 w-10 shrink-0 rounded-lg" aria-hidden="true" />
-                        <div>
-                            <h1 className="flex min-w-0 items-center gap-2 text-lg font-semibold tracking-tight text-white">
-                                <span className="shrink-0 text-teal-200">CaptionLive</span>
-                                <span className="h-4 w-px shrink-0 bg-slate-700" aria-hidden="true" />
+                        <div className="min-w-0">
+                            <h1 className="flex min-w-0 items-center gap-2 truncate text-lg font-semibold tracking-tight sm:text-xl">
+                                <span className="shrink-0 text-[var(--accent)]">CaptionLive</span>
+                                <span className="h-4 w-px shrink-0 bg-[var(--line)]" aria-hidden="true" />
                                 <span className="truncate">Transcript</span>
                             </h1>
-                            <p className="text-xs text-slate-400">Follow live transcription</p>
+                            <p className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-sm">
+                                {roomName ? (
+                                    <>
+                                        <span className="shrink-0 text-[var(--muted)]">Room</span>
+                                        <strong className="truncate font-semibold text-[var(--ink)]">{roomName}</strong>
+                                        <span className="shrink-0 text-[var(--subtle)]" aria-hidden="true">·</span>
+                                    </>
+                                ) : null}
+                                <span className="truncate text-[var(--muted)]">Live dialogue subtitles</span>
+                            </p>
                         </div>
                     </div>
 
-                    {/* Connection Status & Audio Control */}
-                    {viewer.currentRoomName && (
-                        <div className="flex items-center gap-3">
-                            <span className="text-sm text-slate-400">
-                                Room: <span className="text-white font-medium">{viewer.currentRoomName}</span>
-                            </span>
-
-                            {/* Audio Mute Button */}
-                            {viewer.audioParticipants.length > 0 && (
+                    <div className="viewer-navbar__controls flex min-w-0 items-center justify-end gap-1.5 sm:gap-2">
+                        {roomName && <ConnectionBadge state={viewer.connectionState} />}
+                        {viewer.audioParticipants.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={viewer.toggleAudioMute}
+                                className={`control-button !min-h-11 !min-w-11 !px-2.5 ${viewer.isAudioMuted
+                                    ? 'control-button--danger'
+                                    : 'control-button--quiet text-emerald-200'
+                                    }`}
+                                title={viewer.isAudioMuted ? 'Unmute room audio' : 'Mute room audio'}
+                                aria-label={viewer.isAudioMuted ? 'Unmute room audio' : 'Mute room audio'}
+                            >
+                                {viewer.isAudioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                            </button>
+                        )}
+                        {isConnected && (
+                            <>
+                                <span className="viewer-navbar__action-divider" aria-hidden="true" />
                                 <button
-                                    onClick={viewer.toggleAudioMute}
-                                    className={`min-h-11 min-w-11 rounded-lg p-2 transition ${viewer.isAudioMuted
-                                        ? 'text-red-400 hover:text-red-300 bg-red-500/20 hover:bg-red-500/30 border border-red-500/30'
-                                        : 'text-emerald-400 hover:text-emerald-300 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/30'
-                                        }`}
-                                    title={viewer.isAudioMuted ? 'Unmute audio' : 'Mute audio'}
+                                    type="button"
+                                    onClick={viewer.disconnect}
+                                    className="control-button control-button--inline control-button--inline-danger !min-h-11 !px-2.5 sm:!px-3"
+                                    title="Leave room"
+                                    aria-label="Leave room"
                                 >
-                                    {viewer.isAudioMuted ? <VolumeX size={18} /> : <Volume2 size={18} />}
+                                    <LogOut size={16} aria-hidden="true" />
+                                    <span className="hidden lg:inline">Leave room</span>
                                 </button>
-                            )}
-
-                            <ConnectionBadge state={viewer.connectionState} />
-                        </div>
-                    )}
+                            </>
+                        )}
+                    </div>
                 </div>
             </header>
 
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
-                <div className="grid grid-cols-1 gap-5 lg:grid-cols-4">
-                    {/* Left Sidebar - Room List */}
-                    <div className="lg:col-span-1 space-y-4">
-                        {/* Room List Card */}
+            <main id="main-content" className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-7">
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-[19rem_minmax(0,1fr)]">
+                    <aside className="space-y-4">
                         <section className="app-panel p-4">
-                            <div className="mb-4 flex items-center justify-between">
-                                <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-                                    <Radio size={14} className="text-emerald-400" />
-                                    Active Rooms
+                            <div className="mb-4">
+                                <h2 className="flex items-center gap-2 text-sm font-semibold text-white">
+                                    <Radio size={14} className="text-teal-300" />
+                                    Transcript source
                                 </h2>
-                                <button
-                                    onClick={fetchRooms}
-                                    disabled={isLoadingRooms}
-                                    className="control-button control-button--quiet !min-h-11 !px-2 disabled:opacity-50"
-                                    title="Refresh rooms"
-                                >
-                                    <RefreshCw size={14} className={isLoadingRooms ? 'animate-spin' : ''} />
-                                </button>
+                                <p className="mt-1 text-xs leading-5 text-slate-400">
+                                    Choose one provider to follow. Translation appears below the source when available. This view shows recognized dialogue; non-speech audio is not inferred.
+                                </p>
                             </div>
 
-                            {rooms.length === 0 ? (
-                                <p className="text-center text-sm text-slate-400 py-4">
-                                    {isLoadingRooms ? 'Loading...' : 'No active rooms'}
-                                </p>
-                            ) : (
-                                <div className="space-y-1.5">
-                                    {rooms.map(room => (
+                            <div className="space-y-2" role="group" aria-label="Transcript provider">
+                                {availableProviders.map(provider => {
+                                    const isActive = viewer.agents.some(agent => agent.provider === provider);
+                                    const providerCount = viewer.transcripts.filter(segment => segment.provider === provider).length;
+                                    const presentation = getProviderPresentation(provider);
+                                    return (
                                         <button
-                                            key={room.name}
-                                            onClick={() => {
-                                                void viewer.connect(room.name);
-                                                const nextUrl = buildViewerUrl(window.location.origin + window.location.pathname, room.name);
-                                                window.location.hash = new URL(nextUrl).hash;
-                                            }}
-                                            disabled={viewer.connectionState === ConnectionState.CONNECTING}
-                                            className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${viewer.currentRoomName === room.name
-                                                ? 'border-teal-400/45 bg-teal-400/10 text-white'
-                                                : 'border-slate-700 bg-slate-950/20 text-slate-300 hover:bg-slate-700/35'
-                                                }`}
+                                            key={provider}
+                                            type="button"
+                                            aria-pressed={filterProvider === provider}
+                                            onClick={() => setFilterProvider(provider)}
+                                            className={`viewer-provider-option ${filterProvider === provider ? 'viewer-provider-option--selected' : ''}`}
                                         >
-                                            <div className="font-medium text-sm">{room.name}</div>
-                                            <div className="flex items-center gap-1 text-xs text-slate-400 mt-1">
-                                                <Users size={12} />
-                                                {room.numParticipants} participant{room.numParticipants !== 1 ? 's' : ''}
-                                            </div>
+                                            <span className="flex min-w-0 items-center gap-2.5">
+                                                <span className={`viewer-provider-option__swatch ${presentation.accent}`} aria-hidden="true" />
+                                                <span className="min-w-0 truncate">{formatProviderName(provider)}</span>
+                                            </span>
+                                            <span className="flex shrink-0 items-center gap-2">
+                                                <span className={`status-dot ${isActive ? 'status-dot--live' : ''}`} aria-hidden="true" />
+                                                <span className="sr-only">{isActive ? 'Provider live' : 'No active agent'}</span>
+                                                <span className="viewer-provider-option__count" aria-label={`${providerCount} finalized segments`}>{providerCount}</span>
+                                            </span>
                                         </button>
-                                    ))}
-                                </div>
-                            )}
+                                    );
+                                })}
+                            </div>
 
-                            {viewer.connectionState === ConnectionState.CONNECTED && (
-                                <button
-                                    onClick={() => {
-                                        viewer.disconnect();
-                                        const nextUrl = buildViewerUrl(window.location.origin + window.location.pathname, '');
-                                        window.location.hash = new URL(nextUrl).hash;
-                                    }}
-                                    className="control-button control-button--danger mt-4 w-full"
-                                >
-                                    Disconnect
-                                </button>
+                            {availableProviders.length === 0 && (
+                                <div className="viewer-provider-empty" role="status">
+                                    <Radio size={18} className="text-slate-500" aria-hidden="true" />
+                                    <div>
+                                        <p className="text-sm font-medium text-slate-300">Waiting for a provider</p>
+                                        <p className="mt-1 text-xs leading-5 text-slate-500">Start an agent in Control Room to make it available here.</p>
+                                    </div>
+                                </div>
                             )}
                         </section>
 
-                        {/* Active Agents Card */}
-                        {viewer.connectionState === ConnectionState.CONNECTED && (
-                            <section className="app-panel p-4">
-                                <h2 className="text-sm font-semibold text-white flex items-center gap-2 mb-3">
-                                    <Bot size={14} className="text-teal-300" />
-                                    Active Agents
-                                </h2>
+                    </aside>
 
-                                {viewer.agents.length === 0 ? (
-                                    <p className="text-center text-sm text-slate-400 py-2">
-                                        No agents connected
-                                    </p>
-                                ) : (
-                                    <div className="space-y-2">
-                                        {viewer.agents.map(agent => (
-                                            <div
-                                                key={agent.identity}
-                                                className={`flex items-center justify-between rounded-lg border px-2.5 py-2 ${getProviderPresentation(agent.provider).badge}`}
-                                            >
-                                                <span className="text-sm font-medium">{formatProviderName(agent.provider)}</span>
-                                                <span className="status-dot status-dot--live" aria-hidden="true" />
-                                            </div>
-                                        ))}
-                                    </div>
-                                )}
-                            </section>
-                        )}
-
-                        {/* Audio Playback Card */}
-                        {viewer.connectionState === ConnectionState.CONNECTED && viewer.audioParticipants.length > 0 && (
-                            <section className="app-panel p-4">
-                                <div className="flex items-center justify-between mb-3">
-                                    <h2 className="text-sm font-semibold text-white flex items-center gap-2">
-                                        {viewer.isAudioMuted ? (
-                                            <VolumeX size={14} className="text-red-400" />
-                                        ) : (
-                                            <Volume2 size={14} className="text-emerald-400" />
-                                        )}
-                                        Audio
-                                    </h2>
-                                    <button
-                                        onClick={viewer.toggleAudioMute}
-                                        className={`control-button !min-h-11 !px-2.5 ${viewer.isAudioMuted
-                                            ? 'control-button--danger'
-                                            : 'control-button--quiet text-emerald-200'
-                                            }`}
-                                    >
-                                        {viewer.isAudioMuted ? 'Unmute' : 'Mute'}
-                                    </button>
-                                </div>
-
-                                <div className="space-y-1">
-                                    {viewer.audioParticipants.map(participant => (
-                                        <div
-                                            key={participant}
-                                            className="flex items-center gap-2 text-xs text-slate-300"
-                                        >
-                                            <span className={`status-dot ${viewer.isAudioMuted ? '' : 'status-dot--live'}`} aria-hidden="true" />
-                                            <span className="truncate">{participant}</span>
-                                        </div>
-                                    ))}
-                                </div>
-
-                                {!viewer.isAudioMuted && (
-                                    <p className="text-xs text-emerald-400 mt-2">🔊 Listening to room audio</p>
-                                )}
-                            </section>
-                        )}
-                    </div>
-
-                    {/* Main Content - Transcript Area */}
-                    <div className="lg:col-span-3">
-                        <section className="app-panel relative overflow-hidden">
-                            {/* Toolbar */}
-                            <div className="panel-header flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-                                <div className="flex items-center gap-3">
-                                    <h2 className="text-sm font-semibold text-white">
-                                        Transcripts
-                                    </h2>
-                                    <span className="text-xs text-slate-400">
-                                        {filteredTranscripts.length} segment{filteredTranscripts.length !== 1 ? 's' : ''}
-                                    </span>
-                                </div>
-
-                                <div className="flex items-center gap-2">
-                                    {/* Provider Filter */}
-                                    {/* Provider Filter - Simple Select */}
-                                    {availableProviders.length > 0 && (
-                                        <select
-                                            value={filterProvider}
-                                            onChange={(e) => setFilterProvider(e.target.value)}
-                                            aria-label="Filter transcripts by provider"
-                                            className="h-11 rounded-lg border border-slate-600 bg-slate-950/40 px-3 text-xs font-medium text-white"
-                                        >
-                                            <option value="all">All Providers</option>
-                                            {availableProviders.map(provider => (
-                                                <option key={provider} value={provider}>
-                                                    {formatProviderName(provider)}
-                                                </option>
-                                            ))}
-                                        </select>
-                                    )}
-
-                                    {/* Clear Button */}
-                                    <button
-                                        onClick={viewer.clearTranscripts}
-                                        disabled={viewer.transcripts.length === 0 && viewer.interimTranscripts.size === 0}
-                                        className="control-button control-button--quiet disabled:opacity-40"
-                                    >
-                                        <Trash2 size={12} />
-                                        Clear
-                                    </button>
-                                </div>
+                    <section className="app-panel viewer-subtitle-panel flex flex-col" aria-labelledby="viewer-subtitle-heading">
+                        <div className="panel-header viewer-subtitle-toolbar flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
+                            <div className="flex min-w-0 items-center gap-3">
+                                <h2 id="viewer-subtitle-heading" className="text-sm font-semibold text-slate-100">Subtitle</h2>
+                                <span className="text-xs text-slate-400" aria-live="polite">
+                                    {filteredTranscripts.length} final
+                                </span>
                             </div>
-
-                            {/* Transcript List */}
-                            <div
-                                ref={transcriptScrollRef}
-                                className="transcript-scroller h-[clamp(24rem,65dvh,52rem)] overflow-y-auto px-4 py-2"
-                                onScroll={(event) => handleScroll(event.currentTarget)}
-                            >
-                                {viewer.connectionState !== ConnectionState.CONNECTED ? (
-                                    <div className="flex h-full flex-col items-center justify-center text-slate-400">
-                                        <Radio size={32} className="mb-3 opacity-50" />
-                                        <p className="text-sm">Select a room to start viewing</p>
-                                    </div>
-                                ) : filteredTranscripts.length === 0 && filteredInterims.length === 0 ? (
-                                    <div className="flex h-full flex-col items-center justify-center text-slate-400">
-                                        <Bot size={32} className="mb-3 opacity-50" />
-                                        <p className="text-sm">Waiting for transcripts...</p>
-                                        {viewer.agents.length === 0 && (
-                                            <p className="mt-1 text-xs text-slate-400">No agents connected yet</p>
-                                        )}
-                                    </div>
-                                ) : (
-                                    <TranscriptRows transcripts={filteredTranscripts} interims={filteredInterims} variant="detailed" />
-                                )}
-                            </div>
-                            {!isFollowingLatest && (filteredTranscripts.length > 0 || filteredInterims.length > 0) && (
+                            <div className="flex items-center gap-2">
                                 <button
                                     type="button"
-                                    className="control-button control-button--quiet absolute bottom-3 right-4 bg-slate-900/95 shadow-lg"
-                                    onClick={jumpToLatest}
+                                    onClick={() => setSubtitlePaused(paused => !paused)}
+                                    disabled={!hasTranscript}
+                                    className="control-button control-button--quiet disabled:opacity-40"
+                                    aria-pressed={subtitlePaused}
+                                    aria-label={subtitlePaused ? 'Resume subtitles' : 'Pause subtitles'}
                                 >
-                                    Jump to latest
+                                    {subtitlePaused ? <Play size={12} aria-hidden="true" /> : <Pause size={12} aria-hidden="true" />}
+                                    {subtitlePaused ? 'Resume' : 'Pause'}
                                 </button>
-                            )}
-                        </section>
+                                <button
+                                    type="button"
+                                    onClick={viewer.clearTranscripts}
+                                    disabled={!hasAnyTranscript}
+                                    className="control-button control-button--quiet disabled:opacity-40"
+                                    aria-label="Clear transcript"
+                                >
+                                    <Trash2 size={12} aria-hidden="true" />
+                                    Clear
+                                </button>
+                            </div>
+                        </div>
 
-                    </div>
+                        {subtitleSurface}
+                    </section>
                 </div>
             </main>
+        </div>
+    );
+}
+
+function ViewerEmptyState({
+    connectionState,
+    roomName,
+    onConnect,
+}: {
+    connectionState: ConnectionState;
+    roomName: string;
+    onConnect: () => void;
+}) {
+    const isConnecting = connectionState === ConnectionState.CONNECTING;
+    const isError = connectionState === ConnectionState.ERROR;
+    return (
+        <div className="viewer-subtitle-empty" role={isError ? 'alert' : 'status'}>
+            <span className={`viewer-subtitle-empty__icon ${isConnecting ? 'viewer-subtitle-empty__icon--pending' : isError ? 'viewer-subtitle-empty__icon--error' : 'viewer-subtitle-empty__icon--neutral'}`} aria-hidden="true">
+                {isConnecting ? <LoaderCircle size={22} className="animate-spin" /> : isError ? <AlertTriangle size={22} /> : <Radio size={22} />}
+            </span>
+            <p className="text-base font-semibold text-slate-200">
+                {isConnecting ? `Connecting to ${roomName || 'room'}` : isError ? 'Connection failed' : 'Room is not connected'}
+            </p>
+            <p className="mt-1 max-w-sm text-center text-sm text-slate-500">
+                {isConnecting ? 'Joining the live subtitle room…' : isError ? `Could not join ${roomName || 'this room'}. Check the connection and try again.` : 'Connect to the room to start receiving subtitles.'}
+            </p>
+            {!isConnecting && roomName && (
+                <button type="button" onClick={onConnect} className="control-button control-button--primary mt-4">
+                    {isError ? 'Retry connection' : 'Connect to room'}
+                </button>
+            )}
         </div>
     );
 }

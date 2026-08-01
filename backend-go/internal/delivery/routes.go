@@ -63,6 +63,10 @@ func setupLiveKitRoutes(
 		return handler.HandleLiveKitToken(c, cfg, rooms)
 	})
 	log.Println("✅ [LiveKit] Token service enabled at POST /livekit/token")
+	app.Post("/livekit/viewer-token", controlAuth, func(c *fiber.Ctx) error {
+		return handler.HandleViewerToken(c, cfg, rooms)
+	})
+	log.Println("✅ [LiveKit] Read-only viewer tokens enabled at POST /livekit/viewer-token")
 
 	// Room management
 	roomRoutes := app.Group("/livekit/rooms")

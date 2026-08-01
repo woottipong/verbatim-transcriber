@@ -7,6 +7,7 @@ export interface AppRoute {
   providerName: string;
   captionPolicy: CaptionPolicy;
   autoConnect: boolean;
+  cleanOutput?: boolean;
 }
 
 export function parseAppRoute(hash: string): AppRoute {
@@ -26,9 +27,10 @@ export function parseAppRoute(hash: string): AppRoute {
     return {
       page: 'viewer',
       roomName,
-      providerName: '',
+      providerName,
       captionPolicy,
       autoConnect: params.get('autoconnect') === '1' && roomName.length > 0,
+      ...(params.get('output') === '1' ? { cleanOutput: true } : {}),
     };
   }
   if (path === 'caption-desk') {
