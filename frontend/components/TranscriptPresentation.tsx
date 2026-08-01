@@ -16,7 +16,7 @@ import {
     alignSubtitlePagePairs,
     calculateSubtitlePageDurationMs,
     resolveSubtitlePageIndex,
-    splitSubtitleTextByFit,
+    splitSubtitleTextIntoRollingWindows,
 } from '../lib/subtitlePaging';
 
 interface TranscriptRowsProps {
@@ -105,8 +105,8 @@ function SubtitleRows({
         const measurePages = () => {
             const nextPages = buildSubtitlePages(
                 current.text,
-                createTwoLineFitChecker(sourceMeasureRef.current),
-                createTwoLineFitChecker(translationMeasureRef.current),
+                createLineFitChecker(sourceMeasureRef.current),
+                createLineFitChecker(translationMeasureRef.current),
                 current.translation,
                 current.languageCode,
             );
@@ -116,8 +116,14 @@ function SubtitleRows({
         measurePages();
         const resizeObserver = new ResizeObserver(measurePages);
         if (measureContainerRef.current) resizeObserver.observe(measureContainerRef.current);
-        void document.fonts?.ready.then(measurePages);
-        return () => resizeObserver.disconnect();
+        let disposed = false;
+        void document.fonts?.ready.then(() => {
+            if (!disposed) measurePages();
+        });
+        return () => {
+            disposed = true;
+            resizeObserver.disconnect();
+        };
     }, [current, currentContent]);
 
     useEffect(() => {
@@ -214,8 +220,8 @@ function buildSubtitlePages(
     translation?: TranscriptSegment['translation'] | InterimTranscript['translation'],
     sourceLanguageCode?: string,
 ): SubtitlePage[] {
-    const sourcePages = splitSubtitleTextByFit(sourceText, sourceFits, sourceLanguageCode);
-    const translationPages = splitSubtitleTextByFit(
+    const sourcePages = splitSubtitleTextIntoRollingWindows(sourceText, sourceFits, sourceLanguageCode);
+    const translationPages = splitSubtitleTextIntoRollingWindows(
         translation?.text ?? '',
         translationFits,
         translation?.languageCode,
@@ -236,9 +242,9 @@ function buildSubtitlePages(
     }));
 }
 
-function createTwoLineFitChecker(element: HTMLElement): (candidate: string) => boolean {
+function createLineFitChecker(element: HTMLElement): (candidate: string) => boolean {
     const lineHeight = Number.parseFloat(window.getComputedStyle(element).lineHeight);
-    const maximumHeight = lineHeight * 2 + 1;
+    const maximumHeight = lineHeight + 1;
     return candidate => {
         element.textContent = candidate;
         return element.getBoundingClientRect().height <= maximumHeight;

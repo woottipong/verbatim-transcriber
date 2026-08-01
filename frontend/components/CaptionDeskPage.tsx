@@ -46,6 +46,7 @@ function ConnectedCaptionDesk({
   provider,
   captionPolicy,
 }: {
+  key?: string;
   backendUrl: string;
   roomName: string;
   provider: AgentProvider;

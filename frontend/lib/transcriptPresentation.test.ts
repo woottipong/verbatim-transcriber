@@ -5,6 +5,7 @@ import {
     collectTranscriptProviders,
     selectCurrentSubtitle,
     selectTranscriptPresentation,
+    snapshotCurrentSubtitle,
 } from './transcriptPresentation.ts';
 import type { TranscriptSegment } from '../types.ts';
 import type { InterimTranscript } from './transcriptMessages.ts';
@@ -65,6 +66,60 @@ test('keeps one subtitle block on the latest draft or final', () => {
     const final = selectCurrentSubtitle(google.transcripts, []);
     assert.deepEqual(final.transcripts.map(segment => segment.text), ['Google final']);
     assert.deepEqual(final.interims, []);
+});
+
+test('keeps the previous final continuous with a new interim inside five seconds', () => {
+    const currentInterim = {
+        key: 'google:current',
+        text: 'ข้อความใหม่',
+        provider: 'google',
+        sourceIdentity: 'agent-google',
+        timestamp: 4_000,
+    } as InterimTranscript;
+
+    const current = selectCurrentSubtitle([{
+        id: 'previous', text: 'ข้อความก่อนหน้า', isFinal: true,
+        timestamp: 1_000, provider: 'google', role: 'source',
+    }], [currentInterim]);
+
+    assert.deepEqual(current.transcripts, []);
+    assert.deepEqual(current.interims.map(interim => interim.text), ['ข้อความก่อนหน้า ข้อความใหม่']);
+});
+
+test('rolls consecutive finals forward instead of blanking the completed interim', () => {
+    const current = selectCurrentSubtitle([
+        { id: 'previous', text: 'บรรทัดก่อน', isFinal: true, timestamp: 1_000, provider: 'google', role: 'source' },
+        { id: 'current', text: 'บรรทัดใหม่', isFinal: true, timestamp: 4_000, provider: 'google', role: 'source' },
+    ], []);
+
+    assert.deepEqual(current.transcripts.map(segment => segment.text), ['บรรทัดก่อน บรรทัดใหม่']);
+    assert.deepEqual(current.interims, []);
+});
+
+test('starts a fresh subtitle cue after five seconds without continuation', () => {
+    const current = selectCurrentSubtitle([
+        { id: 'stale', text: 'ข้อความเก่า', isFinal: true, timestamp: 1_000, provider: 'google', role: 'source' },
+        { id: 'current', text: 'ข้อความใหม่', isFinal: true, timestamp: 6_001, provider: 'google', role: 'source' },
+    ], []);
+
+    assert.deepEqual(current.transcripts.map(segment => segment.text), ['ข้อความใหม่']);
+});
+
+test('freezes the current subtitle cue independently from later live revisions', () => {
+    const live = selectCurrentSubtitle([], [{
+        key: 'google:live',
+        text: 'Current draft',
+        provider: 'google',
+        sourceIdentity: 'agent-google',
+        translation: { text: 'คำแปลปัจจุบัน', languageCode: 'th', isFinal: false },
+    }]);
+    const frozen = snapshotCurrentSubtitle(live);
+
+    live.interims[0].text = 'Later revision';
+    if (live.interims[0].translation) live.interims[0].translation.text = 'คำแปลใหม่';
+
+    assert.equal(frozen.interims[0].text, 'Current draft');
+    assert.equal(frozen.interims[0].translation?.text, 'คำแปลปัจจุบัน');
 });
 
 test('collects providers from agents, committed rows, and drafts without duplicates', () => {

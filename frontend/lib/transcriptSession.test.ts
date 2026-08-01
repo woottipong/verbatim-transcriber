@@ -81,6 +81,59 @@ test('keeps approved publications out of the raw transcript', () => {
     assert.deepEqual(session.getSnapshot().transcripts.map(item => item.text), ['สดเดิม']);
 });
 
+test('accepts every approved public caption as display-ready text regardless of isFinal', () => {
+    const { session } = createSession('desk');
+
+    session.ingest(payload({
+        text: 'ข้อความที่ตรวจแล้ว', isFinal: false, provider: 'google',
+        publicationId: 'publication-1', timestamp: 1_000,
+    }), 'agent-google', { publicCaptionMode: true });
+
+    assert.deepEqual(session.getSnapshot().transcripts, [{
+        id: 'desk-1',
+        text: 'ข้อความที่ตรวจแล้ว',
+        isFinal: true,
+        timestamp: 1_000,
+        provider: 'caption-desk',
+        role: 'source',
+        segmentId: 'publication-1',
+    }]);
+});
+
+test('accepts an approved public caption when isFinal is omitted', () => {
+    const { session } = createSession('desk');
+
+    session.ingest(payload({
+        text: 'เผยแพร่แล้ว', provider: 'azure',
+        publicationId: 'publication-2', timestamp: 2_000,
+    }), 'agent-azure', { publicCaptionMode: true });
+
+    assert.deepEqual(session.getSnapshot().transcripts.map(item => item.text), ['เผยแพร่แล้ว']);
+});
+
+test('deduplicates approved public captions by publicationId', () => {
+    const { session } = createSession('desk');
+    const approved = payload({
+        text: 'แสดงครั้งเดียว', isFinal: false, provider: 'gemini',
+        publicationId: 'publication-1', timestamp: 1_000,
+    });
+
+    session.ingest(approved, 'agent-gemini', { publicCaptionMode: true });
+    session.ingest(approved, 'agent-gemini', { publicCaptionMode: true });
+
+    assert.deepEqual(session.getSnapshot().transcripts.map(item => item.text), ['แสดงครั้งเดียว']);
+});
+
+test('rejects ordinary provider packets from the public caption session', () => {
+    const { session } = createSession('desk');
+
+    session.ingest(payload({
+        text: 'ข้อความดิบ', isFinal: true, provider: 'google', timestamp: 1_000,
+    }), 'agent-google', { publicCaptionMode: true });
+
+    assert.equal(session.getSnapshot().transcripts.length, 0);
+});
+
 test('ignores a delayed Gemini translation draft after its final translation', () => {
     const { session } = createSession();
 

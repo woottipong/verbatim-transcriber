@@ -62,13 +62,35 @@ export function splitSubtitleTextByFit(
     fits: (candidate: string) => boolean,
     locale?: string,
 ): string[] {
+    return splitSubtitleFragmentsByFit(text, fits, locale).map(fragment => fragment.text);
+}
+
+export function splitSubtitleTextIntoRollingWindows(
+    text: string,
+    fitsOneLine: (candidate: string) => boolean,
+    locale?: string,
+): string[] {
+    const lines = splitSubtitleFragmentsByFit(text, fitsOneLine, locale);
+    return lines.map((_, index) => joinSubtitleFragments(lines.slice(Math.max(0, index - 1), index + 1)));
+}
+
+interface SubtitleFragment {
+    text: string;
+    separatorAfter: string;
+}
+
+function splitSubtitleFragmentsByFit(
+    text: string,
+    fits: (candidate: string) => boolean,
+    locale?: string,
+): SubtitleFragment[] {
     let remaining = text.trim();
     if (!remaining) return [];
 
-    const pages: string[] = [];
+    const fragments: SubtitleFragment[] = [];
     while (remaining) {
         if (fits(remaining)) {
-            pages.push(remaining);
+            fragments.push({ text: remaining, separatorAfter: '' });
             break;
         }
 
@@ -89,16 +111,27 @@ export function splitSubtitleTextByFit(
         }
 
         const breakAt = findNaturalBreak(remaining, fittingBoundary, locale);
-        const page = remaining.slice(0, breakAt).trim();
+        const rawPage = remaining.slice(0, breakAt);
+        const page = rawPage.trim();
         if (!page) {
-            pages.push(remaining);
+            fragments.push({ text: remaining, separatorAfter: '' });
             break;
         }
-        pages.push(page);
-        remaining = remaining.slice(breakAt).trim();
+        const tail = remaining.slice(breakAt);
+        fragments.push({
+            text: page,
+            separatorAfter: /\s$/u.test(rawPage) || /^\s/u.test(tail) ? ' ' : '',
+        });
+        remaining = tail.trim();
     }
 
-    return pages;
+    return fragments;
+}
+
+function joinSubtitleFragments(fragments: SubtitleFragment[]): string {
+    return fragments.map((fragment, index) => (
+        index < fragments.length - 1 ? fragment.text + fragment.separatorAfter : fragment.text
+    )).join('');
 }
 
 export function alignSubtitlePagePairs(sourcePages: string[], translationPages: string[]): Array<{

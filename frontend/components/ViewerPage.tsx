@@ -7,7 +7,7 @@
  */
 
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { AlertTriangle, ArrowLeft, Bot, LoaderCircle, LogOut, Pause, Play, Radio, Trash2, Volume2, VolumeX } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, BadgeCheck, Bot, LoaderCircle, LogOut, Pause, Play, Radio, Trash2, Volume2, VolumeX } from 'lucide-react';
 import { useRoomViewer } from '../hooks/useRoomViewer';
 import { ConnectionState } from '../types';
 import { toHttpUrl } from '../lib/runtime';
@@ -16,7 +16,13 @@ import ConnectionBadge from './ConnectionBadge';
 import { formatProviderName, getProviderPresentation } from '../lib/providers';
 import ToastViewport from './ToastViewport';
 import { TranscriptRows } from './TranscriptPresentation';
-import { collectTranscriptProviders, selectCurrentSubtitle, selectTranscriptPresentation } from '../lib/transcriptPresentation';
+import {
+    collectTranscriptProviders,
+    selectCurrentSubtitle,
+    selectTranscriptPresentation,
+    snapshotCurrentSubtitle,
+    type CurrentSubtitlePresentation,
+} from '../lib/transcriptPresentation';
 import { calculateSubtitleIdleTimeoutMs } from '../lib/subtitlePaging';
 
 interface ViewerPageProps {
@@ -27,6 +33,8 @@ interface ViewerPageProps {
     initialProviderName?: string;
     cleanOutput?: boolean;
 }
+
+const CAPTION_DESK_SOURCE = 'caption-desk';
 
 export default function ViewerPage({
     onBack,
@@ -41,6 +49,7 @@ export default function ViewerPage({
     const [subtitlePageTick, setSubtitlePageTick] = useState(0);
     const [subtitlePageDurationMs, setSubtitlePageDurationMs] = useState(5_000);
     const [subtitlePaused, setSubtitlePaused] = useState(false);
+    const [pausedSubtitle, setPausedSubtitle] = useState<CurrentSubtitlePresentation | null>(null);
     const autoConnectAttemptedRef = useRef<string | null>(null);
 
     const httpBackendUrl = toHttpUrl(backendUrl);
@@ -83,6 +92,7 @@ export default function ViewerPage({
     useEffect(() => {
         setFilterProvider(currentProvider => {
             if (availableProviders.length === 0) return currentProvider;
+            if (currentProvider === CAPTION_DESK_SOURCE) return currentProvider;
             if (currentProvider && availableProviders.includes(currentProvider)) return currentProvider;
 
             const activeProvider = viewer.agents.find(agent => availableProviders.includes(agent.provider))?.provider;
@@ -90,22 +100,42 @@ export default function ViewerPage({
         });
     }, [availableProviders, viewer.agents]);
 
+    useEffect(() => {
+        if (initialProviderName === CAPTION_DESK_SOURCE) viewer.activatePublicCaptions();
+    }, [initialProviderName, viewer.activatePublicCaptions]);
+
+    useEffect(() => () => viewer.deactivatePublicCaptions(), [viewer.deactivatePublicCaptions]);
+
+    const handleSelectSource = useCallback((source: string) => {
+        if (source === filterProvider) return;
+        if (source === CAPTION_DESK_SOURCE) viewer.activatePublicCaptions();
+        else viewer.deactivatePublicCaptions();
+        setFilterProvider(source);
+    }, [filterProvider, viewer.activatePublicCaptions, viewer.deactivatePublicCaptions]);
+
     const { transcripts: filteredTranscripts, interims: filteredInterims } = useMemo(() => {
+        if (filterProvider === CAPTION_DESK_SOURCE) {
+            return { transcripts: viewer.publicCaptions, interims: [] };
+        }
         return selectTranscriptPresentation(
             viewer.transcripts,
             viewer.interimTranscripts,
             filterProvider,
         );
-    }, [filterProvider, viewer.interimTranscripts, viewer.transcripts]);
+    }, [filterProvider, viewer.interimTranscripts, viewer.publicCaptions, viewer.transcripts]);
 
     const roomName = viewer.currentRoomName || initialRoomName;
     const hasTranscript = filteredTranscripts.length > 0 || filteredInterims.length > 0;
-    const hasAnyTranscript = viewer.transcripts.length > 0 || viewer.interimTranscripts.size > 0;
+    const hasAnyTranscript = viewer.transcripts.length > 0 || viewer.interimTranscripts.size > 0 || viewer.publicCaptions.length > 0;
     const isConnected = viewer.connectionState === ConnectionState.CONNECTED;
-    const { transcripts: subtitleTranscripts, interims: subtitleInterims } = selectCurrentSubtitle(
+    const isCaptionDeskSource = filterProvider === CAPTION_DESK_SOURCE;
+    const liveSubtitle = selectCurrentSubtitle(
         filteredTranscripts,
         filteredInterims,
     );
+    const displayedSubtitle = subtitlePaused && pausedSubtitle ? pausedSubtitle : liveSubtitle;
+    const subtitleTranscripts = displayedSubtitle.transcripts;
+    const subtitleInterims = displayedSubtitle.interims;
     const latestSubtitle = subtitleInterims.at(-1) ?? subtitleTranscripts.at(-1);
     const latestSubtitleAnnouncement = [
         latestSubtitle?.text,
@@ -114,6 +144,15 @@ export default function ViewerPage({
     const handleSubtitlePageAdvance = useCallback(() => {
         setSubtitlePageTick(tick => tick + 1);
     }, []);
+    const handleToggleSubtitlePause = useCallback(() => {
+        if (subtitlePaused) {
+            setSubtitlePaused(false);
+            setPausedSubtitle(null);
+            return;
+        }
+        setPausedSubtitle(snapshotCurrentSubtitle(liveSubtitle));
+        setSubtitlePaused(true);
+    }, [liveSubtitle, subtitlePaused]);
     const subtitleActivityKey = useMemo(() => [
         ...subtitleTranscripts.map(segment => [
             segment.id,
@@ -128,6 +167,11 @@ export default function ViewerPage({
             interim.translation?.isFinal ?? '',
         ].join(':')),
     ].join('|'), [subtitleInterims, subtitleTranscripts]);
+
+    useEffect(() => {
+        setSubtitlePaused(false);
+        setPausedSubtitle(null);
+    }, [filterProvider, roomName]);
 
     useEffect(() => {
         if (!isConnected || !hasTranscript || !filterProvider) {
@@ -148,20 +192,26 @@ export default function ViewerPage({
             className={`viewer-subtitle-scroller transcript-scroller relative overflow-hidden px-4 sm:px-8 ${cleanOutput ? 'viewer-subtitle-scroller--clean' : ''}`}
         >
             <span className="sr-only" aria-live="polite" aria-atomic="true">{latestSubtitleAnnouncement}</span>
-            {!isConnected ? (
+            {cleanOutput && (!isConnected || !filterProvider || !hasTranscript) ? null : !isConnected ? (
                 <ViewerEmptyState connectionState={viewer.connectionState} roomName={roomName} onConnect={() => roomName && void viewer.connect(roomName)} />
             ) : !filterProvider ? (
                 <div className="viewer-subtitle-empty" role="status">
                     <span className="viewer-subtitle-empty__icon viewer-subtitle-empty__icon--neutral" aria-hidden="true"><Radio size={22} /></span>
                     <p className="text-base font-semibold text-slate-200">Choose a transcript source</p>
-                    <p className="mt-1 text-sm text-slate-600">Select a provider from the Transcript view.</p>
+                    <p className="mt-1 text-sm text-slate-500">Select a provider from the Transcript view.</p>
                 </div>
             ) : !hasTranscript ? (
                 <div className="viewer-subtitle-empty" role="status">
                     <span className="viewer-subtitle-empty__icon viewer-subtitle-empty__icon--neutral" aria-hidden="true"><Bot size={22} /></span>
-                    <p className="text-base font-semibold text-slate-200">Waiting for subtitle text</p>
+                    <p className="text-base font-semibold text-slate-200">
+                        {isCaptionDeskSource ? 'Waiting for a published caption' : 'Waiting for subtitle text'}
+                    </p>
                     <p className="mt-1 text-sm text-slate-500">
-                        {viewer.agents.length === 0 ? 'No transcription provider is connected yet.' : 'Text will appear here as the room speaks.'}
+                        {isCaptionDeskSource
+                            ? 'Text will appear when Caption Desk publishes it.'
+                            : viewer.agents.length === 0
+                                ? 'No transcription provider is connected yet.'
+                                : 'Text will appear here as the room speaks.'}
                     </p>
                 </div>
             ) : (
@@ -236,9 +286,9 @@ export default function ViewerPage({
                             <button
                                 type="button"
                                 onClick={viewer.toggleAudioMute}
-                                className={`control-button !min-h-11 !min-w-11 !px-2.5 ${viewer.isAudioMuted
-                                    ? 'control-button--danger'
-                                    : 'control-button--quiet text-emerald-200'
+                                className={`control-button control-button--inline !min-h-11 !min-w-11 !px-2.5 ${viewer.isAudioMuted
+                                    ? 'control-button--inline-danger'
+                                    : 'control-button--inline-accent'
                                     }`}
                                 title={viewer.isAudioMuted ? 'Unmute room audio' : 'Mute room audio'}
                                 aria-label={viewer.isAudioMuted ? 'Unmute room audio' : 'Mute room audio'}
@@ -275,11 +325,31 @@ export default function ViewerPage({
                                     Transcript source
                                 </h2>
                                 <p className="mt-1 text-xs leading-5 text-slate-400">
-                                    Choose one provider to follow. Translation appears below the source when available. This view shows recognized dialogue; non-speech audio is not inferred.
+                                    Choose approved captions or a live provider.
                                 </p>
                             </div>
 
-                            <div className="space-y-2" role="group" aria-label="Transcript provider">
+                            <div className="space-y-2" role="group" aria-label="Transcript source">
+                                <p className="viewer-source-group-label">Approved output</p>
+                                <button
+                                    type="button"
+                                    aria-pressed={isCaptionDeskSource}
+                                    onClick={() => handleSelectSource(CAPTION_DESK_SOURCE)}
+                                    className={`viewer-provider-option ${isCaptionDeskSource ? 'viewer-provider-option--selected' : ''}`}
+                                >
+                                    <span className="flex min-w-0 items-center gap-2.5">
+                                        <BadgeCheck size={16} className="shrink-0 text-teal-300" aria-hidden="true" />
+                                        <span className="min-w-0 truncate">Caption Desk</span>
+                                    </span>
+                                    <span className="flex shrink-0 items-center gap-2">
+                                        <span className="viewer-source-public-label">Public</span>
+                                        <span className="viewer-provider-option__count" aria-label={`${viewer.publicCaptions.length} published captions`}>
+                                            {viewer.publicCaptions.length}
+                                        </span>
+                                    </span>
+                                </button>
+
+                                <p className="viewer-source-group-label viewer-source-group-label--providers">Live providers</p>
                                 {availableProviders.map(provider => {
                                     const isActive = viewer.agents.some(agent => agent.provider === provider);
                                     const providerCount = viewer.transcripts.filter(segment => segment.provider === provider).length;
@@ -289,7 +359,7 @@ export default function ViewerPage({
                                             key={provider}
                                             type="button"
                                             aria-pressed={filterProvider === provider}
-                                            onClick={() => setFilterProvider(provider)}
+                                            onClick={() => handleSelectSource(provider)}
                                             className={`viewer-provider-option ${filterProvider === provider ? 'viewer-provider-option--selected' : ''}`}
                                         >
                                             <span className="flex min-w-0 items-center gap-2.5">
@@ -323,14 +393,14 @@ export default function ViewerPage({
                         <div className="panel-header viewer-subtitle-toolbar flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
                             <div className="flex min-w-0 items-center gap-3">
                                 <h2 id="viewer-subtitle-heading" className="text-sm font-semibold text-slate-100">Subtitle</h2>
-                                <span className="text-xs text-slate-400" aria-live="polite">
-                                    {filteredTranscripts.length} final
+                                <span className="text-xs text-slate-400">
+                                    {filteredTranscripts.length} {isCaptionDeskSource ? 'published' : 'final'}
                                 </span>
                             </div>
                             <div className="flex items-center gap-2">
                                 <button
                                     type="button"
-                                    onClick={() => setSubtitlePaused(paused => !paused)}
+                                    onClick={handleToggleSubtitlePause}
                                     disabled={!hasTranscript}
                                     className="control-button control-button--quiet disabled:opacity-40"
                                     aria-pressed={subtitlePaused}

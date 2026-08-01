@@ -18,6 +18,7 @@ import {
     getTranscriptKey,
     getTranscriptTurnKey,
     isAppendOnlyInterimProvider,
+    parsePublicCaptionMessage,
     parseTranscriptMessage,
     prunePendingTranslations,
     removeInterim,
@@ -43,6 +44,7 @@ export interface TranscriptSessionSnapshot {
 export interface TranscriptIngestOptions {
     resolveProvider?: (sourceIdentity: string) => string;
     onProviderObserved?: (sourceIdentity: string, provider: string) => void;
+    publicCaptionMode?: boolean;
 }
 
 interface TranscriptSessionOptions {
@@ -67,6 +69,7 @@ export class TranscriptSession {
     private readonly transcriptUpdates: TranscriptUpdateBuffer<BufferedTranscriptMessage>;
     private readonly googleUpdates: TranscriptUpdateBuffer<BufferedTranscriptMessage>;
     private readonly geminiUpdates: TranscriptUpdateBuffer<BufferedTranscriptMessage>;
+    private seenPublicationIds = new Set<string>();
     private committedSequence = 0;
 
     constructor(options: TranscriptSessionOptions) {
@@ -114,18 +117,45 @@ export class TranscriptSession {
             return false;
         }
 
-        const parsed = parseTranscriptMessage(decoded);
+        const parsed = options.publicCaptionMode
+            ? parsePublicCaptionMessage(decoded)
+            : parseTranscriptMessage(decoded);
         if (!parsed) return false;
 
-        const provider = parsed.provider || options.resolveProvider?.(sourceIdentity) || 'unknown';
-        const message = { ...parsed, provider };
-        if (message.publicationId) {
+        if (options.publicCaptionMode && !parsed.publicationId) return false;
+        if (!options.publicCaptionMode && parsed.publicationId) {
             // Approved captions belong to caption.public / approved WS feeds.
             // Raw Stream and Viewer sessions must never merge them into the
             // provider transcript, even if a transport omits the topic.
             return true;
         }
-        if (parsed.provider) options.onProviderObserved?.(sourceIdentity, parsed.provider);
+
+        if (parsed.publicationId) {
+            if (this.seenPublicationIds.has(parsed.publicationId)) return true;
+            this.seenPublicationIds.add(parsed.publicationId);
+            while (this.seenPublicationIds.size > 500) {
+                const oldest = this.seenPublicationIds.values().next().value;
+                if (oldest === undefined) break;
+                this.seenPublicationIds.delete(oldest);
+            }
+        }
+
+        const provider = options.publicCaptionMode
+            ? 'caption-desk'
+            : parsed.provider || options.resolveProvider?.(sourceIdentity) || 'unknown';
+        const message = options.publicCaptionMode
+            ? {
+                ...parsed,
+                isFinal: true,
+                provider,
+                role: 'source' as const,
+                segmentId: parsed.publicationId,
+                turnId: undefined,
+            }
+            : { ...parsed, provider };
+        if (!options.publicCaptionMode && parsed.provider) {
+            options.onProviderObserved?.(sourceIdentity, parsed.provider);
+        }
 
         const bufferedMessage: BufferedTranscriptMessage = {
             ...message,
@@ -165,6 +195,7 @@ export class TranscriptSession {
         this.geminiUpdates.clear();
         this.translationsByTurn.clear();
         this.latestPacketByKey.clear();
+        this.seenPublicationIds.clear();
         if (clearCommitted) this.committedSequence = 0;
 
         const transcripts = clearCommitted ? [] : this.snapshot.transcripts;

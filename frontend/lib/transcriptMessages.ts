@@ -21,6 +21,7 @@ export interface InterimTranscript {
     text: string;
     provider: string;
     sourceIdentity: string;
+    timestamp?: number;
     languageCode?: string;
     turnId?: string;
     segmentId?: string;
@@ -236,6 +237,32 @@ export function parseTranscriptMessage(value: unknown): TranscriptMessage | unde
     };
 }
 
+export function parsePublicCaptionMessage(value: unknown): TranscriptMessage | undefined {
+    if (typeof value !== 'object' || value === null) return undefined;
+
+    const candidate = value as Record<string, unknown>;
+    const publicationId = typeof candidate.publicationId === 'string'
+        ? candidate.publicationId.trim()
+        : '';
+    if (typeof candidate.text !== 'string' || !publicationId) return undefined;
+
+    const text = candidate.text.replace(/\s+/g, ' ').trim();
+    if (!text) return undefined;
+
+    return {
+        type: 'transcript',
+        text,
+        isFinal: true,
+        role: 'source',
+        publicationId,
+        segmentId: publicationId,
+        ...(typeof candidate.timestamp === 'number' ? { timestamp: candidate.timestamp } : {}),
+        ...(typeof candidate.sequence === 'number' && Number.isSafeInteger(candidate.sequence) && candidate.sequence > 0
+            ? { sequence: candidate.sequence }
+            : {}),
+    };
+}
+
 export function getTranscriptKey(message: TranscriptMessage): string {
     const provider = message.provider || 'unknown';
     return message.segmentId
@@ -333,6 +360,7 @@ export function createInterimTranscript(
         text: message.text,
         provider,
         sourceIdentity,
+        timestamp: message.timestamp ?? Date.now(),
         ...(message.languageCode ? { languageCode: message.languageCode } : {}),
         ...(message.turnId ? { turnId: message.turnId } : {}),
         ...(message.segmentId ? { segmentId: message.segmentId } : {}),

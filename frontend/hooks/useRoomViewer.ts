@@ -22,6 +22,7 @@ import { providerFromAgentIdentity } from '../lib/providers';
 import { TranscriptSession } from '../lib/transcriptSession';
 import { LiveKitRoomLifecycle } from '../lib/liveKitRoomLifecycle';
 import { buildLegacyViewerTokenRequest, shouldFallbackViewerToken } from '../lib/viewerToken';
+import { CAPTION_PUBLIC_TOPIC } from '../lib/captionDeskMessages';
 
 // Agent info with provider
 export interface AgentInfo {
@@ -39,6 +40,7 @@ export interface UseRoomViewerReturn {
     connectionState: ConnectionState;
     transcripts: TranscriptSegment[];
     interimTranscripts: Map<string, InterimTranscript>;
+    publicCaptions: TranscriptSegment[];
     error: string | null;
     room: Room | null;
     currentRoomName: string | null;
@@ -46,6 +48,8 @@ export interface UseRoomViewerReturn {
     connect: (roomName: string) => Promise<void>;
     disconnect: () => void;
     clearTranscripts: () => void;
+    activatePublicCaptions: () => void;
+    deactivatePublicCaptions: () => void;
     // Audio playback
     isAudioMuted: boolean;
     toggleAudioMute: () => void;
@@ -109,10 +113,21 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         transcriptSessionRef.current = new TranscriptSession({ idPrefix: 'view' });
     }
     const transcriptSession = transcriptSessionRef.current;
+    const publicCaptionSessionRef = useRef<TranscriptSession | null>(null);
+    if (publicCaptionSessionRef.current === null) {
+        publicCaptionSessionRef.current = new TranscriptSession({ idPrefix: 'desk' });
+    }
+    const publicCaptionSession = publicCaptionSessionRef.current;
+    const publicCaptionActiveRef = useRef(false);
     const { transcripts, interimTranscripts } = useSyncExternalStore(
         transcriptSession.subscribe,
         transcriptSession.getSnapshot,
         transcriptSession.getSnapshot,
+    );
+    const { transcripts: publicCaptions } = useSyncExternalStore(
+        publicCaptionSession.subscribe,
+        publicCaptionSession.getSnapshot,
+        publicCaptionSession.getSnapshot,
     );
 
     const cleanupAudioElements = useCallback(() => {
@@ -249,8 +264,16 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         _kind?: DataPacket_Kind,
         topic?: string,
     ) => {
+        if (topic === CAPTION_PUBLIC_TOPIC) {
+            if (publicCaptionActiveRef.current) {
+                publicCaptionSession.ingest(payload, participant?.identity || 'caption-desk', {
+                    publicCaptionMode: true,
+                });
+            }
+            return;
+        }
         // Raw transcript surfaces must not mix operator-approved captions into
-        // the provider feed. Approved captions have their own topic and WS feed.
+        // the provider feed. Approved captions have their own topic and session.
         if (topic) return;
         const agentIdentity = participant?.identity || 'unknown';
         transcriptSession.ingest(payload, agentIdentity, {
@@ -262,7 +285,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
                 ));
             },
         });
-    }, [getProviderFromIdentity, isAgent, transcriptSession]);
+    }, [getProviderFromIdentity, isAgent, publicCaptionSession, transcriptSession]);
 
     // Handle participant connected
     const handleParticipantConnected = useCallback((participant: RemoteParticipant) => {
@@ -336,6 +359,7 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
                             setRoom(null);
                             setAgents([]);
                             transcriptSession.reset();
+                            publicCaptionSession.reset(true);
                             cleanupAudioElements();
                             setAudioParticipants([]);
                             if (reason !== 'replaced') setConnectionState(ConnectionState.DISCONNECTED);
@@ -372,32 +396,48 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
             setError(err instanceof Error ? err.message : 'Connection failed');
             setConnectionState(ConnectionState.ERROR);
         }
-    }, [cleanupAudioElements, fetchToken, handleDataReceived, handleParticipantConnected, handleParticipantDisconnected, handleTrackSubscribed, handleTrackUnsubscribed, isAgent, getProviderFromIdentity, transcriptSession, roomLifecycle]);
+    }, [cleanupAudioElements, fetchToken, handleDataReceived, handleParticipantConnected, handleParticipantDisconnected, handleTrackSubscribed, handleTrackUnsubscribed, isAgent, getProviderFromIdentity, publicCaptionSession, transcriptSession, roomLifecycle]);
 
     // Disconnect from room
     const disconnect = useCallback(() => {
         transcriptSession.reset();
+        publicCaptionSession.reset(true);
+        publicCaptionActiveRef.current = false;
         roomLifecycle.disconnect();
-    }, [roomLifecycle, transcriptSession]);
+    }, [publicCaptionSession, roomLifecycle, transcriptSession]);
 
     // Clear transcripts
     const clearTranscripts = useCallback(() => {
         transcriptSession.reset(true);
-    }, [transcriptSession]);
+        publicCaptionSession.reset(true);
+    }, [publicCaptionSession, transcriptSession]);
+
+    const activatePublicCaptions = useCallback(() => {
+        publicCaptionSession.reset(true);
+        publicCaptionActiveRef.current = true;
+    }, [publicCaptionSession]);
+
+    const deactivatePublicCaptions = useCallback(() => {
+        publicCaptionActiveRef.current = false;
+        publicCaptionSession.reset(true);
+    }, [publicCaptionSession]);
 
     // Cleanup on unmount
     useEffect(() => {
         return () => {
             transcriptSession.reset();
+            publicCaptionSession.reset(true);
+            publicCaptionActiveRef.current = false;
             roomLifecycle.dispose();
             cleanupAudioElements();
         };
-    }, [cleanupAudioElements, transcriptSession, roomLifecycle]);
+    }, [cleanupAudioElements, publicCaptionSession, transcriptSession, roomLifecycle]);
 
     return {
         connectionState,
         transcripts,
         interimTranscripts,
+        publicCaptions,
         error,
         room,
         currentRoomName,
@@ -405,6 +445,8 @@ export function useRoomViewer(options: UseRoomViewerOptions): UseRoomViewerRetur
         connect,
         disconnect,
         clearTranscripts,
+        activatePublicCaptions,
+        deactivatePublicCaptions,
         // Audio playback
         isAudioMuted,
         toggleAudioMute,

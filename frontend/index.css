@@ -1058,6 +1058,33 @@ select:focus-visible {
   font-variant-numeric: tabular-nums;
 }
 
+.viewer-source-group-label {
+  padding-inline: 0.125rem;
+  color: var(--subtle);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1rem;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.viewer-source-group-label--providers {
+  padding-top: 0.625rem;
+}
+
+.viewer-source-public-label {
+  border: 1px solid oklch(72% 0.12 180 / 0.28);
+  border-radius: 999px;
+  padding: 0.125rem 0.4375rem;
+  color: oklch(82% 0.12 175);
+  background: oklch(35% 0.08 175 / 0.18);
+  font-size: 0.625rem;
+  font-weight: 700;
+  line-height: 1rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
 .viewer-provider-empty {
   display: flex;
   align-items: flex-start;
@@ -1165,8 +1192,7 @@ select:focus-visible {
 }
 
 .transcript-subtitle-row--current {
-  animation: subtitle-row-enter 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  will-change: opacity, transform;
+  animation: subtitle-row-enter 220ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 .transcript-subtitle-measure {
@@ -1179,12 +1205,14 @@ select:focus-visible {
 
 @keyframes subtitle-row-enter {
   from {
-    opacity: 0;
-    transform: translateY(0.5rem);
+    opacity: 0.72;
+    filter: blur(0.75px);
+    transform: translateY(0.35rem);
   }
 
   to {
     opacity: 1;
+    filter: blur(0);
     transform: translateY(0);
   }
 }

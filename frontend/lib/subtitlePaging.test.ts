@@ -7,6 +7,7 @@ import {
     countSubtitleCharacters,
     resolveSubtitlePageIndex,
     splitSubtitleTextByFit,
+    splitSubtitleTextIntoRollingWindows,
 } from './subtitlePaging.ts';
 
 test('counts Thai combining marks as part of one visible character', () => {
@@ -44,6 +45,32 @@ test('prefers natural English word boundaries while preserving all text', () => 
 
     assert.ok(pages.every(page => page.length <= 24));
     assert.equal(pages.join(' '), text);
+});
+
+test('rolls subtitle text forward one line at a time without dropping the previous line', () => {
+    const windows = splitSubtitleTextIntoRollingWindows(
+        'first line second line third line fourth line',
+        candidate => candidate.length <= 11,
+    );
+
+    assert.deepEqual(windows, [
+        'first line',
+        'first line second line',
+        'second line third line',
+        'third line fourth line',
+    ]);
+});
+
+test('rolls Thai text without inventing spaces between Thai fragments', () => {
+    const text = 'ข้อความบรรทัดแรกข้อความบรรทัดสองข้อความบรรทัดสาม';
+    const windows = splitSubtitleTextIntoRollingWindows(
+        text,
+        candidate => countSubtitleCharacters(candidate) <= 12,
+        'th',
+    );
+
+    assert.ok(windows.length >= 3);
+    assert.equal(windows.some(window => /[ก-๙] [ก-๙]/u.test(window)), false);
 });
 
 test('uses reading speed with professional minimum and maximum page durations', () => {
