@@ -36,16 +36,13 @@
       font-family: "Sarabun", "Noto Sans Thai", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       color: var(--ink);
       background-color: var(--canvas);
-      background-image: radial-gradient(rgba(255, 255, 255, 0.08) 1px, transparent 1px);
-      background-size: 24px 24px;
     }
 
     button { font: inherit; cursor: pointer; }
     
     .presentation {
-      width: min(100% - 2rem, 1600px);
-      margin: 0 auto;
-      padding: 1.25rem 0 2.5rem;
+      width: 100%;
+      padding: 1.25rem 1.5rem 2.5rem;
       display: flex; flex-direction: column; gap: 1.5rem;
     }
 
@@ -70,29 +67,26 @@
     .flow-diagram {
       position: relative;
       background: var(--canvas-raised);
-      padding: 2rem;
+      padding: 1.5rem;
       border-radius: var(--radius-lg);
-      border: 1px solid var(--line);
-      box-shadow: var(--shadow-elegant);
+      border: 1px solid rgba(148, 163, 184, 0.15);
       display: grid;
-      /* 4 Nodes (min 220px), 3 Horizontal Pipes (min 60px) */
       grid-template-columns: minmax(220px, 1fr) minmax(60px, 80px) minmax(220px, 1fr) minmax(60px, 80px) minmax(220px, 1fr) minmax(60px, 80px) minmax(220px, 1fr);
-      /* 2 Node Rows (auto), 1 Vertical Pipe Row (min 50px) */
       grid-template-rows: auto minmax(50px, 60px) auto;
-      gap: 0.75rem; /* Gap between grid cells */
+      gap: 0.75rem;
       align-items: center;
     }
 
     /* === Nodes === */
     .node {
-      background: var(--surface);
-      border: 1px solid var(--line);
+      background: var(--surface-raised);
+      border: 1px solid rgba(148, 163, 184, 0.22);
       border-radius: var(--radius-md);
       padding: 1.25rem;
       display: flex;
       flex-direction: column;
       gap: 0.65rem;
-      transition: all 0.2s ease;
+      transition: opacity 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
       height: 100%;
     }
     
@@ -100,22 +94,19 @@
       background: var(--surface-raised);
       border-color: var(--accent);
       z-index: 10;
-      transform: translateY(-4px);
-      box-shadow: 0 20px 40px -8px rgba(0, 0, 0, 0.8);
+      box-shadow: 0 0 0 1px var(--accent), 0 16px 40px -8px rgba(45, 212, 191, 0.15);
     }
     .js .node.is-dimmed { 
-      opacity: 0.3; 
-      filter: grayscale(60%) contrast(0.8); 
-      transform: scale(0.96); 
+      opacity: 0.6; 
     }
 
     .node-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.25rem; }
-    .node-role { display: flex; align-items: center; gap: 0.35rem; font-size: 0.6rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--subtle); }
+    .node-role { display: flex; align-items: center; gap: 0.35rem; font-size: 0.65rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #94a3b8; }
     .node-status { width: 8px; height: 8px; border-radius: 50%; background: var(--subtle); }
     .node.is-active .node-status { background: var(--accent); }
 
-    .node h3 { margin: 0; font-size: 1.1rem; font-weight: 700; color: var(--ink); letter-spacing: -0.02em; }
-    .node p { margin: 0; font-size: 0.8rem; color: var(--muted); line-height: 1.5; font-weight: 400; }
+    .node h3 { margin: 0; font-size: 1.1rem; font-weight: 700; color: #ffffff; letter-spacing: -0.02em; }
+    .node p { margin: 0; font-size: 0.82rem; color: #d4dde8; line-height: 1.55; font-weight: 400; }
 
     /* Mini Transcripts inside Nodes */
     .mini-transcript {
@@ -136,8 +127,8 @@
     .mini-transcript--viewer { border-left-color: var(--approved); }
     .mini-transcript--socket { border-left-color: var(--websocket); }
     
-    .mini-label { font-size: 0.6rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--subtle); display: block; margin-bottom: 0.35rem; }
-    .mini-text { font-size: 0.85rem; font-weight: 500; color: var(--ink); margin: 0; line-height: 1.4; }
+    .mini-label { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #94a3b8; display: block; margin-bottom: 0.35rem; }
+    .mini-text { font-size: 0.88rem; font-weight: 500; color: #f1f5f9; margin: 0; line-height: 1.45; }
     .mini-text.draft { color: #fde68a; }
     .mini-text code { font-family: ui-monospace, monospace; font-size: 0.8rem; color: var(--muted); overflow-wrap: anywhere; }
     
@@ -168,19 +159,19 @@
     }
     .pipe-label {
       position: absolute;
-      font-size: 0.55rem;
-      font-weight: 800;
+      font-size: 0.62rem;
+      font-weight: 700;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
+      letter-spacing: 0.08em;
       color: var(--ink);
       background: var(--canvas-raised);
-      padding: 0.15rem 0.5rem;
+      padding: 0.2rem 0.55rem;
       border-radius: 99px;
-      border: 1px solid var(--line);
+      border: 1px solid var(--line-strong);
       z-index: 2;
       white-space: nowrap;
       text-align: center;
-      line-height: 1.1;
+      line-height: 1.2;
     }
     
     
@@ -385,9 +376,7 @@
     @keyframes packet-v-up { 0% { bottom: -10px; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { bottom: 100%; opacity: 0; } }
     @keyframes packet-v-up { 0% { bottom: -10px; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { bottom: 100%; opacity: 0; } }
 
-    /* Cinematic Boot */
-    .boot-anim { animation: bootUp 0.8s cubic-bezier(0.2, 0, 0.2, 1) forwards; opacity: 0; transform: translateY(15px); }
-    @keyframes bootUp { to { opacity: 1; transform: translateY(0); } }
+
 
   </style>
 </head>
@@ -422,10 +411,10 @@
           <li><button type="button" data-flow-step="3"><span>04</span> Draft</button></li>
           <li><button type="button" data-flow-step="4"><span>05</span> Final</button></li>
           <li><button type="button" data-flow-step="5"><span>06</span> Caption Desk</button></li>
-          <li><button type="button" data-flow-step="6"><span>07</span> Deliver</button></li>
+          <li><button type="button" data-flow-step="6"><span>07</span> Live Delivery</button></li>
         </ol>
         <div class="playback-controls">
-          <button type="button" id="play-pause">Pause</button>
+          <button type="button" id="play-pause">Play</button>
         </div>
       </aside>
 
@@ -459,7 +448,7 @@
 
           <!-- Row 3 -->
           <div class="pipe pipe--h left pipe-5" data-step="3 4"><span class="pipe-label">Stable Draft</span><div class="pipe-track"></div></div>
-          <div class="pipe pipe--h left pipe-6" data-step="6"><span class="pipe-label">Approved<br>Caption</span><div class="pipe-track"></div></div>
+          <div class="pipe pipe--h left pipe-6" data-step="6"><span class="pipe-label">Approved<br>(Optional)</span><div class="pipe-track"></div></div>
 
           <!-- === NODES === -->
           <article class="node node--audio" data-step="0">
@@ -486,14 +475,18 @@
 
           <article class="node node--prov" data-step="2 3 4">
             <div class="node-header"><span class="node-role"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"/><rect x="9" y="9" width="6" height="6"/><line x1="9" y1="1" x2="9" y2="4"/><line x1="15" y1="1" x2="15" y2="4"/><line x1="9" y1="20" x2="9" y2="23"/><line x1="15" y1="20" x2="15" y2="23"/><line x1="20" y1="9" x2="23" y2="9"/><line x1="20" y1="14" x2="23" y2="14"/><line x1="1" y1="9" x2="4" y2="9"/><line x1="1" y1="14" x2="4" y2="14"/></svg> AI Engine</span><i class="node-status"></i></div>
-            <h3>ASR Provider</h3><p>บริการโมเดลปัญญาประดิษฐ์ประมวลผลเสียงพูดเป็นข้อความ</p>
+            <h3>ASR Provider</h3><p>บริการถอดเสียงเป็นข้อความแบบเรียลไทม์ (ทุก Provider) + คำแปล (Gemini)</p>
+            <div class="mini-transcript mini-transcript--draft" style="border-left-color: var(--provider);">
+              <span class="mini-label">Source &amp; Translation</span>
+              <p class="mini-text draft" style="font-size: 0.75rem;">Source (ทุกตัว) / Dual-Stream (Gemini)</p>
+            </div>
             <div class="node-tooltip">Engine: Google / Gemini / Azure / GPT</div>
           </article>
 
           <article class="node node--stable" data-step="3 4">
             <div class="node-header"><span class="node-role"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg> Interceptor</span><i class="node-status"></i></div>
-            <h3>Stable Interim</h3><p>พักข้อความชั่วคราวเพื่อรอให้ประโยคนิ่ง (ลดอาการคำดิ้น)</p>
-            <div class="node-tooltip">Debounce Logic<br>Flicker Reduction</div>
+            <h3>Stable Interim</h3><p>หน่วงประโยคเพื่อรอคำแปลและลดการกระพริบ (+500ms Gemini Grace Period)</p>
+            <div class="node-tooltip">PCM Segmenter<br>Gemini Grace Window</div>
           </article>
           
           <article class="node node--desk" data-step="3 4 5">
@@ -507,14 +500,15 @@
           </article>
 
 
-          <article class="node node--view" data-step="6">
+          <article class="node node--view" data-step="3 4 5 6">
             <div class="node-header"><span class="node-role"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg> Public App</span><i class="node-status"></i></div>
-            <h3>Transcript</h3><p>ส่วนแสดงผลข้อความคำบรรยายแบบเรียลไทม์สำหรับผู้ชม</p>
+            <h3>Transcript</h3><p>รับ Draft/Final จาก Data Channel โดยตรง รองรับคำแปลและส่งออก .txt</p>
             <div class="mini-transcript mini-transcript--viewer">
-              <span class="mini-label">Approved</span>
+              <span class="mini-label">Data Channel (Direct)</span>
               <p class="mini-text" id="viewer-caption">ผู้ป่วยมีอาการเจ็บหน้าอก</p>
+              <p class="mini-text" style="color:var(--subtle); font-size:0.75rem; margin-top:2px;">Patient has chest pain.</p>
             </div>
-            <div class="node-tooltip">Protocol: Data Channel<br>Payload: Verified JSON</div>
+            <div class="node-tooltip">Protocol: Data Channel<br>Payload: Verified JSON<br>No Caption Desk required</div>
           </article>
 
           <article class="node node--hub" data-step="3 4 6">
@@ -538,34 +532,40 @@
       { title: "Streaming Drafts", narration: "รับข้อความ Draft แบบเรียลไทม์ขณะที่พูดยังไม่จบ", duration: 3500, draft: "ผู้ป่วยมีอาการเจ็บน่าอก" },
       { title: "Final Commit", narration: "Provider ส่งข้อความ Final (สิ้นสุดประโยค)", duration: 2000, draft: "ผู้ป่วยมีอาการเจ็บน่าอก" },
       { title: "Human Review", narration: "ผู้ปฏิบัติงานตรวจสอบแก้ไขคำผิดใน Caption Desk", duration: 3000, draft: "ผู้ป่วยมีอาการเจ็บน่าอก" },
-      { title: "Public Delivery", narration: "ส่งถึงหน้าจอ Viewer และออก Socket ภายนอกทันที", duration: 3000, draft: "ผู้ป่วยมีอาการเจ็บหน้าอก" },
+      { title: "Live Delivery", narration: "Transcript รับ Draft/Final จาก Data Channel โดยตรง — ไม่ต้องรอ Caption Desk", duration: 3000, draft: "ผู้ป่วยมีอาการเจ็บหน้าอก" },
     ]);
     
     let currentStep = 0;
-    let isPlaying = true;
+    let isPlaying = false;
     let intervalId;
 
     
-    function scrambleText(element, finalString, duration = 1200) {
+    function typeText(element, finalString, duration = 1200) {
       if (!finalString) return;
-      const chars = '01#@$%^&*<>[]{}';
-      let iterations = 0;
-      const maxIters = 30;
-      clearInterval(element.dataset.scrambleId);
+      
+      // If it's a waiting state, show it immediately without typing
+      if (finalString === "รอข้อมูล...") {
+        element.textContent = finalString;
+        return;
+      }
+      
+      clearInterval(element.dataset.typeId);
+      element.textContent = "";
+      
+      let index = 0;
+      // Adjust typing speed to not take the full duration so it finishes before the step ends
+      const typeDuration = Math.min(duration, 1500); 
+      const stepTime = typeDuration / finalString.length;
+      
       const id = setInterval(() => {
-        let currentString = finalString.split('').map((letter, index) => {
-          if (letter === ' ') return ' ';
-          if (index < Math.floor((iterations / maxIters) * finalString.length)) return finalString[index];
-          return chars[Math.floor(Math.random() * chars.length)];
-        }).join('');
-        element.textContent = currentString;
-        if (iterations >= maxIters) {
+        if (index < finalString.length) {
+          element.textContent += finalString.charAt(index);
+          index++;
+        } else {
           clearInterval(id);
-          element.textContent = finalString;
         }
-        iterations += 1;
-      }, duration / maxIters);
-      element.dataset.scrambleId = id;
+      }, stepTime);
+      element.dataset.typeId = id;
     }
 
     const titleEl = document.getElementById('stage-title');
@@ -579,7 +579,7 @@
       const stepData = STEPS[currentStep];
       titleEl.textContent = stepData.title;
       narrEl.textContent = stepData.narration;
-      scrambleText(provTextEl, stepData.draft);
+      typeText(provTextEl, stepData.draft, stepData.duration);
       
       nodes.forEach(n => {
         const active = n.dataset.step.includes(currentStep.toString());
@@ -621,15 +621,7 @@
       });
     });
 
-    const allAnimatables = document.querySelectorAll('.presentation-header, .timeline-bar, .node, .pipe');
-    allAnimatables.forEach((el, index) => {
-      el.classList.add('boot-anim');
-      el.style.animationDelay = `${index * 0.04}s`;
-    });
-    setTimeout(() => {
-      renderStep();
-      intervalId = setTimeout(nextStep, STEPS[0].duration);
-    }, allAnimatables.length * 40 + 600);
+    renderStep();
     document.documentElement.classList.add('js');
   </script>
 </body>

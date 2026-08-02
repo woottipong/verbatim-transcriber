@@ -344,27 +344,14 @@
       position: absolute;
       top: 0;
       bottom: 0;
-      width: 40px; /* Laser length */
-      background: linear-gradient(90deg, transparent, currentColor);
+      width: 100%;
+      background: currentColor;
+      opacity: 0.15;
       border-radius: 99px;
-      box-shadow: 4px 0 12px 1px currentColor;
-      animation: laser-flow 3s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-      animation-delay: var(--delay, 0s);
     }
 
     .layer-connector svg {
-      animation: flow-down 3s infinite ease-in-out;
-      animation-delay: var(--delay, 0s);
-    }
-    @keyframes flow-down {
-      0%, 50%, 100% { transform: translateY(-4px); opacity: 0.1; color: var(--subtle); }
-      25% { transform: translateY(4px); opacity: 1; color: var(--accent); }
-    }
-    @keyframes laser-flow {
-      0% { left: -40px; opacity: 0; }
-      15% { opacity: 1; }
-      50% { left: 100%; opacity: 1; }
-      60%, 100% { left: calc(100% + 40px); opacity: 0; }
+      color: var(--accent);
     }
 
     /* Tooltips */
@@ -455,6 +442,7 @@
                 <h3 style="font-size: 0.8rem;">Control Room</h3>
                 <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 6px;">
                   <div class="cap-item">System Settings</div>
+                  <div class="cap-item">Select AI Provider</div>
                   <div class="cap-item">Monitor Status</div>
                 </div>
               </div>
@@ -466,6 +454,7 @@
               <div class="node-icon" style="font-size: 1.25rem;">🛡️</div>
               <h3 style="font-size: 0.8rem;">Auth &amp; Token</h3>
               <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 6px;">
+                <div class="cap-item">API Key Validation</div>
                 <div class="cap-item">HTTP Grants</div>
                 <div class="cap-item">Issue Tokens</div>
               </div>
@@ -478,6 +467,7 @@
               <h3 style="font-size: 0.8rem;">Agent Supervisor</h3>
               <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 6px;">
                 <div class="cap-item">Start/Stop Agents</div>
+                <div class="cap-item">Track Subscription</div>
                 <div class="cap-item">Lifecycle Mgmt</div>
               </div>
             </div>
@@ -603,10 +593,14 @@
             </div>
             <div class="node">
               <div class="node-icon">📝</div>
-              <h3>Raw Transcript</h3>
-              <div class="mini-transcript" style="border-left-color: var(--provider);">
-                <span class="mini-label">Interim</span>
-                <p class="mini-text">ผู้ป่วยมีอาการเจ็บน่าอก</p>
+              <h3>Dual-Stream</h3>
+              <div class="mini-transcript" style="border-left-color: var(--provider); margin-bottom: 2px;">
+                <span class="mini-label">Source (Fast)</span>
+                <p class="mini-text">ผู้ป่วยมีอาการเจ็บหน้าอก</p>
+              </div>
+              <div class="mini-transcript" style="border-left-color: var(--accent);">
+                <span class="mini-label">Translation (Wait)</span>
+                <p class="mini-text">Patient has chest pain</p>
               </div>
             </div>
           </div>
@@ -641,7 +635,7 @@
               <div
                 style="display: flex; flex-direction: row; flex-wrap: wrap; justify-content: center; gap: 4px; margin-top: 8px; width: 100%;">
                 <div class="cap-item">650ms Silence</div>
-                <div class="cap-item">30s Max</div>
+                <div class="cap-item">+500ms Grace Period</div>
                 <div class="cap-item">Early-Final Cut</div>
               </div>
             </div>
@@ -702,12 +696,13 @@
                   <h3 style="font-size: 0.7rem;">Viewers</h3>
                   <div
                     style="display: flex; flex-direction: column; gap: 3px; margin-top: 6px; width: 100%; margin-bottom: 6px;">
-                    <div class="cap-item">Replace Draft</div>
-                    <div class="cap-item">Append Final</div>
+                    <div class="cap-item">Paired Source/Trans.</div>
+                    <div class="cap-item">Replace/Append</div>
                   </div>
                   <div class="mini-transcript" style="border-left-color: var(--approved); width: 100%;">
                     <span class="mini-label">Public UI</span>
                     <p class="mini-text">ผู้ป่วยมีอาการเจ็บหน้าอก</p>
+                    <p class="mini-text" style="color: var(--muted); margin-top: 2px;">Patient has chest pain</p>
                   </div>
                 </div>
               </div>
