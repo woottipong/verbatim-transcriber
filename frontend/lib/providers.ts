@@ -2,9 +2,9 @@ export type AgentProvider = 'google' | 'gemini' | 'azure' | 'gpt-realtime-whispe
 
 export const providerLabels: Record<AgentProvider, string> = {
     google: 'Google Cloud STT',
-    gemini: 'Gemini Live',
+    gemini: 'Gemini 3.5 Live',
     azure: 'Azure Speech',
-    'gpt-realtime-whisper': 'GPT Realtime Whisper',
+    'gpt-realtime-whisper': 'GPT Realtime Translate',
 };
 
 export function formatProviderName(provider: string): string {

@@ -62,7 +62,7 @@ func TestOperationsMapsAgentParticipants(t *testing.T) {
 		participants: map[string][]ParticipantRecord{
 			"room-a": {
 				{Identity: "speaker-1", State: "ACTIVE"},
-				{Identity: "agent-google", State: "ACTIVE"},
+				{Identity: "agent-google-room-a", State: "ACTIVE"},
 			},
 		},
 	}

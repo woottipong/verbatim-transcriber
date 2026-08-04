@@ -7,10 +7,11 @@ test('preserves the full hyphenated OpenAI provider identity', () => {
 });
 test('keeps legacy provider identities with suffixes compatible', () => {
     assert.equal(providerFromAgentIdentity('agent-google-123'), 'google');
+    assert.equal(providerFromAgentIdentity('agent-gemini-3.5-live-test-03'), 'gemini');
 });
 
 test('maps OpenAI provider to its display label', () => {
-    assert.equal(formatProviderName('gpt-realtime-whisper'), 'GPT Realtime Whisper');
+    assert.equal(formatProviderName('gpt-realtime-whisper'), 'GPT Realtime Translate');
 });
 
 test('only bilingual providers show source language labels', () => {

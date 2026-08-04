@@ -8,8 +8,11 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
@@ -115,6 +118,17 @@ func resamplePCM16(samples []int16, sourceRate, targetRate int) []byte {
 		out[i*2+1] = byte(sample >> 8)
 	}
 	return out
+}
+
+func isClosedNetworkErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr *net.OpError
+	if errors.As(err, &netErr) {
+		return true
+	}
+	return strings.Contains(err.Error(), "use of closed network connection")
 }
 
 func transcriptLogValue(value string) string {
@@ -302,21 +316,28 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 	}
 
 	// Connect to room
-	// Generate identity with provider name for frontend display
-	identity := fmt.Sprintf("agent-%s", a.preferredProvider)
-	if a.preferredProvider == "" {
+	// Generate identity with provider name and room name for clear logging
+	providerTag := a.preferredProvider
+	if providerTag == "" {
 		// Auto-detect: will be determined later, use generic identity
 		if a.config.HasGoogleKey() {
-			identity = "agent-google"
+			providerTag = "google"
 		} else if a.config.HasAzureKey() {
-			identity = "agent-azure"
+			providerTag = "azure"
 		} else if a.config.HasGeminiKey() {
-			identity = "agent-gemini"
+			providerTag = "gemini"
 		} else if a.config.HasOpenAITranscriptionKey() {
-			identity = "agent-gpt-realtime-whisper"
+			providerTag = "gpt-realtime-whisper"
 		} else {
-			identity = "agent-unknown"
+			providerTag = "unknown"
 		}
+	}
+
+	var identity string
+	if providerTag == "gemini" {
+		identity = fmt.Sprintf("agent-gemini-3.5-live-%s", roomName)
+	} else {
+		identity = fmt.Sprintf("agent-%s-%s", providerTag, roomName)
 	}
 
 	room, err := lksdk.ConnectToRoom(
@@ -622,7 +643,11 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		// Read RTP packet
 		pkt, _, err := track.ReadRTP()
 		if err != nil {
-			log.Printf("❌ [Agent] Error reading RTP packet: %v", err)
+			if errors.Is(err, io.EOF) || isClosedNetworkErr(err) {
+				log.Printf("ℹ️ [Agent] Audio track closed (EOF): %s", track.ID())
+			} else {
+				log.Printf("⚠️ [Agent] Error reading RTP packet: %v", err)
+			}
 			break
 		}
 

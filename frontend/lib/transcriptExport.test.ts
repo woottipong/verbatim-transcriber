@@ -51,8 +51,8 @@ test('exports Thai final rows without inventing or removing phrase boundaries', 
 
 test('builds a safe provider transcript filename', () => {
   assert.equal(
-    buildTranscriptFilename('Demo Room', 'Gemini Live', new Date(2026, 6, 22)),
-    'demo-room-gemini-live-transcript-2026-07-22.txt',
+    buildTranscriptFilename('Demo Room', 'Gemini 3.5 Live', new Date(2026, 6, 22)),
+    'demo-room-gemini-3-5-live-transcript-2026-07-22.txt',
   );
 });
 

@@ -74,6 +74,14 @@ test('admin readiness leads the operator from audio to transcription', () => {
         nextAction: 'open-audio',
     });
     assert.deepEqual(deriveAdminReadiness([
+        { identity: 'audio-source-test-123', name: 'Sender', isAgent: false, state: 'ACTIVE' },
+    ], 0), {
+        state: 'waiting-agent',
+        title: 'Audio connected',
+        detail: 'Start a provider to begin transcription.',
+        nextAction: 'start-agent',
+    });
+    assert.deepEqual(deriveAdminReadiness([
         { identity: 'user-1', name: 'Sender', isAgent: false, state: 'ACTIVE' },
     ], 0), {
         state: 'waiting-agent',

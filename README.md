@@ -11,7 +11,7 @@ The system is designed for operators who need explicit room, audio, provider, an
 ## What the system provides
 
 - Microphone and Chrome Tab audio publishing through LiveKit.
-- Independent Google, Gemini, Azure, and GPT Realtime Whisper provider agents.
+- Independent Google, Gemini, Azure, and GPT Realtime Translate provider agents.
 - Replaceable interim Draft text and committed final transcript rows.
 - Read-only live Transcript view with provider filtering and final-only text export.
 - A keyboard-first Caption Desk that publishes approved captions alongside the raw provider transcript.
@@ -227,9 +227,9 @@ Handlers only parse HTTP input and map module errors to status codes. LiveKit SD
 | Provider | Main output |
 | --- | --- |
 | Google Cloud STT | Thai source transcript with interim and final results |
-| Gemini Live | Source transcript plus configured-target translation in the in-app Lines view |
+| Gemini 3.5 Live | Source transcript plus configured-target translation in the in-app Lines view |
 | Azure Speech | Source interim hypotheses and finalized phrases |
-| GPT Realtime Whisper | Source-only Draft and final transcription |
+| GPT Realtime Translate | Source-only Draft and final transcription |
 
 Provider models, sample rates, endpointing, reconnect behavior, and credentials are documented in [backend-go/README.md](backend-go/README.md#provider-behavior).
 

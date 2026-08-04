@@ -60,7 +60,11 @@ export function deriveAdminReadiness(
     activeAgentCount: number,
 ): AdminReadiness {
     const hasAudioSender = participants.some(participant =>
-        !participant.isAgent && participant.identity.startsWith('user-'),
+        !participant.isAgent && (
+            participant.identity.startsWith('audio-source-')
+            || participant.identity.startsWith('source-')
+            || participant.identity.startsWith('user-')
+        ),
     );
 
     if (!hasAudioSender) {

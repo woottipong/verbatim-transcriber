@@ -29,7 +29,7 @@ Audio Source ── WebRTC audio ───────────────�
                                                    ├──► room/provider agent
                                                    │        │
                                                    │        └──► Google / Gemini /
-                                                   │             Azure / GPT Realtime Whisper
+                                                   │             Azure / GPT Realtime Translate
                                                    │
 Transcript ◄── room audio + transcript data ──────┘
 
@@ -64,7 +64,7 @@ Preserve these provider-specific semantics:
 - Azure receives 16 kHz PCM after the agent resamples 48 kHz WebRTC audio. The provider uses Azure's upstream WebSocket protocol; this is not a public application WebSocket endpoint.
 - Gemini uses `gemini-3.5-live-translate-preview` at 16 kHz. The model requires an audio response modality, but model audio is discarded. Source and configured-target text are exposed and paired with application `turnId` values.
 - Gemini requests an application turn boundary after the shared 650 ms low-energy window or a 30-second hard duration, then allows a fixed 500 ms translation grace period. Alignment is best-effort.
-- GPT Realtime Whisper uses transcription intent at 24 kHz PCM16, publishes source-only Draft/final text, commits after the shared 650 ms silence window or 30-second hard duration, and performs bounded reconnect with up to one second of recent-audio replay.
+- GPT Realtime Translate uses transcription intent at 24 kHz PCM16, publishes source-only Draft/final text, commits after the shared 650 ms silence window or 30-second hard duration, and performs bounded reconnect with up to one second of recent-audio replay.
 - Non-final source text remains replaceable Draft state keyed by provider. Gemini keys source/translation Drafts by provider, `turnId`, and role; final source text becomes a committed row.
 
 ## Transcript output contracts
