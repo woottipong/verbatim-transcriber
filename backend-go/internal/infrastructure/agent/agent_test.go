@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,6 +35,25 @@ type collectingTranscriptSink struct {
 
 func (s *collectingTranscriptSink) Publish(_ string, message TranscriptMessage) {
 	s.messages = append(s.messages, message)
+}
+
+// recordingCaptionSink captures what the agent hands to the external caption
+// feed, so tests can assert one operator publish produces exactly one delivery.
+type recordingCaptionSink struct {
+	mu        sync.Mutex
+	published []string
+}
+
+func (s *recordingCaptionSink) PublishCaption(_, text string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.published = append(s.published, text)
+}
+
+func (s *recordingCaptionSink) count() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.published)
 }
 
 func TestProviderTranscriptAlwaysUsesRawLane(t *testing.T) {
@@ -477,6 +497,32 @@ func TestCaptionDeskSessionReconnectsDuringGraceAndBlocksOtherSessions(t *testin
 	time.Sleep(30 * time.Millisecond)
 	if got := len(agent.moderator.Snapshot().Pending); got != 1 {
 		t.Fatalf("reconnect grace timer cleared active session pending = %d", got)
+	}
+}
+
+// The external caption WebSocket is a separate delivery leg from the LiveKit
+// caption.public topic. A resend of the same RequestID (the Caption Desk
+// replays waiting commands verbatim on reconnect) must not deliver twice.
+func TestCaptionPublishDeliversToExternalFeedExactlyOncePerRequestID(t *testing.T) {
+	sink := &recordingCaptionSink{}
+	var packets []publishedData
+	agent := newCaptionTestAgent("google", &packets)
+	agent.captionSink = sink
+	agent.captionOperatorID = "caption-operator-1"
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "ผู้ป่วยมีอาการ", IsFinal: true, Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+
+	command := captionCommandEnvelope{
+		Type: captionPublishType, RequestID: "publish-1", Provider: "google",
+		SourceSegmentIDs: []string{"google-1"}, Text: "ผู้ป่วยมีอาการเจ็บหน้าอก",
+	}
+	agent.publishCaptionCommand("caption-operator-1", command)
+	agent.publishCaptionCommand("caption-operator-1", command)
+
+	if got := sink.count(); got != 1 {
+		t.Fatalf("external feed deliveries = %d, want 1 (got %v)", got, sink.published)
 	}
 }
 

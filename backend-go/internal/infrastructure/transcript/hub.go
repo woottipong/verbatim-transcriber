@@ -177,6 +177,7 @@ func (h *Hub) SubscribeCaption(room string) *Subscription {
 		h.captionRooms[room] = state
 	}
 	state.subscribers[subscription] = struct{}{}
+	log.Printf("🔌 [Hub] SubscribeCaption room=%s subscribers=%d", room, len(state.subscribers))
 	return subscription
 }
 
@@ -187,6 +188,25 @@ func (h *Hub) UnsubscribeCaption(room string, subscription *Subscription) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.removeCaptionSubscriptionLocked(room, subscription)
+	if state := h.captionRooms[room]; state != nil {
+		log.Printf("🔌 [Hub] UnsubscribeCaption room=%s subscribers=%d", room, len(state.subscribers))
+	} else {
+		log.Printf("🔌 [Hub] UnsubscribeCaption room=%s subscribers=0 (room emptied)", room)
+	}
+}
+
+// CaptionSubscriberCount reports how many caption feed connections are
+// attached to a room. A duplicate seen by one external consumer cannot be
+// explained by fan-out, so this distinguishes "more clients than expected"
+// from "the same client was written to twice".
+func (h *Hub) CaptionSubscriberCount(room string) int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	state := h.captionRooms[room]
+	if state == nil {
+		return 0
+	}
+	return len(state.subscribers)
 }
 
 func (h *Hub) PublishCaption(room, text string) {
@@ -199,6 +219,10 @@ func (h *Hub) PublishCaption(room, text string) {
 	if state == nil {
 		return
 	}
+	// The fan-out count makes a duplicate at the client unambiguous: one line
+	// per approved caption means the duplicate came from upstream, while
+	// subscribers>1 means more than one feed connection is attached.
+	log.Printf("📡 [Hub] Caption fan-out: room=%s subscribers=%d", room, len(state.subscribers))
 	payload := []byte(text)
 	for subscription := range state.subscribers {
 		select {

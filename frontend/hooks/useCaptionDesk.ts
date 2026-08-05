@@ -205,13 +205,16 @@ export function useCaptionDesk(
         }
       }
     };
-    void connect();
+    const connected = connect();
 
     return () => {
       disposed = true;
       clearSubscribeRetry();
       room.removeAllListeners();
-      void room.disconnect();
+      // Disconnecting while connect() is still in flight can complete the
+      // connection afterwards, stranding this room as a second Caption Desk
+      // participant for the rest of the session. Wait for it to settle first.
+      void connected.finally(() => room.disconnect());
       roomRef.current = null;
     };
   }, [backendUrl, captionPolicy, provider, reconnectNonce, replayWaiting, roomName, sendSubscribe, session]);

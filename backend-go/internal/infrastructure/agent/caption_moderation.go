@@ -251,8 +251,18 @@ func (a *Agent) publishCaptionCommand(identity string, command captionCommandEnv
 			return
 		}
 		if a.captionSink != nil {
+			// Approved captions are the broadcast output of record, so keep an
+			// audit line identifying exactly which request produced each one.
+			log.Printf(
+				"📡 [Caption] Approved caption sent to external feed: room=%s provider=%s requestId=%s publicationId=%s",
+				a.GetRoom(), publication.Provider, command.RequestID, publication.ID,
+			)
 			a.captionSink.PublishCaption(a.GetRoom(), publication.Text)
 		}
+	} else {
+		// A duplicate RequestID means the operator resent the same publish
+		// (reconnect replay). It is acknowledged again but never re-broadcast.
+		log.Printf("♻️  [Caption] Publish replayed, not re-broadcast: requestId=%s publicationId=%s", command.RequestID, publication.ID)
 	}
 
 	ack := captionOperatorEnvelope{
