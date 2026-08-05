@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Settings, Zap } from 'lucide-react';
 import type { CaptionDeskSnapshot } from '../../lib/captionDeskSession';
 import { shouldPublishOnEnter } from '../../lib/captionDeskMessages';
 import {
@@ -17,6 +18,13 @@ import {
   getContentEditableCaretOffset,
   replaceContentEditableTextPreservingCaret,
 } from '../../lib/caretUtils';
+import {
+  insertTextAtCaret,
+  loadPersistedQuickPhrases,
+  savePersistedQuickPhrases,
+  type QuickPhrase,
+} from '../../lib/quickPhrases';
+import { QuickPhraseModal } from './QuickPhraseModal';
 
 interface CaptionDeskReviewEditorProps {
   snapshot: CaptionDeskSnapshot;
@@ -42,9 +50,23 @@ export function CaptionDeskReviewEditor({
   const [showShortcutHint, setShowShortcutHint] = useState(() => !hasSeenShortcutHint());
   const [draftAnnouncement, setDraftAnnouncement] = useState('');
   const [fontSize, setFontSize] = useState<CaptionDeskFontSize>(() => loadPersistedFontSize());
+  const [quickPhrases, setQuickPhrases] = useState<QuickPhrase[]>(() => loadPersistedQuickPhrases());
+  const [showPhraseModal, setShowPhraseModal] = useState(false);
 
   const graphemeCount = countGraphemes(snapshot.reviewText);
   const budgetWarning = getCaptionBudgetWarning(graphemeCount);
+
+  const handleSavePhrases = (next: QuickPhrase[]) => {
+    setQuickPhrases(next);
+    savePersistedQuickPhrases(next);
+  };
+
+  const handleInsertPhrase = (phrase: QuickPhrase) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const nextText = insertTextAtCaret(editor, phrase.text);
+    edit(nextText);
+  };
 
   const changeFontSize = (next: CaptionDeskFontSize) => {
     setFontSize(next);
@@ -149,6 +171,36 @@ export function CaptionDeskReviewEditor({
         </div>
       </div>
 
+      <div className="caption-desk-quick-phrases flex flex-wrap items-center gap-1.5 border-b border-[var(--line)] bg-[var(--control-surface-bg)] px-4 py-2 text-xs sm:px-5">
+        <span className="mr-1 flex items-center gap-1 font-semibold text-[var(--subtle)]">
+          <Zap size={13} className="text-[var(--accent)]" aria-hidden="true" />
+          <span>ศัพท์เฉพาะ:</span>
+        </span>
+        {quickPhrases.map(phrase => (
+          <button
+            key={phrase.id}
+            type="button"
+            onClick={() => handleInsertPhrase(phrase)}
+            title={`กด ${phrase.key} หรือคลิกเพื่อแทรก "${phrase.text}"`}
+            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--line)] bg-[var(--surface)] px-2 py-1 text-xs font-medium text-[var(--ink)] transition-colors hover:border-[var(--accent)] hover:bg-[var(--accent-soft)]"
+          >
+            <span className="rounded bg-[var(--accent-soft)] px-1 py-0.2 font-mono text-[10px] font-bold text-[var(--accent)]">
+              {phrase.key}
+            </span>
+            <span>{phrase.label}</span>
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setShowPhraseModal(true)}
+          title="ตั้งค่า/เพิ่มคำด่วน"
+          className="ml-auto inline-flex items-center gap-1 text-xs text-[var(--muted)] hover:text-[var(--ink)] p-1 rounded transition-colors"
+        >
+          <Settings size={14} aria-hidden="true" />
+          <span className="hidden sm:inline">ตั้งค่าคำด่วน</span>
+        </button>
+      </div>
+
       <div
         ref={editorRef}
         role="textbox"
@@ -169,6 +221,12 @@ export function CaptionDeskReviewEditor({
         style={getFontSizeStyles(fontSize)}
         onInput={event => edit(event.currentTarget.textContent || '')}
         onKeyDown={event => {
+          const matchedPhrase = quickPhrases.find(p => p.key === event.key);
+          if (matchedPhrase) {
+            event.preventDefault();
+            handleInsertPhrase(matchedPhrase);
+            return;
+          }
           if (event.altKey && (event.key === '-' || event.key === '_')) {
             event.preventDefault();
             changeFontSize(getNextFontSize(fontSize, 'down'));
@@ -194,7 +252,7 @@ export function CaptionDeskReviewEditor({
 
       {canEdit && showShortcutHint ? (
         <div className="caption-desk-shortcut-hint flex items-center justify-between gap-3 border-t border-[var(--line)] px-4 py-2 text-xs sm:px-5">
-          <span><strong>Quick publish:</strong> Enter publishes to the cursor. Shift+Enter adds a new line. Alt +/- adjusts font.</span>
+          <span><strong>Quick publish:</strong> Enter publishes to the cursor. F1-F8 inserts quick terms. Alt +/- adjusts font.</span>
           <button type="button" className="control-button control-button--inline shrink-0" onClick={dismissShortcutHint}>
             Got it
           </button>
@@ -220,6 +278,14 @@ export function CaptionDeskReviewEditor({
           <span className="text-xs text-[var(--subtle)]">Waiting for captions…</span>
         )}
       </footer>
+
+      {showPhraseModal ? (
+        <QuickPhraseModal
+          phrases={quickPhrases}
+          onSave={handleSavePhrases}
+          onClose={() => setShowPhraseModal(false)}
+        />
+      ) : null}
     </section>
   );
 }
