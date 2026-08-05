@@ -1,0 +1,31 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_BACKEND_URL: "${VITE_BACKEND_URL}"
+        VITE_LIVEKIT_URL: "${VITE_LIVEKIT_URL}"
+        VITE_CONTROL_API_KEY: "${VITE_CONTROL_API_KEY:-}"
+    image: captionlive-frontend:prod
+    container_name: captionlive-frontend-prod
+    restart: unless-stopped
+    networks:
+      - npm_network
+    expose:
+      - "80"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  npm_network:
+    external: true

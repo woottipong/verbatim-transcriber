@@ -191,6 +191,49 @@ func TestHubInvalidationClosesSubscribersAndAdvancesGeneration(t *testing.T) {
 	}
 }
 
+func TestHubEvictsExpiredGenerationsAfterRetention(t *testing.T) {
+	hub := NewHub()
+	start := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+	now := start
+	hub.now = func() time.Time { return now }
+
+	hub.Invalidate("room-old")
+	if got := hub.Generation("room-old"); got != 1 {
+		t.Fatalf("generation before expiry = %d, want 1", got)
+	}
+
+	// Past the retention window: any token that could have referenced
+	// room-old's generation has already expired on its own, so forgetting
+	// the counter here is safe and keeps the map from growing forever.
+	now = start.Add(defaultGenerationRetention + time.Minute)
+	hub.Invalidate("room-new")
+
+	if got := hub.Generation("room-old"); got != 0 {
+		t.Fatalf("generation for expired room = %d, want 0 (evicted)", got)
+	}
+	if got := hub.Generation("room-new"); got != 1 {
+		t.Fatalf("generation for room-new = %d, want 1", got)
+	}
+	if _, stillPresent := hub.generations["room-old"]; stillPresent {
+		t.Fatal("expired room-old entry was not evicted from the generations map")
+	}
+}
+
+func TestHubRetainsGenerationWithinRetention(t *testing.T) {
+	hub := NewHub()
+	start := time.Date(2026, 7, 16, 10, 0, 0, 0, time.UTC)
+	now := start
+	hub.now = func() time.Time { return now }
+
+	hub.Invalidate("room-a")
+	now = start.Add(defaultGenerationRetention - time.Minute)
+	hub.Invalidate("room-b")
+
+	if got := hub.Generation("room-a"); got != 1 {
+		t.Fatalf("generation for room-a = %d, want 1 (should not be evicted yet)", got)
+	}
+}
+
 func assertNoSubscriptionEvent(t *testing.T, subscription *Subscription) {
 	t.Helper()
 	select {

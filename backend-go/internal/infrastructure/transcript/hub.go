@@ -2,6 +2,7 @@ package transcript
 
 import (
 	"encoding/json"
+	"log"
 	"sync"
 	"time"
 
@@ -14,6 +15,12 @@ import (
 const (
 	defaultSubscriberQueueSize = 32
 	schemaVersion              = "1.0"
+
+	// defaultGenerationRetention bounds how long a deleted room's generation
+	// counter is kept before eviction. It must stay longer than the longest
+	// transcript/caption token TTL (24h, see main.go) so no still-valid token
+	// can ever reference a generation the hub has already forgotten.
+	defaultGenerationRetention = 25 * time.Hour
 )
 
 type TranscriptPayload struct {
@@ -67,12 +74,22 @@ type providerKey struct {
 	provider string
 }
 
+// generationEntry bounds how long a room's invalidation counter is retained.
+// Without an expiry, a hub that outlives many created/deleted rooms would
+// grow this map forever even though old entries stop mattering once every
+// token that could reference them has expired.
+type generationEntry struct {
+	value     uint64
+	expiresAt time.Time
+}
+
 type Hub struct {
 	mu            sync.Mutex
 	rooms         map[string]*roomState
 	providerRooms map[providerKey]*roomState
 	captionRooms  map[string]*roomState
-	generations   map[string]uint64
+	generations   map[string]generationEntry
+	generationTTL time.Duration
 	queueSize     int
 	now           func() time.Time
 }
@@ -89,7 +106,8 @@ func NewHubWithQueueSize(queueSize int) *Hub {
 		rooms:         make(map[string]*roomState),
 		providerRooms: make(map[providerKey]*roomState),
 		captionRooms:  make(map[string]*roomState),
-		generations:   make(map[string]uint64),
+		generations:   make(map[string]generationEntry),
+		generationTTL: defaultGenerationRetention,
 		queueSize:     queueSize,
 		now:           time.Now,
 	}
@@ -98,7 +116,18 @@ func NewHubWithQueueSize(queueSize int) *Hub {
 func (h *Hub) Generation(room string) uint64 {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.generations[room]
+	return h.generations[room].value
+}
+
+// evictExpiredGenerationsLocked drops generation counters past retention.
+// Called from Invalidate, the only path that grows this map, so the map
+// never holds more entries than rooms deleted within the retention window.
+func (h *Hub) evictExpiredGenerationsLocked(now time.Time) {
+	for room, entry := range h.generations {
+		if now.After(entry.expiresAt) {
+			delete(h.generations, room)
+		}
+	}
 }
 
 // Invalidate closes active integrations and advances the room generation so
@@ -109,7 +138,12 @@ func (h *Hub) Invalidate(room string) {
 	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.generations[room]++
+	now := h.now()
+	h.evictExpiredGenerationsLocked(now)
+	entry := h.generations[room]
+	entry.value++
+	entry.expiresAt = now.Add(h.generationTTL)
+	h.generations[room] = entry
 	if state := h.rooms[room]; state != nil {
 		for subscription := range state.subscribers {
 			h.removeSubscriptionLocked(room, subscription)
@@ -170,6 +204,7 @@ func (h *Hub) PublishCaption(room, text string) {
 		select {
 		case subscription.events <- payload:
 		default:
+			log.Printf("⚠️  [Hub] Dropping slow caption subscriber in room %s (queue full, no replay)", room)
 			h.removeCaptionSubscriptionLocked(room, subscription)
 		}
 	}
@@ -267,6 +302,7 @@ func (h *Hub) Publish(room string, message agent.TranscriptMessage) {
 				case subscription.events <- payload:
 				default:
 					// A slow integration must not stall the ASR pipeline.
+					log.Printf("⚠️  [Hub] Dropping slow transcript subscriber in room %s (queue full, no replay)", room)
 					h.removeSubscriptionLocked(room, subscription)
 				}
 			}
@@ -283,6 +319,7 @@ func (h *Hub) Publish(room string, message agent.TranscriptMessage) {
 			select {
 			case subscription.events <- payload:
 			default:
+				log.Printf("⚠️  [Hub] Dropping slow provider subscriber in room %s provider %s (queue full, no replay)", room, message.Provider)
 				h.removeProviderSubscriptionLocked(key, subscription)
 			}
 		}

@@ -7,10 +7,28 @@ import (
 	"thai-transcriber-backend/internal/application/roomoperations"
 	"thai-transcriber-backend/internal/application/transcriptaccess"
 	"thai-transcriber-backend/internal/delivery/handler"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/limiter"
 	websocket "github.com/gofiber/websocket/v2"
 )
+
+// tokenMintLimiter bounds how often one IP can mint a signed LiveKit or
+// transcript/caption token. These handlers sign JWTs and call the LiveKit
+// API on every request, so an unbounded client (or a leaked control key)
+// could otherwise drive real cost with no pushback.
+func tokenMintLimiter() fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:        30,
+		Expiration: 1 * time.Minute,
+		LimitReached: func(c *fiber.Ctx) error {
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"error": "Too many token requests. Try again shortly.",
+			})
+		},
+	})
+}
 
 // SetupRoutes configures all routes for the application
 func SetupRoutes(
@@ -59,11 +77,11 @@ func setupLiveKitRoutes(
 	controlAuth := handler.RequireControlAuth(cfg)
 
 	// Token service
-	app.Post("/livekit/token", controlAuth, func(c *fiber.Ctx) error {
+	app.Post("/livekit/token", tokenMintLimiter(), controlAuth, func(c *fiber.Ctx) error {
 		return handler.HandleLiveKitToken(c, cfg, rooms)
 	})
 	log.Println("✅ [LiveKit] Token service enabled at POST /livekit/token")
-	app.Post("/livekit/viewer-token", controlAuth, func(c *fiber.Ctx) error {
+	app.Post("/livekit/viewer-token", tokenMintLimiter(), controlAuth, func(c *fiber.Ctx) error {
 		return handler.HandleViewerToken(c, cfg, rooms)
 	})
 	log.Println("✅ [LiveKit] Read-only viewer tokens enabled at POST /livekit/viewer-token")
@@ -79,16 +97,16 @@ func setupLiveKitRoutes(
 	roomRoutes.Get("/detailed", controlAuth, func(c *fiber.Ctx) error {
 		return handler.HandleGetRoomsDetailed(c, rooms)
 	})
-	roomRoutes.Post("/:room/transcript-token", controlAuth, func(c *fiber.Ctx) error {
+	roomRoutes.Post("/:room/transcript-token", tokenMintLimiter(), controlAuth, func(c *fiber.Ctx) error {
 		return handler.HandleCreateTranscriptToken(c, transcriptAccess)
 	})
-	roomRoutes.Post("/:room/transcript-token/:provider", controlAuth, func(c *fiber.Ctx) error {
+	roomRoutes.Post("/:room/transcript-token/:provider", tokenMintLimiter(), controlAuth, func(c *fiber.Ctx) error {
 		return handler.HandleCreateProviderTranscriptToken(c, transcriptAccess)
 	})
-	roomRoutes.Post("/:room/caption-token/ws", controlAuth, func(c *fiber.Ctx) error {
+	roomRoutes.Post("/:room/caption-token/ws", tokenMintLimiter(), controlAuth, func(c *fiber.Ctx) error {
 		return handler.HandleCreateCaptionToken(c, transcriptAccess, supervisor)
 	})
-	roomRoutes.Post("/:room/caption-token/:provider", controlAuth, func(c *fiber.Ctx) error {
+	roomRoutes.Post("/:room/caption-token/:provider", tokenMintLimiter(), controlAuth, func(c *fiber.Ctx) error {
 		return handler.HandleCaptionDeskToken(c, cfg, rooms, supervisor)
 	})
 	roomRoutes.Get(

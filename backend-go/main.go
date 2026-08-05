@@ -51,8 +51,18 @@ func main() {
 	)
 
 	// Initialize Fiber app
+	//
+	// Timeouts and BodyLimit apply only to the plain HTTP request/response
+	// cycle. Once a connection is hijacked for a WebSocket upgrade (transcript
+	// and caption feeds), fasthttp's serve loop stops managing that
+	// connection entirely, so these limits cannot cut off a live stream — the
+	// websocket handlers manage their own ping/pong deadlines instead.
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
+		ReadTimeout:           10 * time.Second,
+		WriteTimeout:          10 * time.Second,
+		IdleTimeout:           65 * time.Second,
+		BodyLimit:             1 * 1024 * 1024, // control-plane payloads are small JSON
 	})
 
 	// Middlewares — Recover from panics, Security Headers (Helmet), CORS, and Logger
@@ -89,14 +99,20 @@ func main() {
 
 	log.Println("\n⚠️  Shutting down server...")
 
-	// Timeout for graceful shutdown
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := app.ShutdownWithContext(ctx); err != nil {
+	// Each phase gets its own full timeout budget instead of sharing one
+	// context. A shared context previously let a slow HTTP/WebSocket drain
+	// consume the entire budget, leaving the agent supervisor with an
+	// already-expired context and no chance to close ASR provider streams
+	// cleanly (which matters — some providers bill for open connections).
+	httpCtx, httpCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer httpCancel()
+	if err := app.ShutdownWithContext(httpCtx); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)
 	}
-	if err := agentSupervisor.Shutdown(ctx); err != nil {
+
+	agentCtx, agentCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer agentCancel()
+	if err := agentSupervisor.Shutdown(agentCtx); err != nil {
 		log.Printf("Agent shutdown incomplete: %v", err)
 	}
 
