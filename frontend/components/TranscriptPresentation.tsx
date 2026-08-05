@@ -180,14 +180,18 @@ function SubtitleRows({
         const previousTarget = previousRollingTargetRef.current;
         const previousIdentity = previousRollingIdentityRef.current;
         const nextTarget = rawCurrent?.text ?? '';
-        if (shouldRollProgressiveTarget(previousTarget, nextTarget)) {
-            setRollingCueIdentity(currentIdentity);
-        } else if (previousIdentity !== currentIdentity) {
+        const isTextContinuous = Boolean(
+            previousTarget && nextTarget &&
+            (nextTarget.startsWith(previousTarget) || previousTarget.startsWith(nextTarget) || shouldRollProgressiveTarget(previousTarget, nextTarget))
+        );
+        if (isTextContinuous || (previousIdentity && previousIdentity === currentIdentity)) {
+            if (!rollingCueIdentity) setRollingCueIdentity(currentIdentity);
+        } else {
             setRollingCueIdentity('');
         }
         previousRollingTargetRef.current = nextTarget;
         previousRollingIdentityRef.current = currentIdentity;
-    }, [currentIdentity, rawCurrent?.text]);
+    }, [currentIdentity, rawCurrent?.text, rollingCueIdentity]);
 
     useLayoutEffect(() => {
         if (!current || !sourceMeasureRef.current || !translationMeasureRef.current) {
@@ -221,7 +225,10 @@ function SubtitleRows({
     }, [currentContent, currentIdentity, layoutKey, preserveSourceWhitespace, sourceLanguageCode, translationIsFinal, translationLanguageCode]);
 
     useEffect(() => {
-        const isSameCue = previousIdentityRef.current === currentIdentity;
+        const isSameCue = previousIdentityRef.current === currentIdentity || Boolean(
+            previousRollingTargetRef.current && rawCurrent?.text &&
+            (rawCurrent.text.startsWith(previousRollingTargetRef.current) || previousRollingTargetRef.current.startsWith(rawCurrent.text))
+        );
         setPageIndex(previousIndex => resolveSubtitlePageIndex({
             previousIndex,
             pageCount: pages.length,
@@ -230,7 +237,7 @@ function SubtitleRows({
             followLiveEdge: shouldFollowLiveEdge,
         }));
         previousIdentityRef.current = currentIdentity;
-    }, [currentContent, currentIdentity, isDraft, pages.length, shouldFollowLiveEdge]);
+    }, [currentContent, currentIdentity, isDraft, pages.length, rawCurrent?.text, shouldFollowLiveEdge]);
 
     const activePage = pages[Math.min(pageIndex, Math.max(0, pages.length - 1))];
     const activePageDurationMs = activePage
@@ -270,10 +277,12 @@ function SubtitleRows({
             <div className="transcript-subtitle-row">
                 <div className="transcript-subtitle-slot transcript-subtitle-slot--source">
                     <p className="transcript-source-line transcript-subtitle-row__source">
-                        <span
-                            ref={sourceMeasureRef}
-                            className={`transcript-source-line__text ${preserveSourceWhitespace ? 'transcript-source-line__text--verbatim' : ''}`}
-                        />
+                        <span className="transcript-subtitle-lines">
+                            <span
+                                ref={sourceMeasureRef}
+                                className={`transcript-subtitle-line ${preserveSourceWhitespace ? 'transcript-subtitle-line--verbatim' : ''}`}
+                            />
+                        </span>
                     </p>
                 </div>
                 <div className="transcript-subtitle-slot transcript-subtitle-slot--translation">
@@ -345,12 +354,9 @@ function buildSubtitlePages(
     sourceLanguageCode?: string,
     preserveSourceWhitespace = false,
 ): SubtitlePage[] {
-    const sourceFitsNbtcLine = (candidate: string) => (
-        fitsNbtcCaptionLine(candidate) && sourceFits(candidate)
-    );
     const sourcePages = splitSubtitleTextIntoRollingWindows(
         sourceText,
-        sourceFitsNbtcLine,
+        sourceFits,
         sourceLanguageCode,
         preserveSourceWhitespace,
     );
@@ -366,15 +372,16 @@ function buildSubtitlePages(
         const sourcePageIndex = pageIndexAtProgress(sourcePages, pageIndex, pageCount);
         const sourceFragments = splitSubtitleTextIntoLines(
             page.sourceText,
-            sourceFitsNbtcLine,
+            sourceFits,
             sourceLanguageCode,
             preserveSourceWhitespace,
         );
+        const clampedFragments = sourceFragments.length > 2 ? sourceFragments.slice(-2) : sourceFragments;
         return {
             sourceText: page.sourceText,
             sourcePageIndex,
-            sourceLines: sourceFragments.map((fragment, index) => (
-                index < sourceFragments.length - 1
+            sourceLines: clampedFragments.map((fragment, index) => (
+                index < clampedFragments.length - 1
                     ? fragment.text + fragment.separatorAfter
                     : fragment.text
             )),
@@ -400,8 +407,13 @@ function pageIndexAtProgress(pages: string[], index: number, pageCount: number):
 }
 
 function createLineFitChecker(element: HTMLElement): (candidate: string) => boolean {
-    const lineHeight = Number.parseFloat(window.getComputedStyle(element).lineHeight);
-    const maximumHeight = lineHeight + 1;
+    // Measure the actual rendered height of a single line to avoid getComputedStyle quirks
+    element.textContent = '\u00A0';
+    const singleLineHeight = element.getBoundingClientRect().height;
+    if (singleLineHeight <= 0) return () => true;
+
+    // 1.5x margin safely bounds a single line (even with tall Thai vowels) without reaching 2 lines.
+    const maximumHeight = singleLineHeight * 1.5;
     return candidate => {
         element.textContent = candidate;
         return element.getBoundingClientRect().height <= maximumHeight;

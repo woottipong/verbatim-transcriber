@@ -148,8 +148,16 @@ function joinSubtitleCueText(previousText: string, currentText: string): string 
     const previous = previousText.trim();
     const current = currentText.trim();
     if (!previous) return current;
-    if (!current || previous === current || previous.endsWith(current)) return previous;
+    if (!current || previous === current) return previous;
     if (current.startsWith(previous)) return current;
+
+    const THAI_SCRIPT = /[\u0E00-\u0E7F]/u;
+    if (THAI_SCRIPT.test(previous.slice(-1)) || THAI_SCRIPT.test(current.charAt(0))) {
+        return `${previous}${current}`;
+    }
+
+    // Netflix-style continuity: preserve the previous cue's text to fill
+    // out the block, adding a space before the new sentence/phrase.
     return `${previous} ${current}`;
 }
 
@@ -157,7 +165,11 @@ function joinSubtitleTranslations(
     previous?: TranscriptSegment['translation'],
     current?: TranscriptSegment['translation'],
 ): TranscriptSegment['translation'] {
-    if (!previous || !current || previous.languageCode !== current.languageCode) return undefined;
+    if (!previous && !current) return undefined;
+    if (previous && !current) return previous;
+    if (!previous && current) return current;
+
+    if (previous.languageCode !== current.languageCode) return undefined;
     return {
         ...current,
         text: joinSubtitleCueText(previous.text, current.text),

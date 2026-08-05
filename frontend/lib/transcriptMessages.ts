@@ -51,6 +51,9 @@ function joinTranscriptChunks(previous: string, next: string): string {
     if (!left) return right;
     if (!right || left === right) return left;
     if (right.startsWith(left)) return right;
+    if (THAI_SCRIPT.test(left.slice(-1)) || THAI_SCRIPT.test(right.charAt(0))) {
+        return `${left}${right}`;
+    }
     return `${left} ${right}`;
 }
 
@@ -68,22 +71,28 @@ export function groupFinalTranscriptRows(
             previous.provider === segment.provider &&
             normalizeLanguageTag(previous.languageCode) === normalizeLanguageTag(segment.languageCode) &&
             gap >= 0 && gap <= windowMs &&
-            !containsThaiText(previous) && !containsThaiText(segment) &&
             !STRONG_SENTENCE_END.test(previous.text.trim())
         );
         if (!canGroup || !previous) return [...rows, segment];
 
         const previousTranslation = previous.translation;
         const nextTranslation = segment.translation;
-        const canCombineTranslation = previousTranslation && nextTranslation &&
-            normalizeLanguageTag(previousTranslation.languageCode) === normalizeLanguageTag(nextTranslation.languageCode);
-        const translation = canCombineTranslation
-            ? {
-                text: joinTranscriptChunks(previousTranslation.text, nextTranslation.text),
-                languageCode: nextTranslation.languageCode,
-                isFinal: previousTranslation.isFinal && nextTranslation.isFinal,
+        let translation: TranscriptSegment['translation'] = undefined;
+
+        if (previousTranslation && nextTranslation) {
+            if (normalizeLanguageTag(previousTranslation.languageCode) === normalizeLanguageTag(nextTranslation.languageCode)) {
+                translation = {
+                    text: joinTranscriptChunks(previousTranslation.text, nextTranslation.text),
+                    languageCode: nextTranslation.languageCode,
+                    isFinal: previousTranslation.isFinal && nextTranslation.isFinal,
+                };
             }
-            : undefined;
+        } else if (previousTranslation) {
+            translation = previousTranslation;
+        } else if (nextTranslation) {
+            translation = nextTranslation;
+        }
+
         const grouped: TranscriptSegment = {
             ...previous,
             text: joinTranscriptChunks(previous.text, segment.text),

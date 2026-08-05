@@ -47,7 +47,7 @@ export function shouldRollProgressiveTarget(previousText: string, nextText: stri
 
 function findRetainedPrefixLength(visible: string[], target: string[]): number {
     const maximumLength = Math.min(visible.length, target.length);
-    for (let length = maximumLength; length >= 4; length -= 1) {
+    for (let length = maximumLength; length >= 1; length -= 1) {
         const visibleStart = visible.length - length;
         let matches = true;
         for (let index = 0; index < length; index += 1) {

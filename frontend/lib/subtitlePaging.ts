@@ -143,7 +143,24 @@ export function splitSubtitleTextIntoLines(
             break;
         }
 
-        const fittingBoundary = findFittingBoundary(remaining, fits, locale);
+        const maxBoundary = findFittingBoundary(remaining, fits, locale);
+        let fittingBoundary = maxBoundary;
+
+        // Netflix / Broadcast Subtitle Balancing: When text breaks into 2 lines,
+        // balance the length between Line 1 and Line 2 instead of greedily
+        // packing Line 1 and leaving a short 2nd line.
+        const idealMidpoint = Math.floor(remaining.length / 2);
+        if (idealMidpoint > 0 && idealMidpoint < maxBoundary) {
+            const balancedBreak = findNaturalBreak(remaining, idealMidpoint, locale);
+            if (balancedBreak > 0 && balancedBreak < maxBoundary) {
+                const testLine1 = remaining.slice(0, balancedBreak).trim();
+                const testLine2 = remaining.slice(balancedBreak).trim();
+                if (testLine1 && testLine2 && fits(testLine1) && fits(testLine2)) {
+                    fittingBoundary = balancedBreak;
+                }
+            }
+        }
+
         const breakAt = findNaturalBreak(remaining, fittingBoundary, locale);
         const rawPage = remaining.slice(0, breakAt);
         const page = rawPage.trim();
@@ -159,7 +176,31 @@ export function splitSubtitleTextIntoLines(
         remaining = tail.trim();
     }
 
-    return fragments;
+    return coalesceSubtitleLineFragments(fragments, fits);
+}
+
+function coalesceSubtitleLineFragments(
+    fragments: SubtitleLineFragment[],
+    fits: (candidate: string) => boolean,
+): SubtitleLineFragment[] {
+    if (fragments.length <= 1) return fragments;
+    const merged: SubtitleLineFragment[] = [];
+    for (let index = 0; index < fragments.length; index += 1) {
+        const current = fragments[index];
+        const previous = merged[merged.length - 1];
+        if (previous) {
+            const candidate = previous.text + (previous.separatorAfter || '') + current.text;
+            if (fits(candidate)) {
+                merged[merged.length - 1] = {
+                    text: candidate,
+                    separatorAfter: current.separatorAfter,
+                };
+                continue;
+            }
+        }
+        merged.push(current);
+    }
+    return merged;
 }
 
 function splitVerbatimSubtitleTextIntoLines(

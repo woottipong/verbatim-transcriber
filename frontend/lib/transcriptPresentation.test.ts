@@ -78,23 +78,27 @@ test('keeps the previous final continuous with a new interim inside five seconds
         timestamp: 4_000,
     } as InterimTranscript;
 
-    const current = selectCurrentSubtitle([{
+    const presentation = selectCurrentSubtitle([{
         id: 'previous', text: 'ข้อความก่อนหน้า', isFinal: true,
         timestamp: 1_000, provider: 'google', role: 'source',
     }], [currentInterim]);
 
-    assert.deepEqual(current.transcripts, []);
-    assert.deepEqual(current.interims.map(interim => interim.text), ['ข้อความก่อนหน้า ข้อความใหม่']);
+    assert.deepEqual(presentation.transcripts.map(s => s.text), []);
+    assert.deepEqual(presentation.interims.map(i => i.text), [
+        'ข้อความก่อนหน้าข้อความใหม่',
+    ]);
 });
 
 test('rolls consecutive finals forward instead of blanking the completed interim', () => {
-    const current = selectCurrentSubtitle([
+    const presentation = selectCurrentSubtitle([
         { id: 'previous', text: 'บรรทัดก่อน', isFinal: true, timestamp: 1_000, provider: 'google', role: 'source' },
         { id: 'current', text: 'บรรทัดใหม่', isFinal: true, timestamp: 4_000, provider: 'google', role: 'source' },
     ], []);
 
-    assert.deepEqual(current.transcripts.map(segment => segment.text), ['บรรทัดก่อน บรรทัดใหม่']);
-    assert.deepEqual(current.interims, []);
+    assert.deepEqual(presentation.transcripts.map(s => s.text), [
+        'บรรทัดก่อนบรรทัดใหม่',
+    ]);
+    assert.deepEqual(presentation.interims, []);
 });
 
 test('concatenates Caption Desk publications without changing whitespace', () => {

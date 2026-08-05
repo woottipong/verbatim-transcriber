@@ -6,7 +6,7 @@
  * - Presents the transcript as a read-only subtitle surface
  */
 
-import { useState, useEffect, useMemo, useRef, useCallback, type CSSProperties } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, useDeferredValue, type CSSProperties } from 'react';
 import { AlertTriangle, ArrowLeft, BadgeCheck, LoaderCircle, LogOut, Pause, Play, Radio, Trash2, Volume2, VolumeX } from 'lucide-react';
 import { useRoomViewer } from '../hooks/useRoomViewer';
 import { ConnectionState } from '../types';
@@ -53,6 +53,12 @@ const VIEWER_DISPLAY_SETTINGS_KEY = 'captionlive.viewer.display';
 type SubtitleTextSize = 'small' | 'standard' | 'large';
 type SubtitleBackground = 'canvas' | 'lines' | 'transparent';
 
+const TEXT_SIZE_SCALES: Record<SubtitleTextSize, number> = {
+    small: 0.75,
+    standard: 1.00,
+    large: 1.20,
+};
+
 interface ViewerDisplaySettings {
     textSize: SubtitleTextSize;
     showTranslation: boolean;
@@ -67,9 +73,19 @@ const DEFAULT_DISPLAY_SETTINGS: ViewerDisplaySettings = {
 
 function loadViewerDisplaySettings(): ViewerDisplaySettings {
     try {
-        const saved = JSON.parse(localStorage.getItem(VIEWER_DISPLAY_SETTINGS_KEY) ?? '{}') as Partial<ViewerDisplaySettings>;
+        const saved = JSON.parse(localStorage.getItem(VIEWER_DISPLAY_SETTINGS_KEY) ?? '{}') as Record<string, unknown>;
+        let textSize: SubtitleTextSize = 'standard';
+        if (saved.textSize === 'small' || saved.textSize === 'standard' || saved.textSize === 'large') {
+            textSize = saved.textSize;
+        } else if (typeof saved.textScale === 'number') {
+            const scale = saved.textScale < 2 ? saved.textScale * 100 : saved.textScale;
+            if (scale <= 75) textSize = 'small';
+            else if (scale >= 115) textSize = 'large';
+            else textSize = 'standard';
+        }
+
         return {
-            textSize: saved.textSize === 'small' || saved.textSize === 'large' ? saved.textSize : 'standard',
+            textSize,
             showTranslation: saved.showTranslation !== false,
             background: saved.background === 'lines' || saved.background === 'transparent' ? saved.background : 'canvas',
         };
@@ -395,7 +411,8 @@ export default function ViewerPage({
 
     const subtitleSurface = (
         <div
-            className={`viewer-subtitle-scroller viewer-subtitle-scroller--size-${displaySettings.textSize} viewer-subtitle-scroller--background-${displaySettings.background} ${displaySettings.showTranslation ? '' : 'viewer-subtitle-scroller--translation-hidden'} transcript-scroller relative overflow-hidden px-4 sm:px-8 ${cleanOutput ? 'viewer-subtitle-scroller--clean' : ''}`}
+            className={`viewer-subtitle-scroller viewer-subtitle-scroller--background-${displaySettings.background} ${displaySettings.showTranslation ? '' : 'viewer-subtitle-scroller--translation-hidden'} transcript-scroller relative overflow-hidden px-2 sm:px-4 ${cleanOutput ? 'viewer-subtitle-scroller--clean' : ''}`}
+            style={{ '--viewer-subtitle-font-scale': TEXT_SIZE_SCALES[displaySettings.textSize] } as React.CSSProperties}
         >
             <span className="sr-only" aria-live="polite" aria-atomic="true">{latestSubtitleAnnouncement}</span>
             {cleanOutput && (!isConnected || !filterProvider || !hasTranscript) ? null : !isConnected ? (
@@ -625,21 +642,30 @@ export default function ViewerPage({
                                 </div>
                             </fieldset>
 
-                            <div className="viewer-setting-row" role="group" aria-label="Subtitle text size">
+                            <div className="viewer-setting-row" role="group" aria-label="Text size">
                                 <span className="viewer-setting-row__label">Size</span>
                                 <div className="viewer-segmented-control">
-                                    {([['small', 'S'], ['standard', 'M'], ['large', 'L']] as const).map(([size, label]) => (
-                                        <button
-                                            key={size}
-                                            type="button"
-                                            aria-pressed={displaySettings.textSize === size}
-                                            aria-label={`${size === 'standard' ? 'Standard' : size[0].toUpperCase() + size.slice(1)} subtitle text`}
-                                            title={`${size === 'standard' ? 'Standard' : size[0].toUpperCase() + size.slice(1)} text`}
-                                            onClick={() => setDisplaySettings(settings => ({ ...settings, textSize: size }))}
-                                        >
-                                            {label}
-                                        </button>
-                                    ))}
+                                    <button
+                                        type="button"
+                                        aria-pressed={displaySettings.textSize === 'small'}
+                                        onClick={() => setDisplaySettings(settings => ({ ...settings, textSize: 'small' }))}
+                                    >
+                                        S
+                                    </button>
+                                    <button
+                                        type="button"
+                                        aria-pressed={displaySettings.textSize === 'standard'}
+                                        onClick={() => setDisplaySettings(settings => ({ ...settings, textSize: 'standard' }))}
+                                    >
+                                        M
+                                    </button>
+                                    <button
+                                        type="button"
+                                        aria-pressed={displaySettings.textSize === 'large'}
+                                        onClick={() => setDisplaySettings(settings => ({ ...settings, textSize: 'large' }))}
+                                    >
+                                        L
+                                    </button>
                                 </div>
                             </div>
 
