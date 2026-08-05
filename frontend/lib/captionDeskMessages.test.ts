@@ -15,10 +15,12 @@ test('Enter publishes while Shift+Enter and IME Enter do not', () => {
   assert.equal(shouldPublishOnEnter({ key: 'Enter', shiftKey: false, isComposing: true }), false);
 });
 
-test('accepts only the exact server-owned Agent identity', () => {
+test('accepts only the server-owned Agent identity', () => {
   assert.equal(isCaptionAgentIdentity('agent-google', 'google'), true);
-  assert.equal(isCaptionAgentIdentity('agent-google-fake', 'google'), false);
-  assert.equal(isCaptionAgentIdentity('agent-azure', 'google'), false);
+  assert.equal(isCaptionAgentIdentity('agent-google-room1', 'google'), true);
+  assert.equal(isCaptionAgentIdentity('agent-gemini-3.5-live-room1', 'gemini'), true);
+  assert.equal(isCaptionAgentIdentity('agent-azure-room1', 'google'), false);
+  assert.equal(isCaptionAgentIdentity('user-participant', 'google'), false);
 });
 
 test('parses a pending operator packet', () => {

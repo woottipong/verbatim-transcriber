@@ -161,7 +161,10 @@ export function getCaptionSubscriptionError(
 }
 
 export function isCaptionAgentIdentity(identity: string | undefined, provider: string): boolean {
-  return identity === `agent-${provider}`;
+  if (!identity) return false;
+  if (identity === `agent-${provider}` || identity.startsWith(`agent-${provider}-`)) return true;
+  if (provider === 'gemini' && identity.startsWith('agent-gemini-3.5-live-')) return true;
+  return false;
 }
 
 function parseSource(value: unknown): CaptionSource | undefined {
