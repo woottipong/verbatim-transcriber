@@ -1663,8 +1663,8 @@ body.viewer-output-transparent {
 }
 
 .caption-review-editor {
-  caret-color: var(--ink);
-  caret-width: 2px; /* progressive enhancement — Chrome/Edge; no-op on Firefox/Safari */
+  caret-color: #00ffff;
+  caret-width: 6px; /* progressive enhancement — Chrome/Edge; no-op on Firefox/Safari */
   font-size: 1.25rem;
   line-height: 2.125rem;
 }

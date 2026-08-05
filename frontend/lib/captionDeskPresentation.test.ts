@@ -1,12 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  countGraphemes,
   formatCaptionDeskError,
   formatCaptionDraftAnnouncement,
   formatCaptionSegmentAge,
+  formatFontSizeLabel,
+  getCaptionBudgetWarning,
   getCaptionEditorTextUpdate,
   getCaptionDeskOperationalStatus,
   getCaptionReviewInstructions,
+  getFontSizeStyles,
+  getNextFontSize,
   hasCaptionDeskWork,
 } from './captionDeskPresentation.ts';
 
@@ -84,3 +89,34 @@ test('Draft announcements expose preview text without announcing empty revisions
   assert.equal(formatCaptionDraftAnnouncement(' กำลังถอดข้อความ '), 'Draft preview: กำลังถอดข้อความ');
   assert.equal(formatCaptionDraftAnnouncement('   '), '');
 });
+
+test('font size navigation steps up and down within bounds', () => {
+  assert.equal(getNextFontSize('md', 'up'), 'lg');
+  assert.equal(getNextFontSize('lg', 'up'), 'xl');
+  assert.equal(getNextFontSize('xl', 'up'), 'xl');
+  assert.equal(getNextFontSize('md', 'down'), 'sm');
+  assert.equal(getNextFontSize('sm', 'down'), 'sm');
+  assert.equal(formatFontSizeLabel('md'), '100%');
+  assert.deepEqual(getFontSizeStyles('md'), { fontSize: '1.625rem', lineHeight: '2.625rem' });
+});
+
+test('grapheme counting and budget warning report correct line thresholds', () => {
+  assert.equal(countGraphemes('ผู้ใหญ่'), 4);
+  assert.deepEqual(getCaptionBudgetWarning(20), {
+    isOverSingleLine: false,
+    isOverTwoLines: false,
+    label: 'Line 1 budget (≤35 chars)',
+  });
+  assert.deepEqual(getCaptionBudgetWarning(40), {
+    isOverSingleLine: true,
+    isOverTwoLines: false,
+    label: '2nd line (35+ chars)',
+  });
+  assert.deepEqual(getCaptionBudgetWarning(75), {
+    isOverSingleLine: true,
+    isOverTwoLines: true,
+    label: 'Exceeds 2-line budget (70+ chars)',
+  });
+});
+
+

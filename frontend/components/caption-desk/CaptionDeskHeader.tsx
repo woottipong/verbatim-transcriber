@@ -33,7 +33,7 @@ export function CaptionDeskHeader({
 
   return (
     <header className="app-header">
-      <div className="app-header__content caption-desk-navbar mx-auto w-full max-w-7xl px-4 py-3 sm:px-6">
+      <div className="app-header__content caption-desk-navbar mx-auto w-full px-4 py-3 sm:px-6 lg:px-8">
         <div className="caption-desk-navbar__brand flex min-w-0 items-center gap-3">
           <img src="/captionlive-mark.svg" alt="" className="h-10 w-10 shrink-0 rounded-lg" aria-hidden="true" />
           <div className="min-w-0">

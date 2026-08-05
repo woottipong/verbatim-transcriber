@@ -84,3 +84,97 @@ export function getCaptionEditorTextUpdate(
   }
   return { kind: 'replace', text: nextText };
 }
+
+export type CaptionDeskFontSize = 'sm' | 'md' | 'lg' | 'xl';
+export const CAPTION_DESK_FONT_SIZES: CaptionDeskFontSize[] = ['sm', 'md', 'lg', 'xl'];
+
+export function getNextFontSize(
+  current: CaptionDeskFontSize,
+  direction: 'up' | 'down',
+): CaptionDeskFontSize {
+  const index = CAPTION_DESK_FONT_SIZES.indexOf(current);
+  const validIndex = index === -1 ? 1 : index;
+  if (direction === 'up') {
+    return CAPTION_DESK_FONT_SIZES[Math.min(validIndex + 1, CAPTION_DESK_FONT_SIZES.length - 1)] || 'md';
+  }
+  return CAPTION_DESK_FONT_SIZES[Math.max(validIndex - 1, 0)] || 'md';
+}
+
+export function formatFontSizeLabel(size: CaptionDeskFontSize): string {
+  switch (size) {
+    case 'sm':
+      return '80%';
+    case 'md':
+      return '100%';
+    case 'lg':
+      return '125%';
+    case 'xl':
+      return '150%';
+  }
+}
+
+export function getFontSizeStyles(size: CaptionDeskFontSize): { fontSize: string; lineHeight: string } {
+  switch (size) {
+    case 'sm':
+      return { fontSize: '1.25rem', lineHeight: '2.125rem' };
+    case 'md':
+      return { fontSize: '1.625rem', lineHeight: '2.625rem' };
+    case 'lg':
+      return { fontSize: '2rem', lineHeight: '3.125rem' };
+    case 'xl':
+      return { fontSize: '2.375rem', lineHeight: '3.625rem' };
+  }
+}
+
+export function countGraphemes(text: string): number {
+  if (!text) return 0;
+  const Segmenter = (Intl as typeof Intl & {
+    Segmenter?: new (
+      locales?: string,
+      options?: { granularity: string },
+    ) => { segment(input: string): Iterable<{ segment: string }> };
+  }).Segmenter;
+  if (!Segmenter) return text.length;
+  try {
+    const segmenter = new Segmenter(undefined, { granularity: 'grapheme' });
+    let count = 0;
+    for (const _ of segmenter.segment(text)) {
+      count++;
+    }
+    return count;
+  } catch {
+    return text.length;
+  }
+}
+
+export interface CaptionBudgetWarning {
+  isOverSingleLine: boolean;
+  isOverTwoLines: boolean;
+  label: string;
+}
+
+export function getCaptionBudgetWarning(graphemeCount: number): CaptionBudgetWarning {
+  const isOverSingleLine = graphemeCount > 35;
+  const isOverTwoLines = graphemeCount > 70;
+  if (isOverTwoLines) {
+    return {
+      isOverSingleLine: true,
+      isOverTwoLines: true,
+      label: 'Exceeds 2-line budget (70+ chars)',
+    };
+  }
+  if (isOverSingleLine) {
+    return {
+      isOverSingleLine: true,
+      isOverTwoLines: false,
+      label: '2nd line (35+ chars)',
+    };
+  }
+  return {
+    isOverSingleLine: false,
+    isOverTwoLines: false,
+    label: 'Line 1 budget (≤35 chars)',
+  };
+}
+
+

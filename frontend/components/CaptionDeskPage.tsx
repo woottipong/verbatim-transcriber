@@ -110,7 +110,7 @@ function ConnectedCaptionDesk({
         onChangeDesk={changeDesk}
       />
 
-      <main id="main-content" className="caption-desk-main mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6 sm:py-5 lg:overflow-hidden">
+      <main id="main-content" className="caption-desk-main mx-auto flex min-h-0 w-full flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:overflow-hidden">
         {errorMessage || connectionState === ConnectionState.DISCONNECTED ? (
           <div className="mb-4 flex items-center justify-between gap-4 rounded-lg border border-red-400/35 bg-red-500/10 px-4 py-3 text-sm text-red-200" role="alert">
             <span>{errorMessage || 'Caption Desk disconnected. Your current edits are preserved.'}</span>
@@ -122,7 +122,7 @@ function ConnectedCaptionDesk({
           </div>
         ) : null}
 
-        <div className="caption-desk-workspace grid flex-none gap-4 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(16rem,19rem)]">
+        <div className="caption-desk-workspace grid flex-none gap-4 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)] xl:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)]">
           <CaptionDeskReviewEditor
             snapshot={snapshot}
             captionConnected={captionConnected}

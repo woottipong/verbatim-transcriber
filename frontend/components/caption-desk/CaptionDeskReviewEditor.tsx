@@ -2,10 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import type { CaptionDeskSnapshot } from '../../lib/captionDeskSession';
 import { shouldPublishOnEnter } from '../../lib/captionDeskMessages';
 import {
+  countGraphemes,
   formatCaptionSegmentAge,
   formatCaptionDraftAnnouncement,
+  formatFontSizeLabel,
+  getCaptionBudgetWarning,
   getCaptionEditorTextUpdate,
   getCaptionReviewInstructions,
+  getFontSizeStyles,
+  getNextFontSize,
+  type CaptionDeskFontSize,
 } from '../../lib/captionDeskPresentation';
 import {
   getContentEditableCaretOffset,
@@ -21,6 +27,7 @@ interface CaptionDeskReviewEditorProps {
 }
 
 const SHORTCUT_HINT_STORAGE_KEY = 'captionlive.caption-desk.shortcut-hint-seen';
+const FONT_SIZE_STORAGE_KEY = 'captionlive.caption-desk.font-size';
 
 export function CaptionDeskReviewEditor({
   snapshot,
@@ -34,6 +41,19 @@ export function CaptionDeskReviewEditor({
   const canEdit = captionConnected || hasSegmentIds || snapshot.reviewText.length > 0;
   const [showShortcutHint, setShowShortcutHint] = useState(() => !hasSeenShortcutHint());
   const [draftAnnouncement, setDraftAnnouncement] = useState('');
+  const [fontSize, setFontSize] = useState<CaptionDeskFontSize>(() => loadPersistedFontSize());
+
+  const graphemeCount = countGraphemes(snapshot.reviewText);
+  const budgetWarning = getCaptionBudgetWarning(graphemeCount);
+
+  const changeFontSize = (next: CaptionDeskFontSize) => {
+    setFontSize(next);
+    try {
+      window.localStorage.setItem(FONT_SIZE_STORAGE_KEY, next);
+    } catch {
+      // Fall back for disabled local storage
+    }
+  };
 
   const dismissShortcutHint = () => {
     try {
@@ -85,7 +105,33 @@ export function CaptionDeskReviewEditor({
             {getCaptionReviewInstructions(canEdit)}
           </p>
         </div>
-        <div className="caption-desk-toolbar__tools">
+        <div className="caption-desk-toolbar__tools flex items-center gap-3">
+          <div className="caption-desk-font-control flex items-center rounded-lg border border-[var(--line)] bg-[var(--control-surface-bg)] p-0.5 text-xs" aria-label="Font size control">
+            <button
+              type="button"
+              onClick={() => changeFontSize(getNextFontSize(fontSize, 'down'))}
+              disabled={fontSize === 'sm'}
+              aria-label="Decrease editor font size"
+              title="Decrease font size (Alt + -)"
+              className="h-6 px-2 font-medium transition-colors hover:bg-[var(--line-subtle)] disabled:opacity-30 rounded"
+            >
+              A-
+            </button>
+            <span className="min-w-[36px] text-center font-mono text-[11px] font-semibold text-[var(--muted)]">
+              {formatFontSizeLabel(fontSize)}
+            </span>
+            <button
+              type="button"
+              onClick={() => changeFontSize(getNextFontSize(fontSize, 'up'))}
+              disabled={fontSize === 'xl'}
+              aria-label="Increase editor font size"
+              title="Increase font size (Alt + +)"
+              className="h-6 px-2 font-medium transition-colors hover:bg-[var(--line-subtle)] disabled:opacity-30 rounded"
+            >
+              A+
+            </button>
+          </div>
+
           <div className="caption-desk-queue-status text-right text-xs text-[var(--muted)]">
             {hasSegmentIds ? (
               <>{snapshot.sourceSegmentIds.length} segment{snapshot.sourceSegmentIds.length === 1 ? '' : 's'}</>
@@ -120,15 +166,26 @@ export function CaptionDeskReviewEditor({
         }
         data-draft={snapshot.draftPreview}
         data-draft-join={snapshot.draftJoinWithoutSpace ? 'true' : 'false'}
+        style={getFontSizeStyles(fontSize)}
         onInput={event => edit(event.currentTarget.textContent || '')}
         onKeyDown={event => {
+          if (event.altKey && (event.key === '-' || event.key === '_')) {
+            event.preventDefault();
+            changeFontSize(getNextFontSize(fontSize, 'down'));
+            return;
+          }
+          if (event.altKey && (event.key === '=' || event.key === '+')) {
+            event.preventDefault();
+            changeFontSize(getNextFontSize(fontSize, 'up'));
+            return;
+          }
           if (!shouldPublishOnEnter(event.nativeEvent)) return;
           event.preventDefault();
           if (showShortcutHint) dismissShortcutHint();
           release(true);
         }}
         aria-label="Caption text to review and publish"
-        className="caption-review-editor transcript-paragraph-source w-full flex-1 overflow-y-auto bg-transparent px-4 py-3 text-[var(--ink)] outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--focus-ring)] aria-disabled:cursor-wait aria-disabled:text-[var(--muted)] sm:px-5 sm:py-4"
+        className="caption-review-editor transcript-paragraph-source w-full flex-1 overflow-y-auto bg-transparent px-4 py-3 text-[var(--ink)] outline-none focus:outline-none focus-visible:ring-0 aria-disabled:cursor-wait aria-disabled:text-[var(--muted)] sm:px-5 sm:py-4"
       />
 
       <span className="sr-only" aria-live="polite" aria-atomic="true">
@@ -137,7 +194,7 @@ export function CaptionDeskReviewEditor({
 
       {canEdit && showShortcutHint ? (
         <div className="caption-desk-shortcut-hint flex items-center justify-between gap-3 border-t border-[var(--line)] px-4 py-2 text-xs sm:px-5">
-          <span><strong>Quick publish:</strong> Enter publishes to the cursor. Shift+Enter adds a new line.</span>
+          <span><strong>Quick publish:</strong> Enter publishes to the cursor. Shift+Enter adds a new line. Alt +/- adjusts font.</span>
           <button type="button" className="control-button control-button--inline shrink-0" onClick={dismissShortcutHint}>
             Got it
           </button>
@@ -145,7 +202,15 @@ export function CaptionDeskReviewEditor({
       ) : null}
 
       <footer className="caption-desk-editor-footer flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-[var(--line)] bg-[var(--control-surface-bg)] px-4 py-2.5 sm:px-5">
-        <span className="text-sm text-[var(--muted)]">{snapshot.reviewText.length} characters</span>
+        <div className="flex items-center gap-2 text-xs">
+          <span className={budgetWarning.isOverTwoLines ? 'font-semibold text-amber-400' : 'text-[var(--muted)]'}>
+            {graphemeCount} chars
+          </span>
+          <span className="text-[var(--subtle)]">·</span>
+          <span className={budgetWarning.isOverTwoLines ? 'font-semibold text-amber-400' : 'text-[var(--subtle)]'}>
+            {budgetWarning.label}
+          </span>
+        </div>
         {canEdit ? (
           <>
             <span className="hidden text-xs text-[var(--subtle)] sm:inline">Enter → publish to cursor · Shift+Enter → new line</span>
@@ -181,3 +246,16 @@ function SegmentAge({ segmentKey }: { segmentKey: string }) {
 
   return <span> · {formatCaptionSegmentAge(age)}</span>;
 }
+
+function loadPersistedFontSize(): CaptionDeskFontSize {
+  try {
+    const value = window.localStorage.getItem(FONT_SIZE_STORAGE_KEY);
+    if (value === 'sm' || value === 'md' || value === 'lg' || value === 'xl') {
+      return value;
+    }
+  } catch {
+    // Default fallback
+  }
+  return 'md';
+}
+
