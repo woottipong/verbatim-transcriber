@@ -30,10 +30,11 @@ The V2 endpoint is `<location>-speech.googleapis.com:443`, and the recognizer pa
 
 ## Authentication
 
-`GOOGLE_CLOUD_PROJECT` is always required. Configure either:
-
-- `GOOGLE_APPLICATION_CREDENTIALS` for a service-account JSON file, or
-- `GOOGLE_API_KEY` when the key is valid for this API and project.
+`GOOGLE_CLOUD_PROJECT` and `GOOGLE_APPLICATION_CREDENTIALS` are required. The
+latter points to a service-account JSON file used as Application Default
+Credentials by the client library. Cloud Speech-to-Text uses ADC for
+authentication; this repository does not treat a Google API key as a supported
+replacement.
 
 Do not log or commit credentials.
 

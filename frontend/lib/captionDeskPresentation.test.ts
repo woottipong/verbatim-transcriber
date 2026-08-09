@@ -9,6 +9,7 @@ import {
   getCaptionBudgetWarning,
   getCaptionEditorTextUpdate,
   getCaptionDeskOperationalStatus,
+  getCaptionDraftStatusLabel,
   getCaptionReviewInstructions,
   getFontSizeStyles,
   getNextFontSize,
@@ -90,6 +91,11 @@ test('Draft announcements expose preview text without announcing empty revisions
   assert.equal(formatCaptionDraftAnnouncement('   '), '');
 });
 
+test('an active Draft has a visible non-color status label', () => {
+  assert.equal(getCaptionDraftStatusLabel(true), 'Draft สด · อ่านอย่างเดียว');
+  assert.equal(getCaptionDraftStatusLabel(false), '');
+});
+
 test('font size navigation steps up and down within bounds', () => {
   assert.equal(getNextFontSize('md', 'up'), 'lg');
   assert.equal(getNextFontSize('lg', 'up'), 'xl');
@@ -115,8 +121,6 @@ test('grapheme counting and budget warning report correct line thresholds', () =
   assert.deepEqual(getCaptionBudgetWarning(75), {
     isOverSingleLine: true,
     isOverTwoLines: true,
-    label: 'Exceeds 2-line budget (70+ chars)',
+    label: '',
   });
 });
-
-

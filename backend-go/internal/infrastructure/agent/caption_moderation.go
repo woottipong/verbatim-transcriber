@@ -64,7 +64,12 @@ func (a *Agent) handleTranscriptMessage(message TranscriptMessage) {
 	a.mu.Unlock()
 
 	if policy == captionmoderation.CaptionPolicyEarlyFinal && cutter != nil {
+		a.captionModerationMu.Lock()
+		defer a.captionModerationMu.Unlock()
 		output := cutter.Observe(source, time.Now())
+		if source.IsFinal {
+			a.stopEarlyFinalTimer()
+		}
 		for _, pending := range output.Pending {
 			a.deliverModerationSource(pending, operatorID)
 		}
@@ -76,6 +81,9 @@ func (a *Agent) handleTranscriptMessage(message TranscriptMessage) {
 		}
 		if output.ClearDraft != nil {
 			a.clearModerationDraft(*output.ClearDraft, operatorID)
+		}
+		if !source.IsFinal {
+			a.scheduleEarlyFinalRecheck(cutter)
 		}
 		return
 	}
@@ -113,6 +121,80 @@ func (a *Agent) deliverModerationSource(source captionmoderation.SourceSegment, 
 	}
 	if err := a.publishCaptionOperator(envelope, source.IsFinal, operatorID); err != nil {
 		log.Printf("⚠️ [Caption] Failed to deliver %s to operator: %v", envelope.Type, err)
+	}
+}
+
+func (a *Agent) scheduleEarlyFinalRecheck(cutter *captionmoderation.EarlyFinalCutter) {
+	if cutter == nil {
+		return
+	}
+	delay := cutter.ReevaluateAfter(time.Now())
+	if delay <= 0 {
+		delay = time.Millisecond
+	}
+
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.earlyFinalCutter != cutter ||
+		a.captionPolicy != captionmoderation.CaptionPolicyEarlyFinal ||
+		!a.captionReviewStarted || !a.isRunning {
+		return
+	}
+	if a.earlyFinalTimer != nil {
+		a.earlyFinalTimer.Stop()
+	}
+	a.earlyFinalTimerGeneration++
+	generation := a.earlyFinalTimerGeneration
+	a.earlyFinalTimer = time.AfterFunc(delay, func() {
+		a.reevaluateEarlyFinal(cutter, generation)
+	})
+}
+
+func (a *Agent) stopEarlyFinalTimer() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.stopEarlyFinalTimerLocked()
+}
+
+func (a *Agent) stopEarlyFinalTimerLocked() {
+	if a.earlyFinalTimer != nil {
+		a.earlyFinalTimer.Stop()
+		a.earlyFinalTimer = nil
+	}
+	a.earlyFinalTimerGeneration++
+}
+
+func (a *Agent) reevaluateEarlyFinal(
+	cutter *captionmoderation.EarlyFinalCutter,
+	generation uint64,
+) {
+	a.captionModerationMu.Lock()
+	defer a.captionModerationMu.Unlock()
+
+	a.mu.Lock()
+	if a.earlyFinalCutter != cutter ||
+		a.earlyFinalTimerGeneration != generation ||
+		a.captionPolicy != captionmoderation.CaptionPolicyEarlyFinal ||
+		!a.captionReviewStarted || !a.isRunning {
+		a.mu.Unlock()
+		return
+	}
+	a.earlyFinalTimer = nil
+	operatorID := a.captionOperatorID
+	a.mu.Unlock()
+
+	output := cutter.Reevaluate(time.Now())
+	for _, pending := range output.Pending {
+		a.deliverModerationSource(pending, operatorID)
+	}
+	if output.Draft != nil {
+		if len(output.Pending) > 0 {
+			output.Draft.Sequence = a.nextTranscriptSequence()
+		}
+		a.deliverModerationSource(*output.Draft, operatorID)
+	}
+	if output.ClearDraft != nil {
+		a.clearModerationDraft(*output.ClearDraft, operatorID)
 	}
 }
 
@@ -178,19 +260,23 @@ func (a *Agent) subscribeCaptionOperatorWithPolicy(
 	}
 	isNewSession := a.captionOperatorSessionID == ""
 	var snapshot captionmoderation.Snapshot
+	var cutterToSchedule *captionmoderation.EarlyFinalCutter
 	if isNewSession {
 		snapshot = a.moderator.StartReviewWindow()
 		a.captionReviewStarted = true
 		a.captionOperatorSessionID = sessionID
 		a.captionPolicy = policy
 		if policy == captionmoderation.CaptionPolicyEarlyFinal {
+			a.stopEarlyFinalTimerLocked()
 			a.earlyFinalCutter = captionmoderation.NewEarlyFinalCutter(
 				captionmoderation.DefaultEarlyFinalConfig(),
 			)
+			cutterToSchedule = a.earlyFinalCutter
 			if snapshot.Draft != nil {
 				a.earlyFinalCutter.Observe(*snapshot.Draft, time.Now())
 			}
 		} else {
+			a.stopEarlyFinalTimerLocked()
 			a.earlyFinalCutter = nil
 		}
 	} else {
@@ -198,6 +284,9 @@ func (a *Agent) subscribeCaptionOperatorWithPolicy(
 	}
 	a.captionOperatorID = identity
 	a.mu.Unlock()
+	if cutterToSchedule != nil && snapshot.Draft != nil {
+		a.scheduleEarlyFinalRecheck(cutterToSchedule)
+	}
 
 	envelope := captionOperatorEnvelope{
 		Type:      captionSnapshotType,
@@ -428,6 +517,7 @@ func (a *Agent) expireCaptionOperatorSession(sessionID string) {
 	}
 	a.captionOperatorSessionID = ""
 	a.captionPolicy = ""
+	a.stopEarlyFinalTimerLocked()
 	if a.earlyFinalCutter != nil {
 		a.earlyFinalCutter.Reset()
 		a.earlyFinalCutter = nil

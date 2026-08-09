@@ -49,7 +49,7 @@ External system ◄── signed caption WebSocket ────── caption hu
 - `frontend/`: React 19, TypeScript, Vite, Tailwind CSS, LiveKit client.
 - `backend-go/`: Go 1.24, Fiber HTTP API, LiveKit room agent, provider implementations, caption moderation.
 - `livekit/`: local Docker Compose setup for LiveKit (`docker-compose.yml`/`livekit.yaml`). `docker-compose-prod.yml`/`livekit-prod.yaml` are production-hardened variants (dedicated networks, health checks) and are not part of the local dev flow below.
-- `start.sh`: local frontend/backend launcher. LiveKit must already be running.
+- `start_backend.sh` and `start_frontend.sh`: separate local backend/frontend launchers. LiveKit must already be running.
 
 ## Important entry points
 
@@ -79,6 +79,7 @@ External system ◄── signed caption WebSocket ────── caption hu
 - External transcript + caption fan-out: `backend-go/internal/infrastructure/transcript/` (`hub.go` owns both `rooms`/`providerRooms` for raw transcripts and `captionRooms` for approved captions)
 - Provider interface and Thai normalization: `backend-go/internal/domain/domain.go`
 - Provider implementations: `backend-go/internal/infrastructure/asr/`
+- Caption Desk Gemini proofreader: `backend-go/internal/infrastructure/proofread/`
 
 ## Provider behavior
 
@@ -132,7 +133,7 @@ Applies to the two-line live-caption window used by Transcript when following ei
 
 ## Backend conventions
 
-- Keep provider-independent contracts in `internal/domain` and provider details in `internal/infrastructure/asr`.
+- Keep provider-independent contracts in `internal/domain`. Keep ASR provider details in `internal/infrastructure/asr` and non-ASR proofreading provider details in `internal/infrastructure/proofread`.
 - Keep caption review/moderation domain logic (pending queue, draft/final transitions, publish idempotency, early-final promotion) in `internal/application/captionmoderation`; keep LiveKit data-channel transport, ownership/grace-period bookkeeping, and per-packet authorization in `internal/infrastructure/agent/caption_moderation.go` and `caption_protocol.go`. Don't let transport concerns leak into the moderator or vice versa.
 - Keep HTTP parsing/status handling in `internal/delivery/handler` and route registration in `internal/delivery/routes.go`.
 - Pass `context.Context` through network and long-running operations.
@@ -178,8 +179,9 @@ Applies to the two-line live-caption window used by Transcript when following ei
 # Start local LiveKit first
 cd livekit && docker compose up -d
 
-# Start frontend and backend
-./start.sh
+# Start backend and frontend in separate terminals
+./start_backend.sh
+./start_frontend.sh
 
 # Frontend
 cd frontend
@@ -201,7 +203,7 @@ Use `pnpm` for frontend dependency operations. Keep `pnpm-lock.yaml` authoritati
 
 - Frontend-only logic/UI change: run `pnpm test` and `pnpm build` in `frontend/`.
 - Backend change: run `go test ./...` in `backend-go/`; use `go test -race ./...` for lifecycle, channel, mutex, or agent changes — this includes Caption Desk ownership/grace-period/draft-coalescing changes in `internal/infrastructure/agent`.
-- Provider parsing change: add or update focused tests under `backend-go/internal/infrastructure/asr/`.
+- Provider parsing change: add or update focused tests under `backend-go/internal/infrastructure/asr/` or `backend-go/internal/infrastructure/proofread/`, according to the provider boundary being changed.
 - Caption moderation/review-window change: add or update tests under `backend-go/internal/application/captionmoderation/` and `backend-go/internal/infrastructure/agent/caption_protocol_test.go`.
 - Transcript or Caption Desk state change: update tests under `frontend/lib/*.test.ts` (in particular `captionDeskSession.test.ts`, `captionDeskMessages.test.ts`, `subtitlePaging.test.ts`, `progressiveText.test.ts`, `captionDeskPlaybackStore.test.ts` — these encode the contracts above).
 - Documentation/config change: verify referenced files and commands exist, search for stale architecture terms, and run the narrowest affected build/test.

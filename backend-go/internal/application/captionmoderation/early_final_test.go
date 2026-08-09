@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -38,6 +39,70 @@ func TestEarlyFinalPromotesStablePrefixAndKeepsSafetyTail(t *testing.T) {
 	}
 }
 
+func TestEarlyFinalReevaluatesLatestDraftAfterIdle(t *testing.T) {
+	cutter := NewEarlyFinalCutter(EarlyFinalConfig{
+		MinimumObservations: 2,
+		MinimumSpan:         250 * time.Millisecond,
+		MinimumChunkRunes:   12,
+		MaximumChunkRunes:   45,
+		SafetyTailRunes:     16,
+		MaxObservations:     8,
+	})
+	start := time.Unix(9_000, 0)
+	cutter.Observe(earlyDraftWithSequence(
+		"th-idle",
+		"ข้อความส่วนต้นที่นิ่งแล้วและส่วนท้ายที่ยังเปลี่ยนได้",
+		1,
+	), start)
+	second := cutter.Observe(earlyDraftWithSequence(
+		"th-idle",
+		"ข้อความส่วนต้นที่นิ่งแล้วและส่วนท้ายที่ยังเปลี่ยนได้อีก",
+		2,
+	), start.Add(100*time.Millisecond))
+	if len(second.Pending) != 0 {
+		t.Fatalf("promoted too early: %#v", second.Pending)
+	}
+
+	output := cutter.Reevaluate(start.Add(250 * time.Millisecond))
+	if len(output.Pending) != 1 || output.Draft == nil {
+		t.Fatalf("idle output = %#v", output)
+	}
+	if got := output.Pending[0].Text + output.Draft.Text; got != "ข้อความส่วนต้นที่นิ่งแล้วและส่วนท้ายที่ยังเปลี่ยนได้อีก" {
+		t.Fatalf("idle reconstruction = %q", got)
+	}
+}
+
+func TestEarlyFinalReevaluationDoesNotPromoteSameRevisionTwice(t *testing.T) {
+	cutter := NewEarlyFinalCutter(EarlyFinalConfig{
+		MinimumObservations: 2,
+		MinimumSpan:         250 * time.Millisecond,
+		MinimumChunkRunes:   12,
+		MaximumChunkRunes:   45,
+		SafetyTailRunes:     16,
+		MaxObservations:     8,
+	})
+	start := time.Unix(9_500, 0)
+	text := "ข้อความส่วนต้นที่นิ่งแล้วและส่วนท้ายที่ยังเปลี่ยนได้อีก"
+	cutter.Observe(earlyDraftWithSequence("th-repeat", text, 1), start)
+	cutter.Observe(earlyDraftWithSequence("th-repeat", text+"ครับ", 2), start.Add(100*time.Millisecond))
+
+	first := cutter.Reevaluate(start.Add(250 * time.Millisecond))
+	second := cutter.Reevaluate(start.Add(500 * time.Millisecond))
+	if len(first.Pending) != 1 || len(second.Pending) != 0 {
+		t.Fatalf("repeated idle output = first=%#v second=%#v", first, second)
+	}
+}
+
+func TestDefaultEarlyFinalConfigUsesFasterConservativeBounds(t *testing.T) {
+	config := DefaultEarlyFinalConfig()
+	if config.MinimumObservations != 2 || config.MinimumSpan != 250*time.Millisecond {
+		t.Fatalf("stability defaults = %#v", config)
+	}
+	if config.MinimumChunkRunes != 12 || config.MaximumChunkRunes != 45 || config.SafetyTailRunes != 16 {
+		t.Fatalf("chunk defaults = %#v", config)
+	}
+}
+
 func TestEarlyFinalWaitsForMinimumSpanAndChunkLength(t *testing.T) {
 	cutter := NewEarlyFinalCutter(DefaultEarlyFinalConfig())
 	start := time.Unix(2_000, 0)
@@ -55,6 +120,21 @@ func TestEarlyFinalWaitsForMinimumSpanAndChunkLength(t *testing.T) {
 		if len(output.Pending) != 0 {
 			t.Fatalf("observation %d promoted a short chunk: %#v", index, output.Pending)
 		}
+	}
+}
+
+func TestEarlyFinalResetReleasesLatestSegment(t *testing.T) {
+	cutter := NewEarlyFinalCutter(DefaultEarlyFinalConfig())
+	cutter.Observe(earlyDraftWithSequence(
+		"g-reset",
+		strings.Repeat("ข้อความ Interim ที่ไม่ควรถูกเก็บไว้", 100),
+		1,
+	), time.Unix(2_500, 0))
+
+	cutter.Reset()
+
+	if cutter.latestSegment != (SourceSegment{}) {
+		t.Fatalf("latest segment retained after reset: %#v", cutter.latestSegment)
 	}
 }
 
@@ -274,15 +354,17 @@ func TestEarlyFinalPromotesAfterMinimumSpanAtHighRevisionFrequency(t *testing.T)
 	start := time.Unix(6_500, 0)
 	text := "stable phrase stays unchanged mutable tail"
 	var output EarlyFinalOutput
+	var promoted bool
 	for index := 0; index <= 15; index++ {
 		output = cutter.Observe(
 			earlyDraftWithSequence("g-fast", text, uint64(index+1)),
 			start.Add(time.Duration(index)*20*time.Millisecond),
 		)
+		promoted = promoted || len(output.Pending) == 1
 	}
 
-	if len(output.Pending) != 1 {
-		t.Fatalf("high-frequency stable text was not promoted: %#v", output.Pending)
+	if !promoted {
+		t.Fatalf("high-frequency stable text was not promoted: %#v", output)
 	}
 }
 
@@ -301,14 +383,38 @@ func TestEarlyFinalBoundsOnePromotedChunkForLongStableThaiText(t *testing.T) {
 	if len(output.Pending) != 1 {
 		t.Fatalf("promoted chunks = %#v, want one bounded chunk", output.Pending)
 	}
-	if got := utf8.RuneCountInString(output.Pending[0].Text); got > 64 {
-		t.Fatalf("promoted chunk length = %d runes, want at most 64", got)
+	if got := utf8.RuneCountInString(output.Pending[0].Text); got > 45 {
+		t.Fatalf("promoted chunk length = %d runes, want at most 45", got)
 	}
 	if output.Draft == nil || !output.Draft.JoinWithoutSpace {
 		t.Fatalf("Thai continuation Draft = %#v", output.Draft)
 	}
 	if got := output.Pending[0].Text + output.Draft.Text; got != text {
 		t.Fatalf("bounded promotion changed Thai text: got %q want %q", got, text)
+	}
+}
+
+func TestEarlyFinalDoesNotSplitThaiGraphemeAtFallbackBoundary(t *testing.T) {
+	cutter := NewEarlyFinalCutter(DefaultEarlyFinalConfig())
+	start := time.Unix(7_250, 0)
+	text := strings.Repeat("ก้", 40) + strings.Repeat("ข", 16)
+	var output EarlyFinalOutput
+	for index := 0; index < 3; index++ {
+		output = cutter.Observe(
+			earlyDraftWithSequence("th-grapheme", text, uint64(index+1)),
+			start.Add(time.Duration(index)*150*time.Millisecond),
+		)
+	}
+
+	if len(output.Pending) != 1 || output.Draft == nil {
+		t.Fatalf("split output = %#v, want one pending chunk and Draft", output)
+	}
+	draftRunes := []rune(output.Draft.Text)
+	if len(draftRunes) == 0 || unicode.Is(unicode.Mn, draftRunes[0]) {
+		t.Fatalf("Draft starts inside Thai grapheme: pending=%q Draft=%q", output.Pending[0].Text, output.Draft.Text)
+	}
+	if got := output.Pending[0].Text + output.Draft.Text; got != text {
+		t.Fatalf("grapheme-safe split changed text: got %q want %q", got, text)
 	}
 }
 
@@ -319,13 +425,13 @@ func TestEarlyFinalSplitsLongProviderFinalWithoutChangingThaiText(t *testing.T) 
 	final.IsFinal = true
 
 	output := cutter.Observe(final, time.Unix(7_500, 0))
-	if len(output.Pending) != 3 {
-		t.Fatalf("final chunks = %d, want 3", len(output.Pending))
+	if len(output.Pending) != 4 {
+		t.Fatalf("final chunks = %d, want 4", len(output.Pending))
 	}
 	var reconstructed strings.Builder
 	for index, chunk := range output.Pending {
-		if got := utf8.RuneCountInString(chunk.Text); got > 64 {
-			t.Fatalf("chunk %d length = %d runes, want at most 64", index, got)
+		if got := utf8.RuneCountInString(chunk.Text); got > 45 {
+			t.Fatalf("chunk %d length = %d runes, want at most 45", index, got)
 		}
 		if index > 0 && !chunk.JoinWithoutSpace {
 			reconstructed.WriteByte(' ')

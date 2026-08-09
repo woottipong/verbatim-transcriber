@@ -12,12 +12,14 @@ import (
 
 	"thai-transcriber-backend/config"
 	"thai-transcriber-backend/internal/application/agentsupervisor"
+	"thai-transcriber-backend/internal/application/captionproofread"
 	"thai-transcriber-backend/internal/application/roomoperations"
 	"thai-transcriber-backend/internal/application/transcriptaccess"
 	"thai-transcriber-backend/internal/delivery"
 	"thai-transcriber-backend/internal/delivery/handler"
 	agentinfra "thai-transcriber-backend/internal/infrastructure/agent"
 	"thai-transcriber-backend/internal/infrastructure/livekitroom"
+	proofreadinfra "thai-transcriber-backend/internal/infrastructure/proofread"
 	"thai-transcriber-backend/internal/infrastructure/transcript"
 
 	"github.com/gofiber/fiber/v2"
@@ -49,6 +51,14 @@ func main() {
 		transcript.NewTokenService(cfg.TranscriptWSSecret, 24*time.Hour),
 		handler.TranscriptHub(),
 	)
+	proofreadService := captionproofread.New(nil)
+	if cfg.HasGeminiProofread() {
+		proofreadService = captionproofread.New(proofreadinfra.NewGemini(
+			cfg.GeminiProofreadConfig.Model,
+			cfg.GeminiAPIKey,
+			&http.Client{Timeout: 5 * time.Second},
+		))
+	}
 
 	// Initialize Fiber app
 	//
@@ -78,7 +88,7 @@ func main() {
 	app.Use(logger.New())
 
 	// Routes
-	delivery.SetupRoutes(app, cfg, agentSupervisor, roomOperations, transcriptAccess)
+	delivery.SetupRoutes(app, cfg, agentSupervisor, roomOperations, transcriptAccess, proofreadService)
 
 	// Print startup info
 	printStartupInfo(cfg)

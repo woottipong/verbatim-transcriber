@@ -175,36 +175,39 @@ func formatTranscriptLog(message TranscriptMessage) string {
 
 // Agent handles audio transcription in a LiveKit room
 type Agent struct {
-	config                   *config.Config
-	room                     *lksdk.Room
-	asrProvider              domain.ASRProvider
-	activeTrackID            string
-	pendingTrackID           string
-	trackChanged             chan struct{}
-	transcriptSequence       uint64
-	mu                       sync.Mutex
-	isRunning                bool
-	stopRequested            bool
-	cancel                   context.CancelFunc
-	preferredProvider        string // "google", "gemini", "azure", "gpt-realtime-whisper", or "" for auto
-	roomName                 string // store room name for status
-	transcriptSink           TranscriptSink
-	captionSink              CaptionSink
-	moderator                *captionmoderation.Moderator
-	captionOperatorID        string
-	captionOperatorSessionID string
-	captionPolicy            captionmoderation.CaptionPolicy
-	earlyFinalCutter         *captionmoderation.EarlyFinalCutter
-	captionReviewStarted     bool
-	captionReviewEndTimer    *time.Timer
-	captionOperatorGrace     time.Duration
-	captionDeliveryMu        sync.Mutex
-	captionDraftTimer        *time.Timer
-	captionDraftPending      *captionDraftDelivery
-	captionDraftLastSent     time.Time
-	captionDraftInterval     time.Duration
-	moderationDraftID        string
-	dataPublisher            dataPublishFunc
+	config                    *config.Config
+	room                      *lksdk.Room
+	asrProvider               domain.ASRProvider
+	activeTrackID             string
+	pendingTrackID            string
+	trackChanged              chan struct{}
+	transcriptSequence        uint64
+	mu                        sync.Mutex
+	isRunning                 bool
+	stopRequested             bool
+	cancel                    context.CancelFunc
+	preferredProvider         string // "google", "gemini", "azure", "gpt-realtime-whisper", or "" for auto
+	roomName                  string // store room name for status
+	transcriptSink            TranscriptSink
+	captionSink               CaptionSink
+	moderator                 *captionmoderation.Moderator
+	captionOperatorID         string
+	captionOperatorSessionID  string
+	captionPolicy             captionmoderation.CaptionPolicy
+	earlyFinalCutter          *captionmoderation.EarlyFinalCutter
+	captionReviewStarted      bool
+	captionReviewEndTimer     *time.Timer
+	captionOperatorGrace      time.Duration
+	captionDeliveryMu         sync.Mutex
+	captionModerationMu       sync.Mutex
+	captionDraftTimer         *time.Timer
+	captionDraftPending       *captionDraftDelivery
+	captionDraftLastSent      time.Time
+	captionDraftInterval      time.Duration
+	moderationDraftID         string
+	earlyFinalTimer           *time.Timer
+	earlyFinalTimerGeneration uint64
+	dataPublisher             dataPublishFunc
 }
 
 // New creates a new LiveKit ASR Agent
@@ -405,6 +408,7 @@ func (a *Agent) registerCaptionOperator(participant *lksdk.RemoteParticipant) {
 func (a *Agent) Stop() {
 	a.discardPendingCaptionDraft()
 	a.mu.Lock()
+	a.stopEarlyFinalTimerLocked()
 	if !a.isRunning {
 		a.stopRequested = true
 		a.mu.Unlock()
@@ -478,7 +482,6 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		if a.config.HasGoogleKey() {
 			provider, err = asr.NewGoogleProvider(ctx, asr.GoogleConfig{
 				CredentialsFile:       a.config.GoogleApplicationCredentials,
-				APIKey:                a.config.GoogleAPIKey,
 				ProjectID:             a.config.GoogleCloudProject,
 				Location:              a.config.GoogleConfig.Location,
 				Model:                 a.config.GoogleConfig.Model,
@@ -490,7 +493,7 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 				log.Printf("⚠️ [Agent] Failed to init Google provider: %v", err)
 			}
 		} else {
-			log.Println("⚠️ [Agent] Google requested but no API key configured")
+			log.Println("⚠️ [Agent] Google requested but no credentials configured")
 		}
 	case "gemini":
 		if a.config.HasGeminiKey() {
@@ -525,7 +528,6 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		if a.config.HasGoogleKey() {
 			provider, err = asr.NewGoogleProvider(ctx, asr.GoogleConfig{
 				CredentialsFile:       a.config.GoogleApplicationCredentials,
-				APIKey:                a.config.GoogleAPIKey,
 				ProjectID:             a.config.GoogleCloudProject,
 				Location:              a.config.GoogleConfig.Location,
 				Model:                 a.config.GoogleConfig.Model,

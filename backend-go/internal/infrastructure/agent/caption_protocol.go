@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"strings"
+
+	"thai-transcriber-backend/internal/domain"
 )
 
 const (
@@ -15,7 +17,7 @@ const (
 
 	captionSubscribeType        = "caption.subscribe"
 	captionPublishType          = "caption.publish"
-	maxCaptionCommandTextBytes  = 16_000
+	maxCaptionCommandTextBytes  = domain.MaxCaptionTextBytes
 	maxCaptionCommandSourceIDs  = 500
 	maxCaptionCommandRequestLen = 128
 

@@ -412,7 +412,7 @@ export default function ViewerPage({
     const subtitleSurface = (
         <div
             className={`viewer-subtitle-scroller viewer-subtitle-scroller--background-${displaySettings.background} ${displaySettings.showTranslation ? '' : 'viewer-subtitle-scroller--translation-hidden'} transcript-scroller relative overflow-hidden px-2 sm:px-4 ${cleanOutput ? 'viewer-subtitle-scroller--clean' : ''}`}
-            style={{ '--viewer-subtitle-font-scale': TEXT_SIZE_SCALES[displaySettings.textSize] } as React.CSSProperties}
+            style={{ '--viewer-subtitle-font-scale': TEXT_SIZE_SCALES[displaySettings.textSize] } as CSSProperties}
         >
             <span className="sr-only" aria-live="polite" aria-atomic="true">{latestSubtitleAnnouncement}</span>
             {cleanOutput && (!isConnected || !filterProvider || !hasTranscript) ? null : !isConnected ? (

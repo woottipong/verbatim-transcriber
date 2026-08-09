@@ -10,7 +10,6 @@ type Config struct {
 	Port                         string
 	Host                         string
 	AllowedOrigins               string // Comma-separated list of allowed origins
-	GoogleAPIKey                 string
 	GoogleApplicationCredentials string
 	GoogleCloudProject           string
 	GeminiAPIKey                 string
@@ -24,6 +23,7 @@ type Config struct {
 	ControlAPIKey                string
 	GoogleConfig                 GoogleConfig
 	GeminiConfig                 GeminiConfig
+	GeminiProofreadConfig        GeminiProofreadConfig
 	OpenAIConfig                 OpenAIConfig
 	AzureConfig                  AzureConfig
 	LiveKitConfig                LiveKitConfig
@@ -53,6 +53,10 @@ type GeminiConfig struct {
 	SampleRate         int
 }
 
+type GeminiProofreadConfig struct {
+	Model string
+}
+
 type OpenAIConfig struct {
 	LanguageCode string
 	SampleRate   int
@@ -67,7 +71,6 @@ func Load() *Config {
 		Port:                         getEnv("PORT", "3000"),
 		Host:                         getEnv("HOST", "localhost"),
 		AllowedOrigins:               getEnv("ALLOWED_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000,http://127.0.0.1:3000"),
-		GoogleAPIKey:                 os.Getenv("GOOGLE_API_KEY"),
 		GoogleApplicationCredentials: os.Getenv("GOOGLE_APPLICATION_CREDENTIALS"),
 		GoogleCloudProject:           os.Getenv("GOOGLE_CLOUD_PROJECT"),
 		GeminiAPIKey:                 os.Getenv("GEMINI_API_KEY"),
@@ -91,6 +94,9 @@ func Load() *Config {
 			LanguageCode:       os.Getenv("GEMINI_LANGUAGE_CODE"),
 			TargetLanguageCode: getEnv("GEMINI_TARGET_LANGUAGE_CODE", "th"),
 			SampleRate:         16000,
+		},
+		GeminiProofreadConfig: GeminiProofreadConfig{
+			Model: strings.TrimSpace(os.Getenv("GEMINI_PROOFREAD_MODEL")),
 		},
 		OpenAIConfig: OpenAIConfig{
 			LanguageCode: getEnv("OPENAI_LANGUAGE_CODE", "th"),
@@ -119,11 +125,15 @@ func getEnv(key, fallback string) string {
 
 // Provider availability checks
 func (c *Config) HasGoogleKey() bool {
-	return c.GoogleCloudProject != "" && (c.GoogleAPIKey != "" || c.GoogleApplicationCredentials != "")
+	return c.GoogleCloudProject != "" && c.GoogleApplicationCredentials != ""
 }
 
 func (c *Config) HasGeminiKey() bool {
 	return c.GeminiAPIKey != ""
+}
+
+func (c *Config) HasGeminiProofread() bool {
+	return c != nil && strings.TrimSpace(c.GeminiAPIKey) != "" && strings.TrimSpace(c.GeminiProofreadConfig.Model) != ""
 }
 
 func (c *Config) HasOpenAITranscriptionKey() bool {

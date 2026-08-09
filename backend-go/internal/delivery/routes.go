@@ -4,6 +4,7 @@ import (
 	"log"
 	"thai-transcriber-backend/config"
 	"thai-transcriber-backend/internal/application/agentsupervisor"
+	"thai-transcriber-backend/internal/application/captionproofread"
 	"thai-transcriber-backend/internal/application/roomoperations"
 	"thai-transcriber-backend/internal/application/transcriptaccess"
 	"thai-transcriber-backend/internal/delivery/handler"
@@ -37,13 +38,15 @@ func SetupRoutes(
 	supervisor *agentsupervisor.Supervisor,
 	rooms *roomoperations.Operations,
 	transcriptAccess *transcriptaccess.Policy,
+	proofreadService *captionproofread.Service,
 ) {
-	setupHealthRoutes(app, cfg)
+	setupHealthRoutes(app, cfg, proofreadService)
+	setupProofreadRoutes(app, cfg, proofreadService)
 	setupLiveKitRoutes(app, cfg, supervisor, rooms, transcriptAccess)
 }
 
 // setupHealthRoutes configures health check and provider status endpoints
-func setupHealthRoutes(app *fiber.App, cfg *config.Config) {
+func setupHealthRoutes(app *fiber.App, cfg *config.Config, proofreadService *captionproofread.Service) {
 	app.Get("/health", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"status":  "ok",
@@ -58,8 +61,33 @@ func setupHealthRoutes(app *fiber.App, cfg *config.Config) {
 			"gpt-realtime-whisper": cfg.HasOpenAITranscriptionKey(),
 			"azure":                cfg.HasAzureKey(),
 			"livekit":              cfg.HasLiveKitKey(),
+			"captionProofread":     proofreadService.Enabled(),
 		})
 	})
+}
+
+const proofreadRequestsPerMinute = 30
+
+func proofreadLimiter() fiber.Handler {
+	return limiter.New(limiter.Config{
+		Max:        proofreadRequestsPerMinute,
+		Expiration: 1 * time.Minute,
+		LimitReached: func(c *fiber.Ctx) error {
+			log.Println("[CaptionProofread] error_class=rate_limited")
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"error": "Too many proofreading requests. Try again shortly.",
+			})
+		},
+	})
+}
+
+func setupProofreadRoutes(app *fiber.App, cfg *config.Config, service *captionproofread.Service) {
+	app.Post(
+		"/api/caption-desk/ai-proofread",
+		proofreadLimiter(),
+		handler.RequireControlAuth(cfg),
+		func(c *fiber.Ctx) error { return handler.HandleAIProofread(c, service) },
+	)
 }
 
 // setupLiveKitRoutes configures LiveKit token, room, and agent endpoints

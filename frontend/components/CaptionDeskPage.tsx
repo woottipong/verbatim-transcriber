@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useCaptionDesk } from '../hooks/useCaptionDesk';
 import {
@@ -7,8 +7,10 @@ import {
   type CaptionPolicy,
 } from '../lib/appRoutes';
 import { hasCaptionDeskWork } from '../lib/captionDeskPresentation';
+import { checkAvailableProviders } from '../lib/api';
 import { isAgentProvider, type AgentProvider } from '../lib/providers';
 import { ConnectionState } from '../types';
+import type { ProofreadAvailability } from '../hooks/useCaptionProofread';
 import { CaptionDeskHeader } from './caption-desk/CaptionDeskHeader';
 import { CaptionDeskLauncher } from './caption-desk/CaptionDeskLauncher';
 import { CaptionDeskPublishedHistory } from './caption-desk/CaptionDeskPublishedHistory';
@@ -65,6 +67,7 @@ function ConnectedCaptionDesk({
   } = useCaptionDesk(backendUrl, roomName, provider, captionPolicy);
 
   const connected = connectionState === ConnectionState.CONNECTED;
+  const [proofreadAvailability, setProofreadAvailability] = useState<ProofreadAvailability>('unknown');
   const errorMessage = snapshot.error || error;
   const canReconnect = Boolean(error) || connectionState === ConnectionState.DISCONNECTED;
   const hasWork = hasCaptionDeskWork({
@@ -84,6 +87,17 @@ function ConnectedCaptionDesk({
     window.addEventListener('beforeunload', preventAccidentalExit);
     return () => window.removeEventListener('beforeunload', preventAccidentalExit);
   }, [hasWork]);
+
+  useEffect(() => {
+    let disposed = false;
+    void checkAvailableProviders(backendUrl).then(providers => {
+      if (disposed) return;
+      setProofreadAvailability(providers === null
+        ? 'unknown'
+        : providers.captionProofread === true ? 'enabled' : 'disabled');
+    });
+    return () => { disposed = true; };
+  }, [backendUrl]);
 
   const changeDesk = () => {
     if (
@@ -124,6 +138,8 @@ function ConnectedCaptionDesk({
 
         <div className="caption-desk-workspace grid flex-none gap-4 lg:flex-1 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)] xl:grid-cols-[minmax(0,1fr)_minmax(20rem,24rem)]">
           <CaptionDeskReviewEditor
+            backendUrl={backendUrl}
+            proofreadAvailability={proofreadAvailability}
             snapshot={snapshot}
             captionConnected={captionConnected}
             agentConnected={agentConnected}

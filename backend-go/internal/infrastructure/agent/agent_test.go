@@ -180,6 +180,190 @@ func TestEarlyFinalPolicyPromotesStablePrefixOnlyInModerationLane(t *testing.T) 
 	}
 }
 
+func TestEarlyFinalPromotesAfterIdleWithoutThirdRevision(t *testing.T) {
+	operatorPackets := make(chan captionOperatorEnvelope, 8)
+	rawPackets := make(chan struct{}, 8)
+	agent := &Agent{
+		preferredProvider:    "google",
+		isRunning:            true,
+		moderator:            captionmoderation.New("google", time.Now),
+		captionOperatorID:    "caption-operator-1",
+		captionReviewStarted: true,
+		captionPolicy:        captionmoderation.CaptionPolicyEarlyFinal,
+		earlyFinalCutter: captionmoderation.NewEarlyFinalCutter(captionmoderation.EarlyFinalConfig{
+			MinimumObservations: 2,
+			MinimumSpan:         200 * time.Millisecond,
+			MinimumChunkRunes:   10,
+			MaximumChunkRunes:   45,
+			SafetyTailRunes:     12,
+			MaxObservations:     8,
+		}),
+		dataPublisher: func(payload []byte, topic string, _ bool, _ []string) error {
+			if topic == "" {
+				rawPackets <- struct{}{}
+				return nil
+			}
+			var envelope captionOperatorEnvelope
+			if err := json.Unmarshal(payload, &envelope); err != nil {
+				return err
+			}
+			operatorPackets <- envelope
+			return nil
+		},
+	}
+
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "hello stable phrase mutable tail", Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+	time.Sleep(150 * time.Millisecond)
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "hello stable phrase mutable tail grows", Provider: "google",
+		Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+	})
+
+	deadline := time.After(120 * time.Millisecond)
+	var promoted, tail *captionSourceEnvelope
+	for {
+		select {
+		case envelope := <-operatorPackets:
+			if envelope.Type == captionPendingType {
+				promoted = envelope.Source
+			}
+			if envelope.Type == captionDraftType && envelope.Source != nil && envelope.Source.JoinWithoutSpace {
+				tail = envelope.Source
+			}
+			if promoted != nil && tail != nil {
+				if tail.Sequence <= promoted.Sequence {
+					t.Fatalf("idle Draft sequence = %d, want newer than promoted sequence %d", tail.Sequence, promoted.Sequence)
+				}
+				if got := len(rawPackets); got != 2 {
+					t.Fatalf("raw packet count = %d, want 2", got)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for idle early-final promotion")
+		}
+	}
+}
+
+func TestEarlyFinalProviderFinalStopsIdleRecheck(t *testing.T) {
+	operatorPackets := make(chan captionOperatorEnvelope, 16)
+	agent := &Agent{
+		preferredProvider:    "google",
+		isRunning:            true,
+		moderator:            captionmoderation.New("google", time.Now),
+		captionOperatorID:    "caption-operator-1",
+		captionReviewStarted: true,
+		captionPolicy:        captionmoderation.CaptionPolicyEarlyFinal,
+		earlyFinalCutter: captionmoderation.NewEarlyFinalCutter(captionmoderation.EarlyFinalConfig{
+			MinimumObservations: 2,
+			MinimumSpan:         40 * time.Millisecond,
+			MinimumChunkRunes:   10,
+			MaximumChunkRunes:   45,
+			SafetyTailRunes:     12,
+			MaxObservations:     8,
+		}),
+		dataPublisher: func(payload []byte, topic string, _ bool, _ []string) error {
+			if topic != CaptionOperatorTopic {
+				return nil
+			}
+			var envelope captionOperatorEnvelope
+			if err := json.Unmarshal(payload, &envelope); err != nil {
+				return err
+			}
+			operatorPackets <- envelope
+			return nil
+		},
+	}
+
+	for _, text := range []string{
+		"hello stable phrase mutable tail",
+		"hello stable phrase mutable tail grows",
+	} {
+		agent.handleTranscriptMessage(TranscriptMessage{
+			Type: "transcript", Text: text, Provider: "google",
+			Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+		})
+	}
+	agent.handleTranscriptMessage(TranscriptMessage{
+		Type: "transcript", Text: "hello stable phrase mutable tail grows final",
+		IsFinal: true, Provider: "google", Role: domain.TranscriptRoleSource,
+		SegmentID: "google-1",
+	})
+
+	time.Sleep(100 * time.Millisecond)
+	var pendingCount int
+	for {
+		select {
+		case envelope := <-operatorPackets:
+			if envelope.Type == captionPendingType {
+				pendingCount++
+			}
+		default:
+			if pendingCount != 1 {
+				t.Fatalf("pending packets = %d, want one provider final", pendingCount)
+			}
+			return
+		}
+	}
+}
+
+func TestEarlyFinalAgentStopCancelsIdleRecheck(t *testing.T) {
+	operatorPackets := make(chan captionOperatorEnvelope, 16)
+	agent := &Agent{
+		preferredProvider:    "google",
+		isRunning:            true,
+		moderator:            captionmoderation.New("google", time.Now),
+		captionOperatorID:    "caption-operator-1",
+		captionReviewStarted: true,
+		captionPolicy:        captionmoderation.CaptionPolicyEarlyFinal,
+		earlyFinalCutter: captionmoderation.NewEarlyFinalCutter(captionmoderation.EarlyFinalConfig{
+			MinimumObservations: 2,
+			MinimumSpan:         40 * time.Millisecond,
+			MinimumChunkRunes:   10,
+			MaximumChunkRunes:   45,
+			SafetyTailRunes:     12,
+			MaxObservations:     8,
+		}),
+		dataPublisher: func(payload []byte, topic string, _ bool, _ []string) error {
+			if topic != CaptionOperatorTopic {
+				return nil
+			}
+			var envelope captionOperatorEnvelope
+			if err := json.Unmarshal(payload, &envelope); err != nil {
+				return err
+			}
+			operatorPackets <- envelope
+			return nil
+		},
+	}
+
+	for _, text := range []string{
+		"hello stable phrase mutable tail",
+		"hello stable phrase mutable tail grows",
+	} {
+		agent.handleTranscriptMessage(TranscriptMessage{
+			Type: "transcript", Text: text, Provider: "google",
+			Role: domain.TranscriptRoleSource, SegmentID: "google-1",
+		})
+	}
+	agent.Stop()
+	time.Sleep(100 * time.Millisecond)
+
+	for {
+		select {
+		case envelope := <-operatorPackets:
+			if envelope.Type == captionPendingType {
+				t.Fatalf("idle promotion arrived after agent stop: %#v", envelope)
+			}
+		default:
+			return
+		}
+	}
+}
+
 func TestEarlyFinalPolicyClearsRetractedDraftTail(t *testing.T) {
 	var packets []publishedData
 	agent := newCaptionTestAgent("google", &packets)

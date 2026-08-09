@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+    checkAvailableProviders,
     createCaptionDeskToken,
     createApprovedCaptionToken,
     deleteRoom,
@@ -8,6 +9,40 @@ import {
     startRoomAgent,
     stopRoomAgent,
 } from './api.ts';
+
+test('provider availability retries one transient failure before reporting unavailable', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const originalFetch = globalThis.fetch;
+    const originalWarn = console.warn;
+    let attempts = 0;
+    globalThis.fetch = async () => {
+        attempts += 1;
+        if (attempts === 1) {
+            return new Response('{}', { status: 503, headers: { 'Content-Type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({
+            google: true,
+            gemini: true,
+            azure: true,
+            'gpt-realtime-whisper': true,
+            livekit: true,
+            captionProofread: true,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    };
+    console.warn = () => undefined;
+
+    try {
+        const availability = checkAvailableProviders('http://localhost:3000');
+        await Promise.resolve();
+        await t.mock.timers.tick(1_000);
+
+        assert.equal((await availability)?.captionProofread, true);
+        assert.equal(attempts, 2);
+    } finally {
+        globalThis.fetch = originalFetch;
+        console.warn = originalWarn;
+    }
+});
 
 test('control room adapter owns agent endpoint details', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];

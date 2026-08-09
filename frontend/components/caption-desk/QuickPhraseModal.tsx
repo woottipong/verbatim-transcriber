@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ClipboardEvent } from 'react';
 import { RotateCcw, X } from 'lucide-react';
 import {
   DEFAULT_QUICK_PHRASES,
@@ -34,7 +34,7 @@ export function QuickPhraseModal({ phrases, onSave, onClose }: QuickPhraseModalP
     }));
   };
 
-  const handlePaste = (e: React.ClipboardEvent<HTMLInputElement>, startKey: string) => {
+  const handlePaste = (e: ClipboardEvent<HTMLInputElement>, startKey: string) => {
     const raw = e.clipboardData.getData('text');
     if (!raw) return;
 

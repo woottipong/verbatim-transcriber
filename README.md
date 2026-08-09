@@ -218,7 +218,8 @@ Handlers only parse HTTP input and map module errors to status codes. LiveKit SD
 │       ├── domain/            # Provider contracts and normalization
 │       └── infrastructure/    # LiveKit adapters, room agent, transcript/JWT, ASR providers
 ├── livekit/                   # Local LiveKit Docker Compose environment
-├── start.sh                  # Local frontend/backend launcher
+├── start_backend.sh          # Local backend launcher with a fresh build
+├── start_frontend.sh         # Local frontend development launcher
 └── AGENTS.md                 # Repository development rules
 ```
 
@@ -282,8 +283,11 @@ cd ..
 
 ### 4. Start CaptionLive
 
+Start each process in its own terminal:
+
 ```bash
-./start.sh
+./start_backend.sh
+./start_frontend.sh
 ```
 
 Open:
@@ -293,7 +297,7 @@ Open:
 - Transcript: [http://localhost:5173/#viewer?room=test&autoconnect=1](http://localhost:5173/#viewer?room=test&autoconnect=1)
 - Backend health: [http://localhost:3000/health](http://localhost:3000/health)
 
-LiveKit must already be running; `start.sh` starts only the frontend and backend.
+LiveKit must already be running; the two launcher scripts start only the backend and frontend.
 
 ## Essential configuration
 

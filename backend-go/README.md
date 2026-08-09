@@ -41,6 +41,7 @@ flowchart TB
         Rooms["Room Operations"]
         Supervisor["Room Agent Supervisor"]
         Access["Transcript Feed Access Policy"]
+        Proofread["Caption Proofread Service"]
     end
 
     subgraph Infrastructure["internal/infrastructure"]
@@ -57,6 +58,7 @@ flowchart TB
     Delivery --> Rooms
     Delivery --> Supervisor
     Delivery --> Access
+    Delivery --> Proofread
 
     Rooms --> LKRoom
     LKRoom --> LiveKit
@@ -77,11 +79,13 @@ flowchart TB
 | `application/agentsupervisor` | One agent per room/provider, asynchronous lifecycle, stale-instance protection, room cleanup, shutdown | Provider credentials or Fiber requests |
 | `application/captionmoderation` | Bounded pending segments, ordered publish validation, idempotent requests, rollback | LiveKit or HTTP transport |
 | `application/transcriptaccess` | Feed scope validation and grants bound to room, Room SID, generation, provider, and feed purpose | JWT implementation or WebSocket transport |
+| `application/captionproofread` | Proofread enablement, Caption Desk byte bounds, and provider-independent result policy | Gemini HTTP protocol or Fiber status codes |
 | `delivery` | Request parsing, control authentication, routes, response/error mapping, WebSocket upgrade | Agent state maps or access-policy decisions |
 | `infrastructure/livekitroom` | Translation between LiveKit RoomService and Room Operations records/errors | Room policy |
 | `infrastructure/agent` | LiveKit subscription, Opus decode, PCM routing, provider lifecycle, transcript publishing | HTTP lifecycle management |
 | `infrastructure/transcript` | Signed JWT codec, room/provider subscribers, bounded fan-out, generation tracking | Route authorization policy |
 | `infrastructure/asr` | Provider-specific streaming protocols, reconnect, interim/final parsing | Browser capture or HTTP endpoints |
+| `infrastructure/proofread` | Gemini proofread prompt, structured response, HTTP client, and usage metadata | Caption Desk authorization or editor state |
 | `domain` | Provider-independent ASR contract and Thai spacing normalization | SDK-specific protocol details |
 
 Request/response DTOs live in `models`.
@@ -166,11 +170,11 @@ Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `g
 | `CONTROL_API_KEY` | — | At least 32 random bytes; required for remote control-plane APIs |
 | `GOOGLE_CLOUD_PROJECT` | — | Required for Google |
 | `GOOGLE_APPLICATION_CREDENTIALS` | — | Service-account JSON path |
-| `GOOGLE_API_KEY` | — | Alternative Google authentication |
 | `GOOGLE_CLOUD_LOCATION` | `asia-southeast1` | Speech-to-Text V2 region |
 | `GOOGLE_SPEECH_MODEL` | `chirp_2` | Recognition model |
 | `GEMINI_API_KEY` | — | Required for Gemini |
 | `GEMINI_MODEL` | `gemini-3.5-live-translate-preview` | Live model |
+| `GEMINI_PROOFREAD_MODEL` | — | Optional Caption Desk proofreader model; supports Gemini 2.5 (`thinkingBudget: 0`) and Gemini 3.x (`thinkingLevel: minimal`); requires `GEMINI_API_KEY` |
 | `GEMINI_LANGUAGE_CODE` | — | Optional input language hint; empty enables detection |
 | `GEMINI_TARGET_LANGUAGE_CODE` | `th` | Supported BCP-47 translation target; also used for UI language metadata |
 | `OPENAI_API_KEY` | — | Required for the `gpt-realtime-whisper` provider |
@@ -178,7 +182,7 @@ Google uses `chirp_2`, `th-TH`, and `asia-southeast1` by default. Gemini uses `g
 | `AZURE_SUBSCRIPTION_KEY` | — | Required for Azure |
 | `AZURE_REGION` | `southeastasia` | Azure Speech region |
 
-`HasGoogleKey`, `HasGeminiKey`, `HasOpenAITranscriptionKey`, `HasAzureKey`, and `HasLiveKitKey` in `config/config.go` define availability shown by `/providers`.
+`HasGoogleKey`, `HasGeminiKey`, `HasOpenAITranscriptionKey`, `HasAzureKey`, and `HasLiveKitKey` in `config/config.go` define provider configuration. `/providers.captionProofread` reflects the constructed proofread service, so it is `true` only when the backend has an enabled Gemini proofreader.
 
 ### Gemini Live translation target languages
 
@@ -223,6 +227,7 @@ public frontend build.
 | --- | --- | --- |
 | `GET` | `/health` | Service health |
 | `GET` | `/providers` | Boolean provider and LiveKit availability |
+| `POST` | `/api/caption-desk/ai-proofread` | Authenticated, rate-limited proofread of one bounded Caption Desk text range |
 | `POST` | `/livekit/token` | Generate a participant JWT |
 | `POST` | `/livekit/rooms/` | Create an empty LiveKit room; does not start an Agent |
 | `GET` | `/livekit/rooms/` | List rooms |
@@ -248,6 +253,36 @@ curl -X POST http://localhost:3000/livekit/agent/start \
   -H 'Content-Type: application/json' \
   -d '{"roomName":"test","provider":"gemini"}'
 ```
+
+### Caption Desk AI proofreading
+
+`POST /api/caption-desk/ai-proofread` uses the configured `GEMINI_PROOFREAD_MODEL` to return a suggested replacement for `targetText`. The endpoint is protected by the same control authentication policy as other operator APIs and is limited to 30 requests per minute per client IP.
+
+Request body:
+
+```json
+{
+  "requestId": "proofread-request-1",
+  "revision": 12,
+  "targetText": "ข้อความที่ต้องตรวจ",
+  "contextText": "ข้อความก่อนหน้า"
+}
+```
+
+`targetText` is limited to 16,000 UTF-8 bytes. `contextText` is capped at 2,000 UTF-8 bytes by the application service before it reaches Gemini. The response contains only the replacement and request correlation fields:
+
+```json
+{
+  "requestId": "proofread-request-1",
+  "revision": 12,
+  "suggestedText": "ข้อความที่ตรวจแล้ว",
+  "changed": true
+}
+```
+
+When the key or model is not configured, the capability is reported as `false` and the endpoint returns `503`; it does not silently claim that proofreading succeeded. AI results are advisory, are applied only while their captured editor revision is still current, and never delay operator publication. The editor batches appended final text with a 1,200 ms idle flush, a 2,500 ms hard flush, or a 320-grapheme ceiling. The latest published caption supplies bounded context for the first new batch but is never copied back into the editor.
+
+The backend logs only safe operational fields: request ID, latency, token counts, changed state, and provider error class. The frontend records stale-discard metadata without caption text. Neither side logs `targetText`, `contextText`, `suggestedText`, credentials, or raw upstream bodies. Latency, correction quality, and cost are operational measurements rather than guarantees.
 
 There are no public `/google`, `/azure`, or `/gemini` audio WebSocket routes.
 

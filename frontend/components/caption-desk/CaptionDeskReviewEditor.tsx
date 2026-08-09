@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Settings, Zap } from 'lucide-react';
+import { AlertTriangle, Settings, Sparkles, Zap } from 'lucide-react';
+import ToastViewport from '../ToastViewport';
 import type { CaptionDeskSnapshot } from '../../lib/captionDeskSession';
 import { shouldPublishOnEnter } from '../../lib/captionDeskMessages';
 import {
@@ -8,6 +9,7 @@ import {
   formatCaptionDraftAnnouncement,
   formatFontSizeLabel,
   getCaptionBudgetWarning,
+  getCaptionDraftStatusLabel,
   getCaptionEditorTextUpdate,
   getCaptionReviewInstructions,
   getFontSizeStyles,
@@ -24,20 +26,26 @@ import {
   savePersistedQuickPhrases,
   type QuickPhrase,
 } from '../../lib/quickPhrases';
+import { detectThaiTypos, replaceTypoInText, type TypoMatch } from '../../lib/thaiTypoDetector';
+import { useCaptionProofread, type ProofreadAvailability } from '../../hooks/useCaptionProofread';
 import { QuickPhraseModal } from './QuickPhraseModal';
 
 interface CaptionDeskReviewEditorProps {
+  backendUrl: string;
+  proofreadAvailability: ProofreadAvailability;
   snapshot: CaptionDeskSnapshot;
   captionConnected: boolean;
   agentConnected: boolean;
   edit: (text: string) => void;
-  publish: (splitIndex?: number) => Promise<void>;
+  publish: (splitIndex?: number) => Promise<boolean>;
 }
 
 const SHORTCUT_HINT_STORAGE_KEY = 'captionlive.caption-desk.shortcut-hint-seen';
 const FONT_SIZE_STORAGE_KEY = 'captionlive.caption-desk.font-size';
 
 export function CaptionDeskReviewEditor({
+  backendUrl,
+  proofreadAvailability,
   snapshot,
   captionConnected,
   agentConnected,
@@ -53,8 +61,29 @@ export function CaptionDeskReviewEditor({
   const [quickPhrases, setQuickPhrases] = useState<QuickPhrase[]>(() => loadPersistedQuickPhrases());
   const [showPhraseModal, setShowPhraseModal] = useState(false);
 
+  const {
+    autoEnabled,
+    toggleAuto,
+    isProcessing,
+    notice,
+    dismissNotice,
+  } = useCaptionProofread({
+    backendUrl,
+    availability: proofreadAvailability,
+    reviewText: snapshot.reviewText,
+    sourceSegmentIds: snapshot.sourceSegmentIds,
+    previousPublishedText: snapshot.recentlyPublished.at(-1)?.text,
+    onApply: edit,
+  });
+
   const graphemeCount = countGraphemes(snapshot.reviewText);
   const budgetWarning = getCaptionBudgetWarning(graphemeCount);
+  const draftStatusLabel = getCaptionDraftStatusLabel(snapshot.isDraftActive);
+  const typoMatches = detectThaiTypos(snapshot.reviewText);
+
+  const handleFixTypo = (match: TypoMatch) => {
+    edit(replaceTypoInText(snapshot.reviewText, match));
+  };
 
   const handleSavePhrases = (next: QuickPhrase[]) => {
     setQuickPhrases(next);
@@ -128,6 +157,28 @@ export function CaptionDeskReviewEditor({
           </p>
         </div>
         <div className="caption-desk-toolbar__tools flex items-center gap-3">
+          <button
+            type="button"
+            onClick={toggleAuto}
+            disabled={proofreadAvailability !== 'enabled'}
+            title={proofreadAvailability === 'enabled'
+              ? (autoEnabled ? 'ปิดการเกลาคำผิดอัตโนมัติ' : 'เปิดการเกลาคำผิดอัตโนมัติ')
+              : 'AI proofreading ยังไม่พร้อมใช้งาน'}
+            className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+              autoEnabled
+                ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
+                : 'border-[var(--line)] text-[var(--muted)] hover:border-[var(--accent)] hover:text-[var(--ink)]'
+            }`}
+          >
+            <Sparkles size={13} aria-hidden="true" />
+            AI Auto: {autoEnabled ? 'ON' : 'OFF'}
+          </button>
+          {proofreadAvailability === 'disabled' ? (
+            <span className="text-xs text-[var(--muted)]" role="status">AI ไม่ได้ตั้งค่า</span>
+          ) : proofreadAvailability === 'unknown' ? (
+            <span className="text-xs text-amber-400" role="status">ตรวจสอบสถานะ AI ไม่สำเร็จ</span>
+          ) : null}
+          {isProcessing ? <span className="text-xs text-[var(--muted)]">AI กำลังตรวจ…</span> : null}
           <div className="caption-desk-font-control flex items-center rounded-lg border border-[var(--line)] bg-[var(--control-surface-bg)] p-0.5 text-xs" aria-label="Font size control">
             <button
               type="button"
@@ -201,6 +252,28 @@ export function CaptionDeskReviewEditor({
         </button>
       </div>
 
+      {typoMatches.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--line)] bg-[var(--control-surface-bg)] px-4 py-2 text-xs sm:px-5">
+          <span className="flex items-center gap-1 font-semibold text-amber-400">
+            <AlertTriangle size={13} aria-hidden="true" />
+            สงสัยคำผิด:
+          </span>
+          {typoMatches.map(match => (
+            <button
+              key={match.id}
+              type="button"
+              onClick={() => handleFixTypo(match)}
+              title={`เปลี่ยน "${match.wrong}" เป็น "${match.correct}"`}
+              className="inline-flex items-center gap-1 rounded border border-amber-500/40 px-2 py-0.5 text-amber-200 hover:border-[var(--accent)]"
+            >
+              <span className="line-through">{match.wrong}</span>
+              <span aria-hidden="true">→</span>
+              <span className="font-semibold text-emerald-400">{match.correct}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+
       <div
         ref={editorRef}
         role="textbox"
@@ -261,13 +334,26 @@ export function CaptionDeskReviewEditor({
 
       <footer className="caption-desk-editor-footer flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-[var(--line)] bg-[var(--control-surface-bg)] px-4 py-2.5 sm:px-5">
         <div className="flex items-center gap-2 text-xs">
+          {draftStatusLabel ? (
+            <>
+              <span className="inline-flex items-center gap-1 font-semibold text-amber-400">
+                <Zap size={12} aria-hidden="true" />
+                {draftStatusLabel}
+              </span>
+              <span className="text-[var(--subtle)]">·</span>
+            </>
+          ) : null}
           <span className={budgetWarning.isOverTwoLines ? 'font-semibold text-amber-400' : 'text-[var(--muted)]'}>
             {graphemeCount} chars
           </span>
-          <span className="text-[var(--subtle)]">·</span>
-          <span className={budgetWarning.isOverTwoLines ? 'font-semibold text-amber-400' : 'text-[var(--subtle)]'}>
-            {budgetWarning.label}
-          </span>
+          {budgetWarning.label ? (
+            <>
+              <span className="text-[var(--subtle)]">·</span>
+              <span className={budgetWarning.isOverTwoLines ? 'font-semibold text-amber-400' : 'text-[var(--subtle)]'}>
+                {budgetWarning.label}
+              </span>
+            </>
+          ) : null}
         </div>
         {canEdit ? (
           <>
@@ -286,6 +372,8 @@ export function CaptionDeskReviewEditor({
           onClose={() => setShowPhraseModal(false)}
         />
       ) : null}
+
+      <ToastViewport notices={notice ? [{ ...notice, onDismiss: dismissNotice }] : []} />
     </section>
   );
 }
@@ -324,4 +412,3 @@ function loadPersistedFontSize(): CaptionDeskFontSize {
   }
   return 'md';
 }
-

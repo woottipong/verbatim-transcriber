@@ -43,6 +43,7 @@ type EarlyFinalCutter struct {
 	lastSequence         uint64
 	emittedRunes         int
 	emittedText          string
+	latestSegment        SourceSegment
 	cutNumber            int
 	observations         []earlyFinalObservation
 	lastText             []rune
@@ -53,11 +54,11 @@ type EarlyFinalCutter struct {
 
 func DefaultEarlyFinalConfig() EarlyFinalConfig {
 	return EarlyFinalConfig{
-		MinimumObservations: 3,
-		MinimumSpan:         300 * time.Millisecond,
-		MinimumChunkRunes:   10,
-		MaximumChunkRunes:   64,
-		SafetyTailRunes:     12,
+		MinimumObservations: 2,
+		MinimumSpan:         250 * time.Millisecond,
+		MinimumChunkRunes:   12,
+		MaximumChunkRunes:   45,
+		SafetyTailRunes:     16,
 		MaxObservations:     8,
 	}
 }
@@ -118,14 +119,56 @@ func (c *EarlyFinalCutter) Observe(segment SourceSegment, at time.Time) EarlyFin
 	}
 
 	current := []rune(segment.Text)
+	c.latestSegment = segment
 	c.updateStabilityLocked(current, at)
 	c.observations = append(c.observations, earlyFinalObservation{at: at})
 	if overflow := len(c.observations) - c.config.MaxObservations; overflow > 0 {
 		c.observations = append([]earlyFinalObservation(nil), c.observations[overflow:]...)
 	}
+	return c.buildOutputLocked(segment, current, at)
+}
 
+// Reevaluate checks the most recent interim again after time has passed. It
+// never records a synthetic provider observation or advances the sequence.
+func (c *EarlyFinalCutter) Reevaluate(at time.Time) EarlyFinalOutput {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.latestSegment.ID == "" || len(c.lastText) == 0 || len(c.observations) == 0 {
+		return EarlyFinalOutput{}
+	}
+	return c.buildOutputLocked(c.latestSegment, append([]rune(nil), c.lastText...), at)
+}
+
+// ReevaluateAfter returns the remaining time before the current stable prefix
+// can be promoted. A revision does not restart time already accrued by that
+// prefix.
+func (c *EarlyFinalCutter) ReevaluateAfter(at time.Time) time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	candidate := min(
+		len(c.lastText)-c.config.SafetyTailRunes,
+		c.emittedRunes+c.config.MaximumChunkRunes,
+	)
+	for candidate > c.emittedRunes {
+		index := candidate - 1
+		if index < len(c.stableCounts) && c.stableCounts[index] >= c.config.MinimumObservations {
+			break
+		}
+		candidate--
+	}
+	if candidate-c.emittedRunes >= c.config.MinimumChunkRunes {
+		remaining := c.config.MinimumSpan - at.Sub(c.stableSince[candidate-1])
+		if remaining < 0 {
+			return 0
+		}
+		return remaining
+	}
+	return c.config.MinimumSpan
+}
+
+func (c *EarlyFinalCutter) buildOutputLocked(segment SourceSegment, current []rune, at time.Time) EarlyFinalOutput {
 	output := EarlyFinalOutput{}
-	if cut := c.stableCutLocked(current); cut > c.emittedRunes {
+	if cut := c.stableCutLocked(current, at); cut > c.emittedRunes {
 		chunk := strings.TrimSpace(string(current[c.emittedRunes:cut]))
 		if len([]rune(chunk)) >= c.config.MinimumChunkRunes {
 			c.cutNumber++
@@ -142,6 +185,7 @@ func (c *EarlyFinalCutter) Observe(segment SourceSegment, at time.Time) EarlyFin
 			c.emittedText = string(current[:cut])
 			c.nextJoinWithoutSpace = true
 			c.observations = []earlyFinalObservation{{at: at}}
+			c.resetTailStabilityLocked(cut, at)
 		}
 	}
 
@@ -155,7 +199,7 @@ func (c *EarlyFinalCutter) Observe(segment SourceSegment, at time.Time) EarlyFin
 	return output
 }
 
-func (c *EarlyFinalCutter) stableCutLocked(current []rune) int {
+func (c *EarlyFinalCutter) stableCutLocked(current []rune, at time.Time) int {
 	if c.emittedText != "" && !strings.HasPrefix(string(current), c.emittedText) {
 		return 0
 	}
@@ -164,7 +208,7 @@ func (c *EarlyFinalCutter) stableCutLocked(current []rune) int {
 		index := candidate - 1
 		if index < len(c.stableCounts) &&
 			c.stableCounts[index] >= c.config.MinimumObservations &&
-			c.observations[len(c.observations)-1].at.Sub(c.stableSince[index]) >= c.config.MinimumSpan {
+			at.Sub(c.stableSince[index]) >= c.config.MinimumSpan {
 			break
 		}
 		candidate--
@@ -179,6 +223,13 @@ func (c *EarlyFinalCutter) stableCutLocked(current []rune) int {
 		candidate,
 		c.config.MinimumChunkRunes,
 	)
+}
+
+func (c *EarlyFinalCutter) resetTailStabilityLocked(cut int, at time.Time) {
+	for index := cut; index < len(c.stableCounts); index++ {
+		c.stableSince[index] = at
+		c.stableCounts[index] = 1
+	}
 }
 
 func (c *EarlyFinalCutter) updateStabilityLocked(current []rune, at time.Time) {
@@ -283,6 +334,7 @@ func (c *EarlyFinalCutter) resetLocked() {
 	c.lastSequence = 0
 	c.emittedRunes = 0
 	c.emittedText = ""
+	c.latestSegment = SourceSegment{}
 	c.cutNumber = 0
 	c.observations = nil
 	c.lastText = nil
@@ -328,7 +380,7 @@ func boundedTextCut(text []rune, start, limit, minimum int) int {
 			boundaryRange[1],
 			isSentenceTerminator,
 		); cut > 0 {
-			return cut
+			return combiningMarkSafeCut(text, start, cut)
 		}
 		if cut := latestBoundaryAfter(
 			text,
@@ -336,13 +388,23 @@ func boundedTextCut(text []rune, start, limit, minimum int) int {
 			boundaryRange[1],
 			isClauseSeparator,
 		); cut > 0 {
-			return cut
+			return combiningMarkSafeCut(text, start, cut)
 		}
 		if cut := latestWhitespaceBoundary(text, boundaryRange[0], boundaryRange[1]); cut > 0 {
-			return cut
+			return combiningMarkSafeCut(text, start, cut)
 		}
 	}
-	return limit
+	return combiningMarkSafeCut(text, start, limit)
+}
+
+func combiningMarkSafeCut(text []rune, start, cut int) int {
+	cut = min(cut, len(text))
+	for cut > start && cut < len(text) && (unicode.Is(unicode.Mn, text[cut]) ||
+		unicode.Is(unicode.Mc, text[cut]) ||
+		unicode.Is(unicode.Me, text[cut])) {
+		cut--
+	}
+	return cut
 }
 
 func latestBoundaryAfter(text []rune, from, through int, matches func(rune) bool) int {

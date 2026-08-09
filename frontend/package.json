@@ -18,9 +18,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.20.1",
+    "@types/react-test-renderer": "^19.1.0",
     "@vitejs/plugin-react": "^5.2.0",
     "autoprefixer": "^10.5.4",
     "postcss": "^8.5.24",
+    "react-test-renderer": "19.2.8",
     "tailwindcss": "^3.4.19",
     "typescript": "~5.8.3",
     "vite": "^6.4.3"

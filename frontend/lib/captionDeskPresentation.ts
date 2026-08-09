@@ -69,6 +69,10 @@ export function formatCaptionDraftAnnouncement(text: string): string {
   return normalized ? `Draft preview: ${normalized}` : '';
 }
 
+export function getCaptionDraftStatusLabel(isActive: boolean): string {
+  return isActive ? 'Draft สด · อ่านอย่างเดียว' : '';
+}
+
 export type CaptionEditorTextUpdate =
   | { kind: 'none' }
   | { kind: 'append'; text: string }
@@ -160,7 +164,7 @@ export function getCaptionBudgetWarning(graphemeCount: number): CaptionBudgetWar
     return {
       isOverSingleLine: true,
       isOverTwoLines: true,
-      label: 'Exceeds 2-line budget (70+ chars)',
+      label: '',
     };
   }
   if (isOverSingleLine) {
@@ -176,5 +180,3 @@ export function getCaptionBudgetWarning(graphemeCount: number): CaptionBudgetWar
     label: 'Line 1 budget (≤35 chars)',
   };
 }
-
-

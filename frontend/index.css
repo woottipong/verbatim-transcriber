@@ -1677,7 +1677,6 @@ body.viewer-output-transparent {
 
 .caption-review-editor:not([data-draft=""])::after {
   color: var(--draft-text);
-  font-style: italic;
   pointer-events: none;
   white-space: pre-wrap;
 }

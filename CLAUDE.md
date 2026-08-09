@@ -18,8 +18,9 @@ CaptionLive is a real-time Thai transcription workspace on LiveKit. Audio Source
 # Local LiveKit (must be running first)
 cd livekit && docker compose up -d
 
-# Frontend + backend dev servers
-./start.sh
+# Backend and frontend dev servers (separate terminals)
+./start_backend.sh
+./start_frontend.sh
 
 # Frontend (React 19 + TS + Vite + Tailwind)
 cd frontend
@@ -37,7 +38,7 @@ go build ./...
 
 Use `pnpm` (not npm/yarn) for the frontend; `pnpm-lock.yaml` is authoritative. The Go agent needs CGO plus a system Opus library (`brew install opus pkg-config` / `apt-get install libopus-dev`).
 
-Match verification to what changed — see AGENTS.md's "Verification expectations" for the full mapping (frontend logic → `pnpm test` + `pnpm build`; backend → `go test ./...` or `-race`; provider parsing → tests under `backend-go/internal/infrastructure/asr/`; transcript state → `frontend/lib/*.test.ts`).
+Match verification to what changed — see AGENTS.md's "Verification expectations" for the full mapping (frontend logic → `pnpm test` + `pnpm build`; backend → `go test ./...` or `-race`; provider parsing → tests under `backend-go/internal/infrastructure/asr/` or `backend-go/internal/infrastructure/proofread/`; transcript state → `frontend/lib/*.test.ts`).
 
 ## Architecture cheat sheet
 

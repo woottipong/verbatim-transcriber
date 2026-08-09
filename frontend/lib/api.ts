@@ -55,32 +55,37 @@ export interface ProvidersResponse {
     azure: boolean;
     'gpt-realtime-whisper': boolean;
     livekit: boolean;
+    captionProofread: boolean;
 }
 
 /**
  * Check which ASR providers are available on the backend
  */
 export async function checkAvailableProviders(backendUrl: string): Promise<ProvidersResponse | null> {
-    try {
-        // Convert WebSocket URL to HTTP
-        const httpUrl = toHttpUrl(backendUrl);
-        const response = await fetch(`${httpUrl}/providers`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        });
+    const httpUrl = toHttpUrl(backendUrl).replace(/\/$/, '');
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+            const response = await fetch(`${httpUrl}/providers`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
 
-        if (!response.ok) {
-            console.warn('Failed to check providers:', response.statusText);
-            return null;
+            if (!response.ok) {
+                throw new Error(`Provider status returned HTTP ${response.status}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            if (attempt === 0) {
+                await new Promise(resolve => setTimeout(resolve, 1_000));
+                continue;
+            }
+            console.warn('Could not check available providers:', error);
         }
-
-        return await response.json();
-    } catch (error) {
-        console.warn('Could not check available providers:', error);
-        return null;
     }
+    return null;
 }
 
 /**
