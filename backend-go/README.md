@@ -280,7 +280,7 @@ Request body:
 }
 ```
 
-When the key or model is not configured, the capability is reported as `false` and the endpoint returns `503`; it does not silently claim that proofreading succeeded. AI results are advisory, are applied only while their captured editor revision is still current, and never delay operator publication. The editor batches appended final text with a 1,200 ms idle flush, a 2,500 ms hard flush, or a 320-grapheme ceiling. The latest published caption supplies bounded context for the first new batch but is never copied back into the editor.
+When the key or model is not configured, the capability is reported as `false` and the endpoint returns `503`; it does not silently claim that proofreading succeeded. The backend treats suggestions as advisory and never makes them authoritative over Caption Desk publication.
 
 The backend logs only safe operational fields: request ID, latency, token counts, changed state, and provider error class. The frontend records stale-discard metadata without caption text. Neither side logs `targetText`, `contextText`, `suggestedText`, credentials, or raw upstream bodies. Latency, correction quality, and cost are operational measurements rather than guarantees.
 
