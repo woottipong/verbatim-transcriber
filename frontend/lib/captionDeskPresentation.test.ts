@@ -42,7 +42,7 @@ test('a blocked operator subscription takes priority over connecting states', ()
       true,
       'operator_already_active',
     ),
-    { label: 'โต๊ะนี้กำลังถูกใช้งาน', tone: 'danger' },
+    { label: 'มีผู้ตรวจทานคนอื่นกำลังใช้งานอยู่', tone: 'danger' },
   );
   assert.deepEqual(
     getCaptionDeskOperationalStatus('CONNECTED', true, true, null),
@@ -68,6 +68,10 @@ test('network failures use operator-facing recovery copy', () => {
   assert.equal(
     formatCaptionDeskError(new Error('Room does not exist or is no longer available')),
     'ไม่พบห้องนี้หรือห้องถูกปิดแล้ว ตรวจสอบห้องใน Control Room แล้วลองใหม่',
+  );
+  assert.equal(
+    formatCaptionDeskError(new Error('Another Caption Desk is already active')),
+    'ผู้ให้บริการนี้มีผู้ตรวจทานคนอื่นใช้งานอยู่ ปิดหน้าต่างเดิมหรือลองใหม่ภายหลัง',
   );
   assert.equal(
     formatCaptionDeskError('Move the cursor after the text you want to publish.'),
@@ -156,18 +160,12 @@ test('font size navigation steps up and down within bounds', () => {
 test('grapheme counting and budget warning report correct line thresholds', () => {
   assert.equal(countGraphemes('ผู้ใหญ่'), 4);
   assert.deepEqual(getCaptionBudgetWarning(20), {
-    isOverSingleLine: false,
     isOverTwoLines: false,
-    label: 'บรรทัดที่ 1 ≤35 ตัวอักษร',
   });
   assert.deepEqual(getCaptionBudgetWarning(40), {
-    isOverSingleLine: true,
     isOverTwoLines: false,
-    label: 'บรรทัดที่ 2 (เกิน 35 ตัวอักษร)',
   });
   assert.deepEqual(getCaptionBudgetWarning(75), {
-    isOverSingleLine: true,
     isOverTwoLines: true,
-    label: '',
   });
 });

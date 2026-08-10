@@ -137,18 +137,19 @@ export function QuickPhraseModal({ phrases, onSave, onClose }: QuickPhraseModalP
       role="dialog"
       aria-modal="true"
       aria-labelledby="quick-phrase-modal-title"
+      aria-describedby="quick-phrase-modal-description"
     >
       <div
         ref={dialogRef}
         className="app-panel flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden bg-[var(--surface)] text-[var(--ink)] shadow-2xl"
       >
-        <header className="panel-header flex items-center justify-between border-b border-[var(--line)] px-5 py-3.5">
-          <div>
+        <header className="panel-header flex items-center justify-between gap-3 border-b border-[var(--line)] px-5 py-3.5">
+          <div className="min-w-0">
             <h2 id="quick-phrase-modal-title" className="text-base font-semibold">
               ตั้งค่าศัพท์เฉพาะ
             </h2>
-            <p className="text-xs text-[var(--muted)]">
-              วางข้อความหลายบรรทัด (Ctrl+V) เพื่อเติมศัพท์เฉพาะใน F1–F8 ได้ทันที
+            <p id="quick-phrase-modal-description" className="text-xs text-[var(--muted)]">
+              วางข้อความหลายบรรทัดเพื่อเติมศัพท์เฉพาะใน F1–F8 ได้ทันที
             </p>
           </div>
           <button
@@ -211,26 +212,26 @@ export function QuickPhraseModal({ phrases, onSave, onClose }: QuickPhraseModalP
           </div>
         </div>
 
-        <footer className="flex items-center justify-between border-t border-[var(--line)] bg-[var(--control-surface-bg)] px-5 py-3">
+        <footer className="flex flex-col gap-2 border-t border-[var(--line)] bg-[var(--control-surface-bg)] px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
           <button
             type="button"
             onClick={restoreDefaults}
-            className="control-button control-button--inline text-xs"
+            className="control-button control-button--inline w-full text-xs sm:w-auto"
           >
             <RotateCcw size={14} /> คืนค่าเริ่มต้น
           </button>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
             <button
               type="button"
               onClick={onClose}
-              className="control-button control-button--quiet text-xs"
+              className="control-button control-button--quiet w-full text-xs sm:w-auto"
             >
               ยกเลิก
             </button>
             <button
               type="button"
               onClick={handleSave}
-              className="control-button control-button--primary text-xs"
+              className="control-button control-button--primary w-full text-xs sm:w-auto"
             >
               บันทึกการตั้งค่า
             </button>

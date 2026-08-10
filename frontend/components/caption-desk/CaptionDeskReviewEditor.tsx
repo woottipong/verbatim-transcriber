@@ -184,8 +184,13 @@ export function CaptionDeskReviewEditor({
           {proofreadAvailability === 'disabled' ? (
             <span className="text-xs text-[var(--muted)]" role="status">ยังไม่ได้ตั้งค่า AI · แก้ไขเองได้</span>
           ) : proofreadAvailability === 'unknown' ? (
-            <div className="flex items-center gap-1.5 text-xs text-[var(--warning)]">
-              <span role="status" aria-live="polite" aria-atomic="true">
+            <div className="flex items-center gap-1.5 text-xs">
+              <span
+                className={proofreadChecking ? 'text-[var(--accent)]' : 'text-[var(--warning)]'}
+                role="status"
+                aria-live="polite"
+                aria-atomic="true"
+              >
                 {proofreadChecking ? 'กำลังตรวจสอบ AI…' : 'AI ยังไม่พร้อมใช้งาน'}
               </span>
               {!proofreadChecking ? (
@@ -210,8 +215,8 @@ export function CaptionDeskReviewEditor({
               onClick={() => changeFontSize(getNextFontSize(fontSize, 'down'))}
               disabled={fontSize === 'sm'}
               aria-label="ลดขนาดตัวอักษร"
-              title="ลดขนาดตัวอักษร (Alt + -)"
-              className="h-6 px-2 font-medium transition-colors hover:bg-[var(--line-subtle)] disabled:opacity-30 rounded"
+              title="ลดขนาดตัวอักษร (Alt/Option + -)"
+              className="h-6 rounded px-2 font-medium transition-colors hover:bg-[var(--surface-raised)] disabled:opacity-30"
             >
               A-
             </button>
@@ -223,8 +228,8 @@ export function CaptionDeskReviewEditor({
               onClick={() => changeFontSize(getNextFontSize(fontSize, 'up'))}
               disabled={fontSize === 'xl'}
               aria-label="เพิ่มขนาดตัวอักษร"
-              title="เพิ่มขนาดตัวอักษร (Alt + +)"
-              className="h-6 px-2 font-medium transition-colors hover:bg-[var(--line-subtle)] disabled:opacity-30 rounded"
+              title="เพิ่มขนาดตัวอักษร (Alt/Option + +)"
+              className="h-6 rounded px-2 font-medium transition-colors hover:bg-[var(--surface-raised)] disabled:opacity-30"
             >
               A+
             </button>
@@ -368,7 +373,7 @@ export function CaptionDeskReviewEditor({
 
       {canEdit && showShortcutHint ? (
         <div className="caption-desk-shortcut-hint flex items-center justify-between gap-3 border-t border-[var(--line)] px-4 py-2 text-xs sm:px-5">
-          <span><strong>เผยแพร่ด่วน:</strong> Enter เผยแพร่ถึงเคอร์เซอร์ · F1-F8 แทรกศัพท์เฉพาะ · Alt +/- ปรับขนาดตัวอักษร</span>
+          <span><strong>เผยแพร่ด่วน:</strong> Enter เผยแพร่ถึงเคอร์เซอร์ · F1–F8 แทรกศัพท์เฉพาะ · Alt/Option +/- ปรับขนาดตัวอักษร</span>
           <button type="button" className="control-button control-button--inline shrink-0" onClick={dismissShortcutHint}>
             เข้าใจแล้ว
           </button>
@@ -378,7 +383,9 @@ export function CaptionDeskReviewEditor({
       <footer className="caption-desk-editor-footer flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-[var(--line)] bg-[var(--control-surface-bg)] px-4 py-2.5 sm:px-5">
         <div className="flex items-center gap-2 text-xs">
           <span className={budgetWarning.isOverTwoLines ? 'font-semibold text-[var(--warning)]' : 'text-[var(--muted)]'}>
-            พร้อมเผยแพร่ {graphemeCount} ตัวอักษร
+            {graphemeCount === 0
+              ? 'ยังไม่มีข้อความให้เผยแพร่'
+              : <>พร้อมเผยแพร่ · {graphemeCount} ตัวอักษร</>}
           </span>
         </div>
         {canEdit ? (

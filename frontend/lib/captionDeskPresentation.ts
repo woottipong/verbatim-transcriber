@@ -13,7 +13,7 @@ export function getCaptionDeskOperationalStatus(
   subscriptionBlockCode: string | null,
 ): CaptionDeskOperationalStatus {
   if (subscriptionBlockCode === 'operator_already_active') {
-    return { label: 'โต๊ะนี้กำลังถูกใช้งาน', tone: 'danger' };
+    return { label: 'มีผู้ตรวจทานคนอื่นกำลังใช้งานอยู่', tone: 'danger' };
   }
   if (subscriptionBlockCode) {
     return { label: 'ข้อมูลแคปชันยังไม่พร้อม', tone: 'danger' };
@@ -59,7 +59,7 @@ export function formatCaptionDeskError(value: unknown): string {
     return 'ไม่มีสิทธิ์เปิด Caption Desk ตรวจสอบลิงก์หรือสิทธิ์แล้วลองใหม่';
   }
   if (/another Caption Desk is already active/i.test(message)) {
-    return 'มี Caption Desk อื่นใช้งานผู้ให้บริการนี้อยู่ ปิดโต๊ะเดิมหรือลองใหม่ภายหลัง';
+    return 'ผู้ให้บริการนี้มีผู้ตรวจทานคนอื่นใช้งานอยู่ ปิดหน้าต่างเดิมหรือลองใหม่ภายหลัง';
   }
   if (/different finalization policy/i.test(message)) {
     return 'เซสชัน Caption Desk นี้เลือกวิธีเริ่มตรวจทานไม่ตรงกัน';
@@ -224,31 +224,10 @@ export function countGraphemes(text: string): number {
 }
 
 export interface CaptionBudgetWarning {
-  isOverSingleLine: boolean;
   isOverTwoLines: boolean;
-  label: string;
 }
 
 export function getCaptionBudgetWarning(graphemeCount: number): CaptionBudgetWarning {
-  const isOverSingleLine = graphemeCount > 35;
   const isOverTwoLines = graphemeCount > 70;
-  if (isOverTwoLines) {
-    return {
-      isOverSingleLine: true,
-      isOverTwoLines: true,
-      label: '',
-    };
-  }
-  if (isOverSingleLine) {
-    return {
-      isOverSingleLine: true,
-      isOverTwoLines: false,
-      label: 'บรรทัดที่ 2 (เกิน 35 ตัวอักษร)',
-    };
-  }
-  return {
-    isOverSingleLine: false,
-    isOverTwoLines: false,
-    label: 'บรรทัดที่ 1 ≤35 ตัวอักษร',
-  };
+  return { isOverTwoLines };
 }

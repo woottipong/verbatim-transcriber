@@ -12,7 +12,8 @@
   --line-strong: oklch(45% 0.05 285 / 0.8);
   --ink: oklch(95% 0.012 270);
   --muted: oklch(72% 0.025 270);
-  --subtle: oklch(58% 0.026 270);
+  /* Keep helper text readable on both the raised canvas and panel surfaces. */
+  --subtle: oklch(62% 0.026 270);
   --accent: oklch(72% 0.12 180);
   --accent-strong: oklch(59% 0.13 183);
   --accent-soft: oklch(34% 0.06 183);
