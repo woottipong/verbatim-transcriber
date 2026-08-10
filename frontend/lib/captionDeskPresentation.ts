@@ -1,5 +1,5 @@
 export type CaptionDeskConnectionState = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'ERROR';
-export type CaptionDeskStatusTone = 'success' | 'warning' | 'danger';
+export type CaptionDeskStatusTone = 'success' | 'info' | 'warning' | 'danger';
 
 export interface CaptionDeskOperationalStatus {
   label: string;
@@ -13,22 +13,22 @@ export function getCaptionDeskOperationalStatus(
   subscriptionBlockCode: string | null,
 ): CaptionDeskOperationalStatus {
   if (subscriptionBlockCode === 'operator_already_active') {
-    return { label: 'Desk already in use', tone: 'danger' };
+    return { label: 'โต๊ะนี้กำลังถูกใช้งาน', tone: 'danger' };
   }
   if (subscriptionBlockCode) {
-    return { label: 'Caption feed unavailable', tone: 'danger' };
+    return { label: 'ข้อมูลแคปชันยังไม่พร้อม', tone: 'danger' };
   }
   switch (state) {
     case 'ERROR':
-      return { label: 'Desk unavailable', tone: 'danger' };
+      return { label: 'Caption Desk ไม่พร้อมใช้งาน', tone: 'danger' };
     case 'DISCONNECTED':
-      return { label: 'Disconnected', tone: 'danger' };
+      return { label: 'ขาดการเชื่อมต่อ', tone: 'danger' };
     case 'CONNECTED':
-      if (!agentConnected) return { label: 'Transcriber offline', tone: 'warning' };
-      if (!captionConnected) return { label: 'Connecting captions', tone: 'warning' };
-      return { label: 'Ready', tone: 'success' };
+      if (!agentConnected) return { label: 'ตัวถอดเสียงยังไม่ทำงาน', tone: 'warning' };
+      if (!captionConnected) return { label: 'กำลังรับข้อความแคปชัน', tone: 'info' };
+      return { label: 'พร้อมใช้งาน', tone: 'success' };
     default:
-      return { label: 'Connecting', tone: 'warning' };
+      return { label: 'กำลังเชื่อมต่อ', tone: 'info' };
   }
 }
 
@@ -47,30 +47,102 @@ export function formatCaptionDeskError(value: unknown): string {
     value instanceof TypeError &&
     /failed to fetch|networkerror|network request failed/i.test(value.message)
   ) {
-    return 'Can’t reach CaptionLive. Check the backend connection, then try again.';
+    return 'เชื่อมต่อ CaptionLive ไม่ได้ ตรวจสอบการเชื่อมต่อแบ็กเอนด์แล้วลองอีกครั้ง';
   }
-  return value instanceof Error && value.message
+  const message = value instanceof Error
     ? value.message
-    : 'Caption Desk connection failed. Try again.';
+    : typeof value === 'string' ? value : '';
+  if (/room (?:does not exist|not found)|no longer available/i.test(message)) {
+    return 'ไม่พบห้องนี้หรือห้องถูกปิดแล้ว ตรวจสอบห้องใน Control Room แล้วลองใหม่';
+  }
+  if (/unauthorized|forbidden|token rejected|permission denied/i.test(message)) {
+    return 'ไม่มีสิทธิ์เปิด Caption Desk ตรวจสอบลิงก์หรือสิทธิ์แล้วลองใหม่';
+  }
+  if (/another Caption Desk is already active/i.test(message)) {
+    return 'มี Caption Desk อื่นใช้งานผู้ให้บริการนี้อยู่ ปิดโต๊ะเดิมหรือลองใหม่ภายหลัง';
+  }
+  if (/different finalization policy/i.test(message)) {
+    return 'เซสชัน Caption Desk นี้เลือกวิธีเริ่มตรวจทานไม่ตรงกัน';
+  }
+  if (/cannot publish captions/i.test(message)) {
+    return 'ผู้ใช้นี้ไม่มีสิทธิ์เผยแพร่แคปชัน';
+  }
+  if (/move the cursor after the text you want to publish/i.test(message)) {
+    return 'เลื่อนเคอร์เซอร์ไปหลังข้อความที่ต้องการเผยแพร่';
+  }
+  if (/wait for this caption to finish sending/i.test(message)) {
+    return 'รอให้แคปชันนี้ส่งเสร็จก่อนเผยแพร่ส่วนถัดไป';
+  }
+  const lengthLimit = message.match(/Caption is too long to publish\. Keep it under ([\d,]+) UTF-8 bytes/i);
+  if (lengthLimit) {
+    return `แคปชันยาวเกินไป เผยแพร่ได้ไม่เกิน ${lengthLimit[1]} ไบต์ UTF-8`;
+  }
+  const waitingLimit = message.match(/Waiting for (\d+) captions to finish sending/i);
+  if (waitingLimit) {
+    return `กำลังรอส่งแคปชัน ${waitingLimit[1]} รายการ รอให้รายการหนึ่งเสร็จก่อนแล้วลองใหม่`;
+  }
+  if (/caption was not published|could not subscribe to this provider/i.test(message)) {
+    return 'เผยแพร่แคปชันไม่สำเร็จ ลองอีกครั้ง';
+  }
+  if (/AI proofreading returned an invalid (?:response|result)|AI proofreading failed/i.test(message)) {
+    return 'AI ตรวจแก้คำขัดข้องชั่วคราว ข้อความเดิมยังอยู่ครบ';
+  }
+  if (/[฀-๿]/.test(message)) return message;
+  return 'การเชื่อมต่อ Caption Desk ล้มเหลว ลองอีกครั้ง';
+}
+
+export type CaptionProofreadAvailability = 'enabled' | 'disabled' | 'unknown';
+
+export function getCaptionProofreadAvailability(
+  providers: { captionProofread?: boolean } | null,
+): CaptionProofreadAvailability {
+  if (providers === null) return 'unknown';
+  return providers.captionProofread === true ? 'enabled' : 'disabled';
+}
+
+export function getCaptionDeskChangeConfirmation(): string {
+  return 'ละทิ้งแคปชันที่กำลังตรวจทาน แล้วเปลี่ยนผู้ให้บริการหรือไม่?';
 }
 
 export function getCaptionReviewInstructions(canEdit: boolean): string {
   return canEdit
-    ? 'Move the cursor to a break, then press Enter to publish up to it.'
-    : 'Captions will be editable when the feed is ready.';
+    ? 'เลื่อนเคอร์เซอร์ไปยังจุดแบ่ง แล้วกด Enter เพื่อเผยแพร่ถึงจุดนั้น'
+    : 'แก้ไขได้เมื่อข้อความเริ่มเข้ามา';
 }
 
 export function formatCaptionSegmentAge(ageSeconds: number): string {
-  return `Open for ${Math.max(0, Math.floor(ageSeconds))}s`;
+  return `รอตรวจทานมาแล้ว ${Math.max(0, Math.floor(ageSeconds))} วินาที`;
 }
 
 export function formatCaptionDraftAnnouncement(text: string): string {
   const normalized = text.trim();
-  return normalized ? `Draft preview: ${normalized}` : '';
+  return normalized ? `ตัวอย่างข้อความสด: ${normalized}` : '';
 }
 
 export function getCaptionDraftStatusLabel(isActive: boolean): string {
-  return isActive ? 'Draft สด · อ่านอย่างเดียว' : '';
+  return isActive ? 'ข้อความสด · อ่านอย่างเดียว' : '';
+}
+
+export interface CaptionDeskPolicyCopy {
+  shortLabel: string;
+  title: string;
+  description: string;
+}
+
+export function getCaptionPolicyCopy(
+  policy: 'early-final' | 'provider-final',
+): CaptionDeskPolicyCopy {
+  return policy === 'early-final'
+    ? {
+      shortLabel: 'Early interim',
+      title: 'Early interim',
+      description: 'เริ่มตรวจทานข้อความส่วนที่นิ่งได้ก่อน ไม่ต้องรอข้อความทั้งช่วง · แนะนำ',
+    }
+    : {
+      shortLabel: 'Standard interim',
+      title: 'Standard interim',
+      description: 'รอให้ผู้ให้บริการยืนยันข้อความทั้งช่วงก่อนเริ่มตรวจทาน',
+    };
 }
 
 export type CaptionEditorTextUpdate =
@@ -171,12 +243,12 @@ export function getCaptionBudgetWarning(graphemeCount: number): CaptionBudgetWar
     return {
       isOverSingleLine: true,
       isOverTwoLines: false,
-      label: '2nd line (35+ chars)',
+      label: 'บรรทัดที่ 2 (เกิน 35 ตัวอักษร)',
     };
   }
   return {
     isOverSingleLine: false,
     isOverTwoLines: false,
-    label: 'Line 1 budget (≤35 chars)',
+    label: 'บรรทัดที่ 1 ≤35 ตัวอักษร',
   };
 }

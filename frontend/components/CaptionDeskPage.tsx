@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 import { useCaptionDesk } from '../hooks/useCaptionDesk';
 import {
@@ -6,7 +6,12 @@ import {
   buildCaptionDeskSessionKey,
   type CaptionPolicy,
 } from '../lib/appRoutes';
-import { hasCaptionDeskWork } from '../lib/captionDeskPresentation';
+import {
+  getCaptionDeskChangeConfirmation,
+  getCaptionProofreadAvailability,
+  formatCaptionDeskError,
+  hasCaptionDeskWork,
+} from '../lib/captionDeskPresentation';
 import { checkAvailableProviders } from '../lib/api';
 import { isAgentProvider, type AgentProvider } from '../lib/providers';
 import { ConnectionState } from '../types';
@@ -68,7 +73,9 @@ function ConnectedCaptionDesk({
 
   const connected = connectionState === ConnectionState.CONNECTED;
   const [proofreadAvailability, setProofreadAvailability] = useState<ProofreadAvailability>('unknown');
+  const [proofreadChecking, setProofreadChecking] = useState(true);
   const errorMessage = snapshot.error || error;
+  const displayErrorMessage = errorMessage ? formatCaptionDeskError(errorMessage) : null;
   const canReconnect = Boolean(error) || connectionState === ConnectionState.DISCONNECTED;
   const hasWork = hasCaptionDeskWork({
     reviewText: snapshot.reviewText,
@@ -90,19 +97,26 @@ function ConnectedCaptionDesk({
 
   useEffect(() => {
     let disposed = false;
+    setProofreadChecking(true);
     void checkAvailableProviders(backendUrl).then(providers => {
       if (disposed) return;
-      setProofreadAvailability(providers === null
-        ? 'unknown'
-        : providers.captionProofread === true ? 'enabled' : 'disabled');
+      setProofreadAvailability(getCaptionProofreadAvailability(providers));
+      setProofreadChecking(false);
     });
     return () => { disposed = true; };
+  }, [backendUrl]);
+
+  const retryProofreadAvailability = useCallback(async () => {
+    setProofreadChecking(true);
+    const providers = await checkAvailableProviders(backendUrl);
+    setProofreadAvailability(getCaptionProofreadAvailability(providers));
+    setProofreadChecking(false);
   }, [backendUrl]);
 
   const changeDesk = () => {
     if (
       hasWork &&
-      !window.confirm('Discard the caption currently in this desk and change room or provider?')
+      !window.confirm(getCaptionDeskChangeConfirmation())
     ) return;
     window.location.href = changeDeskUrl;
   };
@@ -110,7 +124,7 @@ function ConnectedCaptionDesk({
   return (
     <div className="app-shell flex h-dvh flex-col overflow-hidden bg-[var(--canvas)] text-[var(--ink)]">
       <a href="#main-content" className="app-skip-link">
-        Skip to content
+        ข้ามไปยังเนื้อหา
       </a>
 
       <CaptionDeskHeader
@@ -125,12 +139,12 @@ function ConnectedCaptionDesk({
       />
 
       <main id="main-content" className="caption-desk-main mx-auto flex min-h-0 w-full flex-1 flex-col overflow-y-auto px-4 py-4 sm:px-6 sm:py-5 lg:px-8 lg:overflow-hidden">
-        {errorMessage || connectionState === ConnectionState.DISCONNECTED ? (
-          <div className="mb-4 flex items-center justify-between gap-4 rounded-lg border border-red-400/35 bg-red-500/10 px-4 py-3 text-sm text-red-200" role="alert">
-            <span>{errorMessage || 'Caption Desk disconnected. Your current edits are preserved.'}</span>
+        {displayErrorMessage || connectionState === ConnectionState.DISCONNECTED ? (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-4 rounded-lg border border-[var(--danger)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-text)]" role="alert">
+            <span className="min-w-0 flex-1 break-words">{displayErrorMessage || 'Caption Desk ขาดการเชื่อมต่อ แต่ข้อความที่แก้ไขไว้ยังอยู่'}</span>
             {canReconnect ? (
-              <button type="button" onClick={reconnect} className="control-button control-button--inline shrink-0">
-                <RefreshCw size={15} /> {connected ? 'Try again' : 'Reconnect'}
+              <button type="button" onClick={reconnect} className="control-button control-button--inline w-full shrink-0 sm:w-auto">
+                <RefreshCw size={15} /> {connected ? 'ลองอีกครั้ง' : 'เชื่อมต่อใหม่'}
               </button>
             ) : null}
           </div>
@@ -140,6 +154,8 @@ function ConnectedCaptionDesk({
           <CaptionDeskReviewEditor
             backendUrl={backendUrl}
             proofreadAvailability={proofreadAvailability}
+            proofreadChecking={proofreadChecking}
+            onRetryProofread={() => void retryProofreadAvailability()}
             snapshot={snapshot}
             captionConnected={captionConnected}
             agentConnected={agentConnected}
@@ -156,7 +172,7 @@ function ConnectedCaptionDesk({
             className="sr-only"
             aria-live="polite"
           >
-            Caption published.
+            เผยแพร่แคปชันแล้ว
           </span>
         ) : null}
       </main>

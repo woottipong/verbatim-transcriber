@@ -148,7 +148,7 @@ export function useCaptionProofread({
         setNotice({
           id: `proofread-warning-${Date.now()}`,
           tone: 'warning',
-          message: 'AI Auto พักชั่วคราว ข้อความเดิมยังอยู่ครบ',
+          message: 'AI ตรวจแก้คำหยุดทำงานชั่วคราว ข้อความเดิมยังอยู่ครบ',
         });
       }
     } finally {

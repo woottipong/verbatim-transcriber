@@ -14,7 +14,7 @@ export function CaptionDeskPublishedHistory({ snapshot }: CaptionDeskPublishedHi
 
   return (
     <>
-      <section className="app-panel caption-desk-history-compact order-2 overflow-hidden bg-[var(--canvas-raised)] shadow-none lg:hidden" aria-label="Published captions">
+      <section className="app-panel caption-desk-history-compact order-2 overflow-hidden bg-[var(--canvas-raised)] shadow-none lg:hidden" aria-label="แคปชันที่เผยแพร่แล้ว">
         <button
           type="button"
           aria-expanded={mobileExpanded}
@@ -23,7 +23,7 @@ export function CaptionDeskPublishedHistory({ snapshot }: CaptionDeskPublishedHi
         >
           <span className="flex items-center justify-between gap-3">
             <span className="text-sm font-semibold">
-              {snapshot.waiting.length > 0 ? 'Sending' : 'Last published'}
+              {snapshot.waiting.length > 0 ? 'กำลังส่ง' : 'เผยแพร่ล่าสุด'}
             </span>
             <span
               key={latestPublished?.publicationId || 'published-empty'}
@@ -31,7 +31,7 @@ export function CaptionDeskPublishedHistory({ snapshot }: CaptionDeskPublishedHi
                 latestPublished ? 'caption-desk-published-pulse' : ''
               }`}
             >
-              {latest?.text || 'No captions published yet'}
+              {latest?.text || 'ยังไม่มีแคปชันที่เผยแพร่'}
             </span>
           </span>
         </button>
@@ -45,8 +45,8 @@ export function CaptionDeskPublishedHistory({ snapshot }: CaptionDeskPublishedHi
         aria-labelledby="published-captions-heading"
       >
         <div className="panel-header px-4 py-2.5">
-          <h2 id="published-captions-heading" className="text-sm font-semibold">Published</h2>
-          <p className="text-xs text-[var(--subtle)]">Release history</p>
+          <h2 id="published-captions-heading" className="text-sm font-semibold">เผยแพร่แล้ว</h2>
+          <p className="text-xs text-[var(--subtle)]">ประวัติการเผยแพร่</p>
         </div>
         <HistoryContent snapshot={snapshot} isEmpty={isEmpty} />
       </section>
@@ -61,13 +61,13 @@ function HistoryContent({
   return (
     <div className="max-h-64 flex-1 overflow-y-auto lg:max-h-none">
       {isEmpty ? (
-        <p className="px-4 py-5 text-sm leading-6 text-[var(--subtle)]">Captions you publish will appear here.</p>
+        <p className="px-4 py-5 text-sm leading-6 text-[var(--subtle)]">แคปชันที่เผยแพร่แล้วจะแสดงที่นี่</p>
       ) : (
         <ol className="divide-y divide-[var(--line)]">
           {[...snapshot.waiting].reverse().map(item => (
             <li key={item.requestId} className="px-4 py-3">
-              <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-[var(--status-warning-text)]">
-                <RefreshCw className="animate-spin" size={13} aria-hidden="true" /> Sending…
+              <div className="mb-1.5 flex items-center gap-2 text-xs font-medium text-[var(--accent)]">
+                <RefreshCw className="animate-spin" size={13} aria-hidden="true" /> กำลังส่ง…
               </div>
               <p className="break-words whitespace-pre-wrap text-sm leading-6 text-[var(--ink)] [overflow-wrap:anywhere]">{item.text}</p>
             </li>

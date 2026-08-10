@@ -6,6 +6,7 @@ export interface QuickPhrase {
 }
 
 export const QUICK_PHRASE_STORAGE_KEY = 'captionlive.caption-desk.quick-phrases';
+export const MAX_QUICK_PHRASE_GRAPHEMES = 80;
 
 export const DEFAULT_QUICK_PHRASES: QuickPhrase[] = [
   { id: 'qp-1', key: 'F1', label: 'ท่านประธาน', text: 'ท่านประธาน' },
@@ -17,6 +18,29 @@ export const DEFAULT_QUICK_PHRASES: QuickPhrase[] = [
   { id: 'qp-7', key: 'F7', label: 'อภิปราย', text: 'อภิปราย' },
   { id: 'qp-8', key: 'F8', label: 'ที่ประชุม', text: 'ที่ประชุม' },
 ];
+
+export function limitQuickPhraseText(text: string): string {
+  const Segmenter = (Intl as typeof Intl & {
+    Segmenter?: new (
+      locales?: string,
+      options?: { granularity: string },
+    ) => { segment(input: string): Iterable<{ segment: string }> };
+  }).Segmenter;
+  if (!Segmenter) return Array.from(text).slice(0, MAX_QUICK_PHRASE_GRAPHEMES).join('');
+  try {
+    const segmenter = new Segmenter(undefined, { granularity: 'grapheme' });
+    let result = '';
+    let count = 0;
+    for (const item of segmenter.segment(text)) {
+      if (count >= MAX_QUICK_PHRASE_GRAPHEMES) break;
+      result += item.segment;
+      count += 1;
+    }
+    return result;
+  } catch {
+    return Array.from(text).slice(0, MAX_QUICK_PHRASE_GRAPHEMES).join('');
+  }
+}
 
 export function loadPersistedQuickPhrases(): QuickPhrase[] {
   try {
@@ -35,12 +59,17 @@ export function loadPersistedQuickPhrases(): QuickPhrase[] {
             typeof (item as QuickPhrase).key === 'string' &&
             typeof (item as QuickPhrase).text === 'string',
         )
-        .map(item => ({
-          id: item.id,
-          key: item.key,
-          label: item.label || item.text,
-          text: item.text,
-        }));
+        .map(item => {
+          const label = typeof (item as { label?: unknown }).label === 'string'
+            ? (item as { label: string }).label
+            : item.text;
+          return {
+            id: item.id,
+            key: item.key,
+            label: limitQuickPhraseText(label || item.text),
+            text: limitQuickPhraseText(item.text),
+          };
+        });
 
       // Deduplicate by key (keep first occurrence)
       const seenKeys = new Set<string>();
@@ -63,7 +92,12 @@ export function savePersistedQuickPhrases(phrases: QuickPhrase[]): void {
   try {
     const storage = typeof window !== 'undefined' && window.localStorage ? window.localStorage : null;
     if (storage) {
-      storage.setItem(QUICK_PHRASE_STORAGE_KEY, JSON.stringify(phrases));
+      const bounded = phrases.map(phrase => ({
+        ...phrase,
+        label: limitQuickPhraseText(phrase.label),
+        text: limitQuickPhraseText(phrase.text),
+      }));
+      storage.setItem(QUICK_PHRASE_STORAGE_KEY, JSON.stringify(bounded));
     }
   } catch {
     // Session fallback if storage is disabled

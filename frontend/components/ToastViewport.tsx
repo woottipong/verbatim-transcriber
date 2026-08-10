@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { CheckCircle2, CircleAlert, Info, TriangleAlert, X } from 'lucide-react';
-
-export type ToastTone = 'success' | 'error' | 'warning' | 'info';
+import { getToastCopy, type ToastLocale, type ToastTone } from '../lib/toastCopy';
 
 export interface ToastNotice {
   id: string;
@@ -14,20 +13,21 @@ export interface ToastNotice {
 
 interface ToastViewportProps {
   notices: Array<ToastNotice | null | false | undefined>;
+  locale?: ToastLocale;
 }
 
-const tonePresentation = {
-  success: { icon: CheckCircle2, title: 'Completed' },
-  error: { icon: CircleAlert, title: 'Something went wrong' },
-  warning: { icon: TriangleAlert, title: 'Attention needed' },
-  info: { icon: Info, title: 'Notice' },
+const toneIcons = {
+  success: CheckCircle2,
+  error: CircleAlert,
+  warning: TriangleAlert,
+  info: Info,
 } as const;
 
-function ToastItem({ notice }: { notice: ToastNotice }) {
+function ToastItem({ notice, locale }: { notice: ToastNotice; locale: ToastLocale }) {
   const [visible, setVisible] = useState(true);
   const onDismissRef = useRef(notice.onDismiss);
-  const presentation = tonePresentation[notice.tone];
-  const Icon = presentation.icon;
+  const presentation = getToastCopy(notice.tone, locale);
+  const Icon = toneIcons[notice.tone];
 
   onDismissRef.current = notice.onDismiss;
 
@@ -60,22 +60,22 @@ function ToastItem({ notice }: { notice: ToastNotice }) {
         <p className="app-toast__title">{notice.title ?? presentation.title}</p>
         <p className="app-toast__message">{notice.message}</p>
       </div>
-      <button type="button" className="app-toast__dismiss" onClick={dismiss} aria-label="Dismiss notification">
+      <button type="button" className="app-toast__dismiss" onClick={dismiss} aria-label={presentation.dismissLabel}>
         <X size={15} aria-hidden="true" />
       </button>
     </div>
   );
 }
 
-export default function ToastViewport({ notices }: ToastViewportProps) {
+export default function ToastViewport({ notices, locale = 'en' }: ToastViewportProps) {
   const visibleNotices = notices.filter((notice): notice is ToastNotice => Boolean(notice));
   if (visibleNotices.length === 0) return null;
 
   return (
-    <div className="app-toast-viewport" role="region" aria-label="Notifications">
+    <div className="app-toast-viewport" role="region" aria-label={getToastCopy('info', locale).regionLabel}>
       {visibleNotices.map(notice => (
         <div key={notice.id}>
-          <ToastItem notice={notice} />
+          <ToastItem notice={notice} locale={locale} />
         </div>
       ))}
     </div>

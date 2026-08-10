@@ -6,6 +6,9 @@ import {
   formatCaptionDraftAnnouncement,
   formatCaptionSegmentAge,
   formatFontSizeLabel,
+  getCaptionDeskChangeConfirmation,
+  getCaptionPolicyCopy,
+  getCaptionProofreadAvailability,
   getCaptionBudgetWarning,
   getCaptionEditorTextUpdate,
   getCaptionDeskOperationalStatus,
@@ -18,12 +21,16 @@ import {
 
 test('terminal room failures are presented as unavailable rather than connecting', () => {
   assert.deepEqual(getCaptionDeskOperationalStatus('ERROR', false, false, null), {
-    label: 'Desk unavailable',
+    label: 'Caption Desk ไม่พร้อมใช้งาน',
     tone: 'danger',
   });
   assert.deepEqual(getCaptionDeskOperationalStatus('CONNECTING', false, false, null), {
-    label: 'Connecting',
-    tone: 'warning',
+    label: 'กำลังเชื่อมต่อ',
+    tone: 'info',
+  });
+  assert.deepEqual(getCaptionDeskOperationalStatus('CONNECTED', false, true, null), {
+    label: 'กำลังรับข้อความแคปชัน',
+    tone: 'info',
   });
 });
 
@@ -35,11 +42,11 @@ test('a blocked operator subscription takes priority over connecting states', ()
       true,
       'operator_already_active',
     ),
-    { label: 'Desk already in use', tone: 'danger' },
+    { label: 'โต๊ะนี้กำลังถูกใช้งาน', tone: 'danger' },
   );
   assert.deepEqual(
     getCaptionDeskOperationalStatus('CONNECTED', true, true, null),
-    { label: 'Ready', tone: 'success' },
+    { label: 'พร้อมใช้งาน', tone: 'success' },
   );
 });
 
@@ -52,27 +59,54 @@ test('leaving is guarded only while review or publication work exists', () => {
 test('network failures use operator-facing recovery copy', () => {
   assert.equal(
     formatCaptionDeskError(new TypeError('Failed to fetch')),
-    'Can’t reach CaptionLive. Check the backend connection, then try again.',
+    'เชื่อมต่อ CaptionLive ไม่ได้ ตรวจสอบการเชื่อมต่อแบ็กเอนด์แล้วลองอีกครั้ง',
   );
   assert.equal(
     formatCaptionDeskError(new Error('Token rejected')),
-    'Token rejected',
+    'ไม่มีสิทธิ์เปิด Caption Desk ตรวจสอบลิงก์หรือสิทธิ์แล้วลองใหม่',
   );
+  assert.equal(
+    formatCaptionDeskError(new Error('Room does not exist or is no longer available')),
+    'ไม่พบห้องนี้หรือห้องถูกปิดแล้ว ตรวจสอบห้องใน Control Room แล้วลองใหม่',
+  );
+  assert.equal(
+    formatCaptionDeskError('Move the cursor after the text you want to publish.'),
+    'เลื่อนเคอร์เซอร์ไปหลังข้อความที่ต้องการเผยแพร่',
+  );
+  assert.equal(
+    formatCaptionDeskError('Caption is too long to publish. Keep it under 16,000 UTF-8 bytes.'),
+    'แคปชันยาวเกินไป เผยแพร่ได้ไม่เกิน 16,000 ไบต์ UTF-8',
+  );
+  assert.equal(
+    formatCaptionDeskError('AI proofreading returned an invalid result'),
+    'AI ตรวจแก้คำขัดข้องชั่วคราว ข้อความเดิมยังอยู่ครบ',
+  );
+});
+
+test('proofread availability maps to a clear operator state', () => {
+  assert.equal(getCaptionProofreadAvailability(null), 'unknown');
+  assert.equal(getCaptionProofreadAvailability({ captionProofread: true }), 'enabled');
+  assert.equal(getCaptionProofreadAvailability({ captionProofread: false }), 'disabled');
+});
+
+test('changing desks explains that unfinished captions will be discarded', () => {
+  assert.match(getCaptionDeskChangeConfirmation(), /ละทิ้งแคปชัน/);
+  assert.match(getCaptionDeskChangeConfirmation(), /เปลี่ยนผู้ให้บริการ/);
 });
 
 test('review instructions reflect whether the editor can be used', () => {
   assert.equal(
     getCaptionReviewInstructions(false),
-    'Captions will be editable when the feed is ready.',
+    'แก้ไขได้เมื่อข้อความเริ่มเข้ามา',
   );
   assert.equal(
     getCaptionReviewInstructions(true),
-    'Move the cursor to a break, then press Enter to publish up to it.',
+    'เลื่อนเคอร์เซอร์ไปยังจุดแบ่ง แล้วกด Enter เพื่อเผยแพร่ถึงจุดนั้น',
   );
 });
 
 test('segment age describes elapsed open time rather than system delay', () => {
-  assert.equal(formatCaptionSegmentAge(14), 'Open for 14s');
+  assert.equal(formatCaptionSegmentAge(14), 'รอตรวจทานมาแล้ว 14 วินาที');
 });
 
 test('editor text appends a new suffix without replacing the live DOM text', () => {
@@ -87,13 +121,26 @@ test('editor text appends a new suffix without replacing the live DOM text', () 
 });
 
 test('Draft announcements expose preview text without announcing empty revisions', () => {
-  assert.equal(formatCaptionDraftAnnouncement(' กำลังถอดข้อความ '), 'Draft preview: กำลังถอดข้อความ');
+  assert.equal(formatCaptionDraftAnnouncement(' กำลังถอดข้อความ '), 'ตัวอย่างข้อความสด: กำลังถอดข้อความ');
   assert.equal(formatCaptionDraftAnnouncement('   '), '');
 });
 
 test('an active Draft has a visible non-color status label', () => {
-  assert.equal(getCaptionDraftStatusLabel(true), 'Draft สด · อ่านอย่างเดียว');
+  assert.equal(getCaptionDraftStatusLabel(true), 'ข้อความสด · อ่านอย่างเดียว');
   assert.equal(getCaptionDraftStatusLabel(false), '');
+});
+
+test('interim mode copy explains both ways to review a caption', () => {
+  assert.deepEqual(getCaptionPolicyCopy('early-final'), {
+    shortLabel: 'Early interim',
+    title: 'Early interim',
+    description: 'เริ่มตรวจทานข้อความส่วนที่นิ่งได้ก่อน ไม่ต้องรอข้อความทั้งช่วง · แนะนำ',
+  });
+  assert.deepEqual(getCaptionPolicyCopy('provider-final'), {
+    shortLabel: 'Standard interim',
+    title: 'Standard interim',
+    description: 'รอให้ผู้ให้บริการยืนยันข้อความทั้งช่วงก่อนเริ่มตรวจทาน',
+  });
 });
 
 test('font size navigation steps up and down within bounds', () => {
@@ -111,12 +158,12 @@ test('grapheme counting and budget warning report correct line thresholds', () =
   assert.deepEqual(getCaptionBudgetWarning(20), {
     isOverSingleLine: false,
     isOverTwoLines: false,
-    label: 'Line 1 budget (≤35 chars)',
+    label: 'บรรทัดที่ 1 ≤35 ตัวอักษร',
   });
   assert.deepEqual(getCaptionBudgetWarning(40), {
     isOverSingleLine: true,
     isOverTwoLines: false,
-    label: '2nd line (35+ chars)',
+    label: 'บรรทัดที่ 2 (เกิน 35 ตัวอักษร)',
   });
   assert.deepEqual(getCaptionBudgetWarning(75), {
     isOverSingleLine: true,

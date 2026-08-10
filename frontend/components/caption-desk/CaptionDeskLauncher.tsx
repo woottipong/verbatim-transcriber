@@ -7,7 +7,7 @@ import {
   type RunningAgent,
 } from '../../lib/api';
 import { buildCaptionDeskUrl, type CaptionPolicy } from '../../lib/appRoutes';
-import { formatCaptionDeskError } from '../../lib/captionDeskPresentation';
+import { formatCaptionDeskError, getCaptionPolicyCopy } from '../../lib/captionDeskPresentation';
 import { formatProviderName, selectActiveRoomProviders, type AgentProvider } from '../../lib/providers';
 
 interface CaptionDeskLauncherProps {
@@ -37,6 +37,8 @@ export function CaptionDeskLauncher({
     () => selectActiveRoomProviders(agents, roomName),
     [agents, roomName],
   );
+  const earlyFinalCopy = getCaptionPolicyCopy('early-final');
+  const providerFinalCopy = getCaptionPolicyCopy('provider-final');
 
   const refresh = async () => {
     setLoading(true);
@@ -82,7 +84,7 @@ export function CaptionDeskLauncher({
   return (
     <div className="app-shell min-h-screen bg-[var(--canvas)] text-[var(--ink)]">
       <a href="#main-content" className="app-skip-link">
-        Skip to content
+        ข้ามไปยังเนื้อหา
       </a>
       <header className="app-header">
         <div className="app-header__content mx-auto flex w-full max-w-7xl items-center px-4 py-3 sm:px-6">
@@ -94,7 +96,7 @@ export function CaptionDeskLauncher({
                 <span className="h-4 w-px bg-[var(--line)]" aria-hidden="true" />
                 <span>Caption Desk</span>
               </h1>
-              <p className="mt-0.5 text-xs text-[var(--muted)]">Review and publish moderated captions.</p>
+              <p className="mt-0.5 text-xs text-[var(--muted)]">ตรวจทานและเผยแพร่แคปชันที่ผ่านการกลั่นกรอง</p>
             </div>
           </div>
         </div>
@@ -106,34 +108,34 @@ export function CaptionDeskLauncher({
               <Radio size={19} aria-hidden="true" />
             </span>
             <div>
-              <h2 id="caption-desk-connect-heading" className="text-lg font-semibold">Connect to a caption desk</h2>
+              <h2 id="caption-desk-connect-heading" className="text-lg font-semibold">เชื่อมต่อ Caption Desk</h2>
               {fixedRoomName ? (
                 <p className="mt-1 text-sm text-[var(--muted)]">
-                  Room <strong className="font-semibold text-[var(--ink)]">{fixedRoomName}</strong>
+                  ห้อง <strong className="font-semibold text-[var(--ink)]">{fixedRoomName}</strong>
                   <span aria-hidden="true"> · </span>
-                  Choose an active transcription provider.
+                  เลือกผู้ให้บริการถอดเสียงที่กำลังทำงาน
                 </p>
               ) : (
-                <p className="mt-1 text-sm text-[var(--muted)]">Choose a room and one of its active transcription providers.</p>
+                <p className="mt-1 text-sm text-[var(--muted)]">เลือกห้องและผู้ให้บริการถอดเสียงที่กำลังทำงาน</p>
               )}
             </div>
           </div>
 
           {error ? (
-            <div className="mt-5 flex items-center justify-between gap-3 rounded-lg border border-red-400/35 bg-red-500/10 px-4 py-3 text-sm text-red-200" role="alert">
-              <span>{error}</span>
-              <button type="button" onClick={() => void refresh()} className="control-button control-button--inline shrink-0">
-                <RefreshCw size={15} /> Retry
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--danger)] bg-[var(--status-danger-bg)] px-4 py-3 text-sm text-[var(--status-danger-text)]" role="alert">
+              <span className="min-w-0 flex-1 break-words">{error}</span>
+              <button type="button" onClick={() => void refresh()} className="control-button control-button--inline w-full shrink-0 sm:w-auto">
+                <RefreshCw size={15} /> ลองอีกครั้ง
               </button>
             </div>
           ) : !loading && rooms.length === 0 ? (
             <div className="mt-5 rounded-lg bg-[var(--control-surface-bg)] px-4 py-4">
-              <p className="text-sm font-medium">No rooms yet.</p>
-              <p className="mt-1 text-sm text-[var(--muted)]">Start by creating one in Control Room, then come back here.</p>
+              <p className="text-sm font-medium">ยังไม่มีห้อง</p>
+              <p className="mt-1 text-sm text-[var(--muted)]">เริ่มจากสร้างห้องใน Control Room แล้วกลับมาที่นี่</p>
               <div className="mt-4 flex items-center gap-2">
-                <a href="#admin" className="control-button control-button--quiet">Open Control Room</a>
+                <a href="#admin" className="control-button control-button--quiet">เปิด Control Room</a>
                 <button type="button" onClick={() => void refresh()} className="control-button control-button--inline">
-                  <RefreshCw size={15} /> Refresh
+                  <RefreshCw size={15} /> รีเฟรช
                 </button>
               </div>
             </div>
@@ -141,7 +143,7 @@ export function CaptionDeskLauncher({
             <div className="mt-6 grid gap-4">
               {!fixedRoomName ? (
                 <label className="grid gap-2 text-sm font-medium" htmlFor="caption-desk-room">
-                  Room
+                  ห้อง
                   <select
                     id="caption-desk-room"
                     value={roomName}
@@ -149,14 +151,14 @@ export function CaptionDeskLauncher({
                     disabled={loading}
                     className="h-11 rounded-lg border border-[var(--line)] bg-[var(--control-surface-bg)] px-3 text-[var(--ink)]"
                   >
-                    {loading ? <option value="">Loading rooms…</option> : null}
+                    {loading ? <option value="">กำลังโหลดห้อง…</option> : null}
                     {roomNames.map(room => <option key={room} value={room}>{room}</option>)}
                   </select>
                 </label>
               ) : null}
 
               <label className="grid gap-2 text-sm font-medium" htmlFor="caption-desk-provider">
-                Provider
+                ผู้ให้บริการ
                 <select
                   id="caption-desk-provider"
                   value={provider}
@@ -164,17 +166,17 @@ export function CaptionDeskLauncher({
                   disabled={loading || !roomName}
                   className="h-11 rounded-lg border border-[var(--line)] bg-[var(--control-surface-bg)] px-3 text-[var(--ink)]"
                 >
-                  {loading ? <option value="">Loading providers…</option> : null}
-                  {!loading && providers.length === 0 ? <option value="">No active providers</option> : null}
+                  {loading ? <option value="">กำลังโหลดผู้ให้บริการ…</option> : null}
+                  {!loading && providers.length === 0 ? <option value="">ไม่มีผู้ให้บริการที่กำลังทำงาน</option> : null}
                   {providers.map(item => <option key={item} value={item}>{formatProviderName(item)}</option>)}
                 </select>
                 {!loading && roomName && providers.length === 0 ? (
-                  <span className="text-xs font-normal text-[var(--status-warning-text)]">Start a transcription provider for this room in Control Room.</span>
+                  <span className="text-xs font-normal text-[var(--status-warning-text)]">เริ่มผู้ให้บริการถอดเสียงของห้องนี้ใน Control Room</span>
                 ) : null}
               </label>
 
               <fieldset className="grid gap-2">
-                <legend className="text-sm font-medium">Finalization</legend>
+                <legend className="text-sm font-medium">เลือกโหมดการรับข้อความ</legend>
                 <div className="grid gap-2 sm:grid-cols-2">
                   <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-[var(--line)] bg-[var(--control-surface-bg)] p-3 has-[:checked]:border-[var(--accent)] has-[:checked]:bg-[var(--accent-soft)]">
                     <input
@@ -186,9 +188,9 @@ export function CaptionDeskLauncher({
                       className="mt-1 accent-[var(--accent)]"
                     />
                     <span>
-                      <span className="block text-sm font-semibold">Stable Draft</span>
+                      <span className="block text-sm font-semibold">{earlyFinalCopy.title}</span>
                       <span className="mt-0.5 block text-xs font-normal leading-5 text-[var(--muted)]">
-                        Sends stable phrases to review sooner. Recommended.
+                        {earlyFinalCopy.description}
                       </span>
                     </span>
                   </label>
@@ -202,9 +204,9 @@ export function CaptionDeskLauncher({
                       className="mt-1 accent-[var(--accent)]"
                     />
                     <span>
-                      <span className="block text-sm font-semibold">Provider final</span>
+                      <span className="block text-sm font-semibold">{providerFinalCopy.title}</span>
                       <span className="mt-0.5 block text-xs font-normal leading-5 text-[var(--muted)]">
-                        Waits for the provider’s original final result.
+                        {providerFinalCopy.description}
                       </span>
                     </span>
                   </label>
@@ -218,7 +220,7 @@ export function CaptionDeskLauncher({
                 className="control-button control-button--primary mt-1 h-11 justify-center"
               >
                 {connecting ? <RefreshCw className="animate-spin" size={16} /> : <ArrowRight size={16} />}
-                {connecting ? 'Connecting…' : 'Connect'}
+                {connecting ? 'กำลังเชื่อมต่อ…' : 'เชื่อมต่อ'}
               </button>
             </div>
           )}

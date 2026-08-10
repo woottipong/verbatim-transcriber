@@ -1,7 +1,8 @@
-import { useState, type ClipboardEvent } from 'react';
+import { useEffect, useRef, useState, type ClipboardEvent } from 'react';
 import { RotateCcw, X } from 'lucide-react';
 import {
   DEFAULT_QUICK_PHRASES,
+  limitQuickPhraseText,
   type QuickPhrase,
 } from '../../lib/quickPhrases';
 
@@ -26,11 +27,53 @@ function buildInitialMap(source: QuickPhrase[]): PhraseFormMap {
 
 export function QuickPhraseModal({ phrases, onSave, onClose }: QuickPhraseModalProps) {
   const [formState, setFormState] = useState<PhraseFormMap>(() => buildInitialMap(phrases));
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const firstInputRef = useRef<HTMLInputElement>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = dialogRef.current;
+    firstInputRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab' || !dialog) return;
+
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>(
+          'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter(element => element.getAttribute('aria-hidden') !== 'true');
+      if (focusable.length === 0) return;
+
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    dialog?.addEventListener('keydown', handleKeyDown);
+    return () => {
+      dialog?.removeEventListener('keydown', handleKeyDown);
+      if (previousFocus?.isConnected) previousFocus.focus();
+    };
+  }, []);
 
   const handleChange = (key: string, value: string) => {
     setFormState(prev => ({
       ...prev,
-      [key]: value,
+      [key]: limitQuickPhraseText(value),
     }));
   };
 
@@ -53,7 +96,7 @@ export function QuickPhraseModal({ phrases, onSave, onClose }: QuickPhraseModalP
         lines.forEach((line, index) => {
           const targetIndex = startIndex + index;
           if (targetIndex < FIXED_KEYS.length) {
-            next[FIXED_KEYS[targetIndex]] = line;
+            next[FIXED_KEYS[targetIndex]] = limitQuickPhraseText(line);
           }
         });
         return next;
@@ -95,20 +138,23 @@ export function QuickPhraseModal({ phrases, onSave, onClose }: QuickPhraseModalP
       aria-modal="true"
       aria-labelledby="quick-phrase-modal-title"
     >
-      <div className="app-panel flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden bg-[var(--surface)] text-[var(--ink)] shadow-2xl">
+      <div
+        ref={dialogRef}
+        className="app-panel flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden bg-[var(--surface)] text-[var(--ink)] shadow-2xl"
+      >
         <header className="panel-header flex items-center justify-between border-b border-[var(--line)] px-5 py-3.5">
           <div>
             <h2 id="quick-phrase-modal-title" className="text-base font-semibold">
-              ตั้งค่าศัพท์เฉพาะ (Quick Terms)
+              ตั้งค่าศัพท์เฉพาะ
             </h2>
             <p className="text-xs text-[var(--muted)]">
-              ก๊อปปี้ข้อความหลายบรรทัดมาวาง (Ctrl+V) ที่ช่องเพื่อจัดเรียงเข้า F1 - F8 ได้ทันที
+              วางข้อความหลายบรรทัด (Ctrl+V) เพื่อเติมศัพท์เฉพาะใน F1–F8 ได้ทันที
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close modal"
+            aria-label="ปิดหน้าต่างตั้งค่าศัพท์เฉพาะ"
             className="control-button control-button--inline shrink-0 p-1.5"
           >
             <X size={18} />
@@ -132,13 +178,18 @@ export function QuickPhraseModal({ phrases, onSave, onClose }: QuickPhraseModalP
                     {key}
                   </span>
 
+                  <label htmlFor={`quick-phrase-${key}`} className="sr-only">
+                    คำศัพท์สำหรับ {key}
+                  </label>
                   <input
+                    ref={key === FIXED_KEYS[0] ? firstInputRef : undefined}
+                    id={`quick-phrase-${key}`}
                     type="text"
                     value={textValue}
                     onChange={e => handleChange(key, e.target.value)}
                     onPaste={e => handlePaste(e, key)}
                     placeholder={`คำศัพท์สำหรับ ${key} (วางหลายบรรทัดได้)…`}
-                    className="h-8 flex-1 rounded border border-[var(--line)] bg-[var(--surface)] px-3 text-xs text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
+                    className="h-11 min-w-0 flex-1 rounded border border-[var(--line)] bg-[var(--surface)] px-3 text-xs text-[var(--ink)] focus:border-[var(--accent)] focus:outline-none"
                   />
 
                   {hasValue ? (
@@ -146,7 +197,8 @@ export function QuickPhraseModal({ phrases, onSave, onClose }: QuickPhraseModalP
                       type="button"
                       onClick={() => handleClearRow(key)}
                       title={`ล้างคำสำหรับ ${key}`}
-                      className="shrink-0 p-1 text-[var(--subtle)] hover:text-red-400 transition-colors"
+                      aria-label={`ล้างคำสำหรับ ${key}`}
+                      className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded p-1 text-[var(--subtle)] transition-colors hover:text-[var(--status-danger-text)]"
                     >
                       <X size={15} />
                     </button>

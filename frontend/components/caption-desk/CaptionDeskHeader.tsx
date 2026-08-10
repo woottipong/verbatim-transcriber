@@ -1,4 +1,8 @@
-import { type CaptionDeskStatusTone, getCaptionDeskOperationalStatus } from '../../lib/captionDeskPresentation';
+import {
+  type CaptionDeskStatusTone,
+  getCaptionDeskOperationalStatus,
+  getCaptionPolicyCopy,
+} from '../../lib/captionDeskPresentation';
 import { formatProviderName, type AgentProvider } from '../../lib/providers';
 import type { ConnectionState } from '../../types';
 import type { CaptionPolicy } from '../../lib/appRoutes';
@@ -30,6 +34,7 @@ export function CaptionDeskHeader({
     agentConnected,
     subscriptionBlockCode,
   );
+  const policyCopy = getCaptionPolicyCopy(captionPolicy);
 
   return (
     <header className="app-header">
@@ -42,20 +47,26 @@ export function CaptionDeskHeader({
               <span className="hidden h-4 w-px shrink-0 bg-[var(--line)] sm:inline" aria-hidden="true" />
               <span className="truncate">Caption Desk</span>
             </h1>
-            <p className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-sm">
-              <span className="text-[var(--muted)]">Room</span>
+            <p className="caption-desk-navbar__meta mt-0.5 flex min-w-0 items-center gap-1.5 text-sm">
+              <span className="text-[var(--muted)]">ห้อง</span>
               <strong className="truncate font-semibold text-[var(--ink)]">{roomName}</strong>
               <span className="text-[var(--subtle)]" aria-hidden="true">·</span>
               <strong className="truncate font-semibold text-[var(--ink)]">{formatProviderName(provider)}</strong>
-              <span className="text-[var(--subtle)]" aria-hidden="true">·</span>
-              <span className="truncate text-[var(--muted)]">
-                {captionPolicy === 'early-final' ? 'Stable Draft' : 'Provider final'}
+              <span className="caption-desk-navbar__policy flex items-center gap-1.5 text-[var(--muted)]">
+                <span className="text-[var(--subtle)]" aria-hidden="true">·</span>
+                {policyCopy.shortLabel}
               </span>
             </p>
           </div>
         </div>
         <div className="caption-desk-navbar__controls flex items-center justify-end gap-2">
-          <div className="flex items-center gap-1.5" aria-label="Caption Desk status">
+          <div
+            className="caption-desk-navbar__status flex min-w-0 items-center gap-1.5"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+          >
+            <span className="sr-only">สถานะ: </span>
             <Status tone={operationalStatus.tone} label={operationalStatus.label} />
           </div>
           <button
@@ -63,7 +74,7 @@ export function CaptionDeskHeader({
             onClick={onChangeDesk}
             className="control-button control-button--inline"
           >
-            Change desk
+            เปลี่ยนผู้ให้บริการ
           </button>
         </div>
       </div>

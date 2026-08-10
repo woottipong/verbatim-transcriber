@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Settings, Sparkles, Zap } from 'lucide-react';
 import ToastViewport from '../ToastViewport';
 import type { CaptionDeskSnapshot } from '../../lib/captionDeskSession';
@@ -33,6 +33,8 @@ import { QuickPhraseModal } from './QuickPhraseModal';
 interface CaptionDeskReviewEditorProps {
   backendUrl: string;
   proofreadAvailability: ProofreadAvailability;
+  proofreadChecking: boolean;
+  onRetryProofread: () => void;
   snapshot: CaptionDeskSnapshot;
   captionConnected: boolean;
   agentConnected: boolean;
@@ -46,6 +48,8 @@ const FONT_SIZE_STORAGE_KEY = 'captionlive.caption-desk.font-size';
 export function CaptionDeskReviewEditor({
   backendUrl,
   proofreadAvailability,
+  proofreadChecking,
+  onRetryProofread,
   snapshot,
   captionConnected,
   agentConnected,
@@ -79,7 +83,10 @@ export function CaptionDeskReviewEditor({
   const graphemeCount = countGraphemes(snapshot.reviewText);
   const budgetWarning = getCaptionBudgetWarning(graphemeCount);
   const draftStatusLabel = getCaptionDraftStatusLabel(snapshot.isDraftActive);
-  const typoMatches = detectThaiTypos(snapshot.reviewText);
+  const typoMatches = useMemo(
+    () => detectThaiTypos(snapshot.reviewText),
+    [snapshot.reviewText],
+  );
 
   const handleFixTypo = (match: TypoMatch) => {
     edit(replaceTypoInText(snapshot.reviewText, match));
@@ -151,7 +158,7 @@ export function CaptionDeskReviewEditor({
     <section className="app-panel caption-desk-review order-1 flex min-h-64 flex-col lg:order-1 lg:h-full lg:min-h-0" aria-labelledby="review-caption-heading">
       <div className="panel-header caption-desk-toolbar px-4 py-2.5 sm:px-5">
         <div className="min-w-0">
-          <h2 id="review-caption-heading" className="font-semibold">Review caption</h2>
+          <h2 id="review-caption-heading" className="font-semibold">ตรวจทานแคปชัน</h2>
           <p id="caption-review-instructions" className="text-xs leading-5 text-[var(--muted)]">
             {getCaptionReviewInstructions(canEdit)}
           </p>
@@ -161,9 +168,10 @@ export function CaptionDeskReviewEditor({
             type="button"
             onClick={toggleAuto}
             disabled={proofreadAvailability !== 'enabled'}
+            aria-pressed={autoEnabled}
             title={proofreadAvailability === 'enabled'
-              ? (autoEnabled ? 'ปิดการเกลาคำผิดอัตโนมัติ' : 'เปิดการเกลาคำผิดอัตโนมัติ')
-              : 'AI proofreading ยังไม่พร้อมใช้งาน'}
+              ? (autoEnabled ? 'ปิดการตรวจแก้คำอัตโนมัติ' : 'เปิดการตรวจแก้คำอัตโนมัติ')
+              : 'AI ยังไม่พร้อมใช้งาน'}
             className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
               autoEnabled
                 ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]'
@@ -171,21 +179,38 @@ export function CaptionDeskReviewEditor({
             }`}
           >
             <Sparkles size={13} aria-hidden="true" />
-            AI Auto: {autoEnabled ? 'ON' : 'OFF'}
+            ตรวจแก้คำอัตโนมัติ: {autoEnabled ? 'เปิด' : 'ปิด'}
           </button>
           {proofreadAvailability === 'disabled' ? (
-            <span className="text-xs text-[var(--muted)]" role="status">AI ไม่ได้ตั้งค่า</span>
+            <span className="text-xs text-[var(--muted)]" role="status">ยังไม่ได้ตั้งค่า AI · แก้ไขเองได้</span>
           ) : proofreadAvailability === 'unknown' ? (
-            <span className="text-xs text-amber-400" role="status">ตรวจสอบสถานะ AI ไม่สำเร็จ</span>
+            <div className="flex items-center gap-1.5 text-xs text-[var(--warning)]">
+              <span role="status" aria-live="polite" aria-atomic="true">
+                {proofreadChecking ? 'กำลังตรวจสอบ AI…' : 'AI ยังไม่พร้อมใช้งาน'}
+              </span>
+              {!proofreadChecking ? (
+                <button
+                  type="button"
+                  onClick={onRetryProofread}
+                  className="control-button control-button--inline text-xs"
+                >
+                  ลองตรวจสอบอีกครั้ง
+                </button>
+              ) : null}
+            </div>
           ) : null}
-          {isProcessing ? <span className="text-xs text-[var(--muted)]">AI กำลังตรวจ…</span> : null}
-          <div className="caption-desk-font-control flex items-center rounded-lg border border-[var(--line)] bg-[var(--control-surface-bg)] p-0.5 text-xs" aria-label="Font size control">
+          {isProcessing ? (
+            <span className="text-xs text-[var(--muted)]" role="status" aria-live="polite" aria-atomic="true">
+              กำลังตรวจแก้คำ…
+            </span>
+          ) : null}
+          <div className="caption-desk-font-control flex items-center rounded-lg border border-[var(--line)] bg-[var(--control-surface-bg)] p-0.5 text-xs" aria-label="ปรับขนาดตัวอักษร">
             <button
               type="button"
               onClick={() => changeFontSize(getNextFontSize(fontSize, 'down'))}
               disabled={fontSize === 'sm'}
-              aria-label="Decrease editor font size"
-              title="Decrease font size (Alt + -)"
+              aria-label="ลดขนาดตัวอักษร"
+              title="ลดขนาดตัวอักษร (Alt + -)"
               className="h-6 px-2 font-medium transition-colors hover:bg-[var(--line-subtle)] disabled:opacity-30 rounded"
             >
               A-
@@ -197,8 +222,8 @@ export function CaptionDeskReviewEditor({
               type="button"
               onClick={() => changeFontSize(getNextFontSize(fontSize, 'up'))}
               disabled={fontSize === 'xl'}
-              aria-label="Increase editor font size"
-              title="Increase font size (Alt + +)"
+              aria-label="เพิ่มขนาดตัวอักษร"
+              title="เพิ่มขนาดตัวอักษร (Alt + +)"
               className="h-6 px-2 font-medium transition-colors hover:bg-[var(--line-subtle)] disabled:opacity-30 rounded"
             >
               A+
@@ -207,16 +232,16 @@ export function CaptionDeskReviewEditor({
 
           <div className="caption-desk-queue-status text-right text-xs text-[var(--muted)]">
             {hasSegmentIds ? (
-              <>{snapshot.sourceSegmentIds.length} segment{snapshot.sourceSegmentIds.length === 1 ? '' : 's'}</>
+              <>{snapshot.sourceSegmentIds.length} ช่วงข้อความ</>
             ) : null}
             {hasSegmentIds ? (
               <SegmentAge segmentKey={snapshot.sourceSegmentIds.join(':')} />
             ) : null}
             {snapshot.queuedCount > 0 ? (
-              <span className="text-[var(--subtle)]"> · Next {snapshot.queuedCount}</span>
+              <span className="text-[var(--subtle)]"> · ถัดไป {snapshot.queuedCount}</span>
             ) : null}
             {snapshot.waiting.length > 0 ? (
-              <span> · Sending {snapshot.waiting.length}</span>
+              <span> · กำลังส่ง {snapshot.waiting.length}</span>
             ) : null}
           </div>
         </div>
@@ -238,23 +263,24 @@ export function CaptionDeskReviewEditor({
             <span className="rounded bg-[var(--accent-soft)] px-1 py-0.2 font-mono text-[10px] font-bold text-[var(--accent)]">
               {phrase.key}
             </span>
-            <span>{phrase.label}</span>
+            <span className="caption-desk-quick-phrase__label min-w-0 truncate">{phrase.label}</span>
           </button>
         ))}
         <button
           type="button"
           onClick={() => setShowPhraseModal(true)}
-          title="ตั้งค่า/เพิ่มคำด่วน"
-          className="ml-auto inline-flex items-center gap-1 text-xs text-[var(--muted)] hover:text-[var(--ink)] p-1 rounded transition-colors"
+          aria-label="ตั้งค่าศัพท์เฉพาะ"
+          title="จัดการศัพท์เฉพาะ"
+          className="caption-desk-quick-phrase-settings ml-auto inline-flex items-center gap-1 rounded p-1 text-xs text-[var(--muted)] transition-colors hover:text-[var(--ink)]"
         >
           <Settings size={14} aria-hidden="true" />
-          <span className="hidden sm:inline">ตั้งค่าคำด่วน</span>
+          <span className="hidden sm:inline">ตั้งค่าศัพท์เฉพาะ</span>
         </button>
       </div>
 
       {typoMatches.length > 0 ? (
         <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--line)] bg-[var(--control-surface-bg)] px-4 py-2 text-xs sm:px-5">
-          <span className="flex items-center gap-1 font-semibold text-amber-400">
+          <span className="flex items-center gap-1 font-semibold text-[var(--warning)]">
             <AlertTriangle size={13} aria-hidden="true" />
             สงสัยคำผิด:
           </span>
@@ -264,60 +290,77 @@ export function CaptionDeskReviewEditor({
               type="button"
               onClick={() => handleFixTypo(match)}
               title={`เปลี่ยน "${match.wrong}" เป็น "${match.correct}"`}
-              className="inline-flex items-center gap-1 rounded border border-amber-500/40 px-2 py-0.5 text-amber-200 hover:border-[var(--accent)]"
+              className="inline-flex min-h-11 min-w-11 items-center gap-1 rounded border border-[var(--warning)] px-2 py-1 text-[var(--draft-text)] hover:border-[var(--accent)]"
             >
               <span className="line-through">{match.wrong}</span>
               <span aria-hidden="true">→</span>
-              <span className="font-semibold text-emerald-400">{match.correct}</span>
+              <span className="font-semibold text-[var(--success)]">{match.correct}</span>
             </button>
           ))}
         </div>
       ) : null}
 
-      <div
-        ref={editorRef}
-        role="textbox"
-        contentEditable={canEdit ? 'plaintext-only' : false}
-        suppressContentEditableWarning
-        aria-multiline="true"
-        aria-disabled={!canEdit}
-        aria-describedby="caption-review-instructions"
-        data-placeholder={
-          captionConnected
-            ? 'Caption text will collect here…'
-            : agentConnected
-              ? 'Connecting to the caption feed…'
-              : 'Waiting for the transcriber…'
-        }
-        data-draft={snapshot.draftPreview}
-        data-draft-join={snapshot.draftJoinWithoutSpace ? 'true' : 'false'}
-        style={getFontSizeStyles(fontSize)}
-        onInput={event => edit(event.currentTarget.textContent || '')}
-        onKeyDown={event => {
-          const matchedPhrase = quickPhrases.find(p => p.key === event.key);
-          if (matchedPhrase) {
-            event.preventDefault();
-            handleInsertPhrase(matchedPhrase);
-            return;
+      <div className="caption-review-editor-shell flex min-h-0 flex-1 flex-col">
+        <div
+          ref={editorRef}
+          role="textbox"
+          contentEditable={canEdit ? 'plaintext-only' : false}
+          suppressContentEditableWarning
+          aria-multiline="true"
+          aria-disabled={!canEdit}
+          aria-describedby={isDraftActive && snapshot.draftPreview.trim()
+            ? 'caption-review-instructions caption-draft-description'
+            : 'caption-review-instructions'}
+          data-placeholder={
+            captionConnected
+              ? 'ข้อความแคปชันจะแสดงที่นี่…'
+              : agentConnected
+                ? 'กำลังรับข้อความแคปชัน…'
+                : 'กำลังรอตัวถอดเสียง…'
           }
-          if (event.altKey && (event.key === '-' || event.key === '_')) {
+          style={getFontSizeStyles(fontSize)}
+          onInput={event => edit(event.currentTarget.textContent || '')}
+          onKeyDown={event => {
+            const matchedPhrase = quickPhrases.find(p => p.key === event.key);
+            if (matchedPhrase) {
+              event.preventDefault();
+              handleInsertPhrase(matchedPhrase);
+              return;
+            }
+            if (event.altKey && (event.key === '-' || event.key === '_')) {
+              event.preventDefault();
+              changeFontSize(getNextFontSize(fontSize, 'down'));
+              return;
+            }
+            if (event.altKey && (event.key === '=' || event.key === '+')) {
+              event.preventDefault();
+              changeFontSize(getNextFontSize(fontSize, 'up'));
+              return;
+            }
+            if (!shouldPublishOnEnter(event.nativeEvent)) return;
             event.preventDefault();
-            changeFontSize(getNextFontSize(fontSize, 'down'));
-            return;
-          }
-          if (event.altKey && (event.key === '=' || event.key === '+')) {
-            event.preventDefault();
-            changeFontSize(getNextFontSize(fontSize, 'up'));
-            return;
-          }
-          if (!shouldPublishOnEnter(event.nativeEvent)) return;
-          event.preventDefault();
-          if (showShortcutHint) dismissShortcutHint();
-          release(true);
-        }}
-        aria-label="Caption text to review and publish"
-        className="caption-review-editor transcript-paragraph-source w-full flex-1 overflow-y-auto bg-transparent px-4 py-3 text-[var(--ink)] outline-none focus:outline-none focus-visible:ring-0 aria-disabled:cursor-wait aria-disabled:text-[var(--muted)] sm:px-5 sm:py-4"
-      />
+            if (showShortcutHint) dismissShortcutHint();
+            release(true);
+          }}
+          aria-label="ข้อความแคปชันสำหรับตรวจทานและเผยแพร่"
+          className="caption-review-editor transcript-paragraph-source min-h-0 w-full flex-1 overflow-y-auto bg-transparent px-4 py-3 text-[var(--ink)] aria-disabled:cursor-wait aria-disabled:text-[var(--muted)] sm:px-5 sm:py-4"
+        />
+        {isDraftActive && snapshot.draftPreview.trim() ? (
+          <div
+            id="caption-draft-description"
+            className="caption-review-draft-preview"
+            aria-label="ตัวอย่างข้อความสด แบบอ่านอย่างเดียว ยังเผยแพร่ไม่ได้"
+          >
+            <div className="caption-review-draft-preview__label">
+              <Zap size={13} aria-hidden="true" />
+              {draftStatusLabel}
+            </div>
+            <p className="caption-review-draft-preview__text">
+              {snapshot.draftJoinWithoutSpace ? snapshot.draftPreview : ` ${snapshot.draftPreview}`}
+            </p>
+          </div>
+        ) : null}
+      </div>
 
       <span className="sr-only" aria-live="polite" aria-atomic="true">
         {isDraftActive ? draftAnnouncement : ''}
@@ -325,44 +368,25 @@ export function CaptionDeskReviewEditor({
 
       {canEdit && showShortcutHint ? (
         <div className="caption-desk-shortcut-hint flex items-center justify-between gap-3 border-t border-[var(--line)] px-4 py-2 text-xs sm:px-5">
-          <span><strong>Quick publish:</strong> Enter publishes to the cursor. F1-F8 inserts quick terms. Alt +/- adjusts font.</span>
+          <span><strong>เผยแพร่ด่วน:</strong> Enter เผยแพร่ถึงเคอร์เซอร์ · F1-F8 แทรกศัพท์เฉพาะ · Alt +/- ปรับขนาดตัวอักษร</span>
           <button type="button" className="control-button control-button--inline shrink-0" onClick={dismissShortcutHint}>
-            Got it
+            เข้าใจแล้ว
           </button>
         </div>
       ) : null}
 
       <footer className="caption-desk-editor-footer flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-[var(--line)] bg-[var(--control-surface-bg)] px-4 py-2.5 sm:px-5">
         <div className="flex items-center gap-2 text-xs">
-          {draftStatusLabel ? (
-            <>
-              <span className="inline-flex items-center gap-1 font-semibold text-amber-400">
-                <Zap size={12} aria-hidden="true" />
-                {draftStatusLabel}
-              </span>
-              <span className="text-[var(--subtle)]">·</span>
-            </>
-          ) : null}
-          <span className={budgetWarning.isOverTwoLines ? 'font-semibold text-amber-400' : 'text-[var(--muted)]'}>
-            {graphemeCount} chars
+          <span className={budgetWarning.isOverTwoLines ? 'font-semibold text-[var(--warning)]' : 'text-[var(--muted)]'}>
+            พร้อมเผยแพร่ {graphemeCount} ตัวอักษร
           </span>
-          {budgetWarning.label ? (
-            <>
-              <span className="text-[var(--subtle)]">·</span>
-              <span className={budgetWarning.isOverTwoLines ? 'font-semibold text-amber-400' : 'text-[var(--subtle)]'}>
-                {budgetWarning.label}
-              </span>
-            </>
-          ) : null}
         </div>
         {canEdit ? (
           <>
-            <span className="hidden text-xs text-[var(--subtle)] sm:inline">Enter → publish to cursor · Shift+Enter → new line</span>
-            <span className="text-xs text-[var(--subtle)] sm:hidden">Enter → publish · Shift+Enter → new line</span>
+            <span className="hidden text-xs text-[var(--subtle)] sm:inline">Enter → เผยแพร่ถึงเคอร์เซอร์ · Shift+Enter → ขึ้นบรรทัดใหม่</span>
+            <span className="text-xs text-[var(--subtle)] sm:hidden">Enter → เผยแพร่ · Shift+Enter → ขึ้นบรรทัดใหม่</span>
           </>
-        ) : (
-          <span className="text-xs text-[var(--subtle)]">Waiting for captions…</span>
-        )}
+        ) : null}
       </footer>
 
       {showPhraseModal ? (
@@ -373,7 +397,7 @@ export function CaptionDeskReviewEditor({
         />
       ) : null}
 
-      <ToastViewport notices={notice ? [{ ...notice, onDismiss: dismissNotice }] : []} />
+      <ToastViewport locale="th" notices={notice ? [{ ...notice, onDismiss: dismissNotice }] : []} />
     </section>
   );
 }

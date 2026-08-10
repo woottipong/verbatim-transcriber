@@ -290,7 +290,7 @@ test('shows one calm warning after three consecutive AI failures', async t => {
     }
 
     assert.equal(latestState?.notice?.tone, 'warning');
-    assert.equal(latestState?.notice?.message, 'AI Auto พักชั่วคราว ข้อความเดิมยังอยู่ครบ');
+    assert.equal(latestState?.notice?.message, 'AI ตรวจแก้คำหยุดทำงานชั่วคราว ข้อความเดิมยังอยู่ครบ');
   } finally {
     await act(async () => renderer?.unmount());
     globalThis.fetch = originalFetch;
