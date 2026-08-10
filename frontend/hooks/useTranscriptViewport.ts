@@ -28,7 +28,7 @@ export function useTranscriptViewport({
     }, [descendantScrollers]);
 
     useEffect(() => {
-        if (!isFollowingLatest) return;
+        if (!isFollowingLatest || hasActiveTextSelection()) return;
         const frame = window.requestAnimationFrame(scrollToLatest);
         return () => window.cancelAnimationFrame(frame);
     }, [committed, interim, isFollowingLatest, scrollToLatest]);
@@ -48,4 +48,9 @@ export function useTranscriptViewport({
         handleScroll,
         jumpToLatest,
     };
+}
+
+function hasActiveTextSelection(): boolean {
+    const selection = window.getSelection();
+    return Boolean(selection && !selection.isCollapsed && selection.toString().trim());
 }

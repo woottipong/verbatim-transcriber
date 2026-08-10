@@ -9,6 +9,39 @@ export interface ProviderTranscriptPresentation {
     exportText: string;
 }
 
+export interface CurrentSubtitlePresentation {
+    transcripts: TranscriptSegment[];
+    interims: InterimTranscript[];
+}
+
+const SUBTITLE_CONTINUITY_WINDOW_MS = 5_000;
+
+export function snapshotCurrentSubtitle(
+    presentation: CurrentSubtitlePresentation,
+): CurrentSubtitlePresentation {
+    return {
+        transcripts: presentation.transcripts.map(segment => ({
+            ...segment,
+            ...(segment.translation ? { translation: { ...segment.translation } } : {}),
+        })),
+        interims: presentation.interims.map(interim => ({
+            ...interim,
+            ...(interim.translation ? { translation: { ...interim.translation } } : {}),
+        })),
+    };
+}
+
+export function buildFinalSubtitleAnnouncement(
+    segment: TranscriptSegment | undefined,
+    showTranslation: boolean,
+): string {
+    if (!segment?.isFinal) return '';
+    const translation = showTranslation && segment.translation?.isFinal
+        ? segment.translation.text
+        : '';
+    return [segment.text, translation].filter(Boolean).join('. ');
+}
+
 const PROVIDER_ORDER = ['google', 'gemini', 'azure', 'gpt-realtime-whisper'];
 
 export function buildProviderTranscriptPresentations(
@@ -49,15 +82,98 @@ export function selectTranscriptPresentation(
     interimTranscripts: ReadonlyMap<string, InterimTranscript>,
     provider: string,
 ): Pick<ProviderTranscriptPresentation, 'transcripts' | 'interims'> {
-    const matching = provider === 'all'
-        ? transcripts
-        : transcripts.filter(segment => segment.provider === provider);
-    const interims = Array.from(interimTranscripts.values());
+    const matching = provider
+        ? transcripts.filter(segment => segment.provider === provider)
+        : [];
     return {
         transcripts: groupFinalTranscriptRows(matching),
-        interims: provider === 'all'
-            ? interims
-            : interims.filter(interim => interim.provider === provider),
+        interims: Array.from(interimTranscripts.values()).filter(interim => interim.provider === provider),
+    };
+}
+
+export function selectCurrentSubtitle(
+    transcripts: readonly TranscriptSegment[],
+    interims: readonly InterimTranscript[],
+): CurrentSubtitlePresentation {
+    const latestInterim = interims.at(-1);
+    const latestTranscript = transcripts.at(-1);
+
+    if (latestInterim) {
+        if (latestTranscript && isContinuousSubtitleUpdate(latestTranscript, latestInterim)) {
+            return {
+                transcripts: [],
+                interims: [{
+                    ...latestInterim,
+                    text: joinSubtitleCueText(latestTranscript.text, latestInterim.text),
+                    translation: joinSubtitleTranslations(latestTranscript.translation, latestInterim.translation),
+                }],
+            };
+        }
+        return { transcripts: [], interims: [latestInterim] };
+    }
+
+    const previousTranscript = transcripts.at(-2);
+    if (
+        latestTranscript && previousTranscript &&
+        isContinuousSubtitleUpdate(previousTranscript, latestTranscript)
+    ) {
+        return {
+            transcripts: [{
+                ...latestTranscript,
+                text: latestTranscript.provider === 'caption-desk'
+                    ? previousTranscript.text + latestTranscript.text
+                    : joinSubtitleCueText(previousTranscript.text, latestTranscript.text),
+                translation: joinSubtitleTranslations(previousTranscript.translation, latestTranscript.translation),
+            }],
+            interims: [],
+        };
+    }
+
+    return {
+        transcripts: latestTranscript ? [latestTranscript] : [],
+        interims: [],
+    };
+}
+
+function isContinuousSubtitleUpdate(
+    previous: Pick<TranscriptSegment, 'provider' | 'timestamp'>,
+    current: Pick<TranscriptSegment, 'provider' | 'timestamp'> | InterimTranscript,
+): boolean {
+    if (previous.provider !== current.provider || current.timestamp === undefined) return false;
+    const gapMs = current.timestamp - previous.timestamp;
+    return gapMs >= 0 && gapMs <= SUBTITLE_CONTINUITY_WINDOW_MS;
+}
+
+function joinSubtitleCueText(previousText: string, currentText: string): string {
+    const previous = previousText.trim();
+    const current = currentText.trim();
+    if (!previous) return current;
+    if (!current || previous === current) return previous;
+    if (current.startsWith(previous)) return current;
+
+    const THAI_SCRIPT = /[\u0E00-\u0E7F]/u;
+    if (THAI_SCRIPT.test(previous.slice(-1)) || THAI_SCRIPT.test(current.charAt(0))) {
+        return `${previous}${current}`;
+    }
+
+    // Netflix-style continuity: preserve the previous cue's text to fill
+    // out the block, adding a space before the new sentence/phrase.
+    return `${previous} ${current}`;
+}
+
+function joinSubtitleTranslations(
+    previous?: TranscriptSegment['translation'],
+    current?: TranscriptSegment['translation'],
+): TranscriptSegment['translation'] {
+    if (!previous && !current) return undefined;
+    if (previous && !current) return previous;
+    if (!previous && current) return current;
+
+    if (previous.languageCode !== current.languageCode) return undefined;
+    return {
+        ...current,
+        text: joinSubtitleCueText(previous.text, current.text),
+        isFinal: previous.isFinal && current.isFinal,
     };
 }
 

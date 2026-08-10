@@ -102,7 +102,7 @@ export function useLiveKit(options: UseLiveKitOptions): UseLiveKitReturn {
 
     // Fetch token from backend
     const fetchToken = useCallback(async (): Promise<string> => {
-        const identity = `user-${Date.now()}`;
+        const identity = `audio-source-${roomName}-${Date.now()}`;
 
         const response = await fetch(tokenEndpoint, {
             method: 'POST',

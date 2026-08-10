@@ -202,6 +202,92 @@ func TestSupervisorRemovesAgentThatStoppedAfterConnecting(t *testing.T) {
 	}
 }
 
+// Replacing an agent that stopped on its own must release it, not merely drop
+// it from tracking: an untracked agent still holding a live context and room
+// connection would sit in the room alongside its replacement.
+func TestSupervisorReleasesReplacedAgent(t *testing.T) {
+	stopped := newCompletedFakeAgent()
+	replacement := newCompletedFakeAgent()
+	agents := []Agent{stopped, replacement}
+	index := 0
+	supervisor := New(func(string) Agent {
+		agent := agents[index]
+		index++
+		return agent
+	})
+
+	if err := supervisor.Start(context.Background(), "room-a", "google"); err != nil {
+		t.Fatal(err)
+	}
+	waitForSignal(t, stopped.started)
+	stopped.Stop()
+
+	if err := supervisor.Start(context.Background(), "room-a", "google"); err != nil {
+		t.Fatalf("replacement Start() error = %v", err)
+	}
+	waitForSignal(t, replacement.started)
+
+	if got := stopped.stopCount(); got < 2 {
+		t.Fatalf("replaced agent Stop() calls = %d, want the supervisor to stop it too", got)
+	}
+	if err := stopped.contextErr(); err == nil {
+		t.Fatal("replaced agent context was never cancelled")
+	}
+	if err := replacement.contextErr(); err != nil {
+		t.Fatalf("replacement context = %v, want live", err)
+	}
+}
+
+// Status reaps agents that stopped on their own; reaping must release them for
+// the same reason replacing does.
+func TestSupervisorReleasesAgentReapedByStatus(t *testing.T) {
+	agent := newCompletedFakeAgent()
+	supervisor := New(func(string) Agent { return agent })
+
+	if err := supervisor.Start(context.Background(), "room-a", "google"); err != nil {
+		t.Fatal(err)
+	}
+	waitForSignal(t, agent.started)
+	agent.Stop()
+
+	if got := supervisor.Status(); len(got) != 0 {
+		t.Fatalf("Status() = %#v, want stopped agent removed", got)
+	}
+	if got := agent.stopCount(); got < 2 {
+		t.Fatalf("reaped agent Stop() calls = %d, want the supervisor to stop it too", got)
+	}
+	if err := agent.contextErr(); err == nil {
+		t.Fatal("reaped agent context was never cancelled")
+	}
+}
+
+// Room names may contain the same separator once used to join room and
+// provider into a key, so distinct pairs must never share a map entry.
+func TestSupervisorKeysDoNotCollideAcrossRoomAndProvider(t *testing.T) {
+	first := newCompletedFakeAgent()
+	second := newCompletedFakeAgent()
+	agents := []Agent{first, second}
+	index := 0
+	supervisor := New(func(string) Agent {
+		agent := agents[index]
+		index++
+		return agent
+	})
+
+	if err := supervisor.Start(context.Background(), "room-a", "google"); err != nil {
+		t.Fatal(err)
+	}
+	waitForSignal(t, first.started)
+	if err := supervisor.Start(context.Background(), "room", "a-google"); err != nil {
+		t.Fatalf("second pair rejected as a duplicate: %v", err)
+	}
+	waitForSignal(t, second.started)
+
+	if got := supervisor.Status(); len(got) != 2 {
+		t.Fatalf("Status() = %#v, want both pairs tracked separately", got)
+	}
+}
+
 type fakeAgent struct {
 	started     chan struct{}
 	finished    chan struct{}
@@ -281,6 +367,8 @@ func waitForSignal(t *testing.T, signal <-chan struct{}) {
 type completedFakeAgent struct {
 	mu      sync.Mutex
 	running bool
+	stops   int
+	ctx     context.Context
 	started chan struct{}
 }
 
@@ -288,9 +376,10 @@ func newCompletedFakeAgent() *completedFakeAgent {
 	return &completedFakeAgent{started: make(chan struct{})}
 }
 
-func (a *completedFakeAgent) Start(context.Context, string) error {
+func (a *completedFakeAgent) Start(ctx context.Context, _ string) error {
 	a.mu.Lock()
 	a.running = true
+	a.ctx = ctx
 	a.mu.Unlock()
 	close(a.started)
 	return nil
@@ -299,7 +388,26 @@ func (a *completedFakeAgent) Start(context.Context, string) error {
 func (a *completedFakeAgent) Stop() {
 	a.mu.Lock()
 	a.running = false
+	a.stops++
 	a.mu.Unlock()
+}
+
+func (a *completedFakeAgent) stopCount() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.stops
+}
+
+// contextErr reports whether the supervisor cancelled the context it handed to
+// this agent, which is the observable signal that the entry was released
+// rather than dropped from tracking and left running.
+func (a *completedFakeAgent) contextErr() error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.ctx == nil {
+		return nil
+	}
+	return a.ctx.Err()
 }
 
 func (a *completedFakeAgent) IsRunning() bool {

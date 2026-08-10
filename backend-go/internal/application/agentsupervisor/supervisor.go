@@ -28,14 +28,23 @@ type Factory func(provider string) Agent
 
 // Status describes a supervised room/provider agent.
 type Status struct {
-	Key      string
-	Room     string
-	Provider string
-	Running  bool
+	Key       string
+	Room      string
+	Provider  string
+	Running   bool
+	Connected bool
+}
+
+// agentKey identifies one supervised room/provider pair. It is a struct rather
+// than a joined string because room names may themselves contain the separator,
+// which would let two distinct pairs collide onto a single map entry.
+type agentKey struct {
+	room     string
+	provider string
 }
 
 type entry struct {
-	key       string
+	key       agentKey
 	room      string
 	provider  string
 	agent     Agent
@@ -44,11 +53,16 @@ type entry struct {
 	connected bool
 }
 
+// displayKey is the identifier reported to API clients.
+func (e *entry) displayKey() string {
+	return fmt.Sprintf("%s-%s", e.room, e.provider)
+}
+
 // Supervisor ensures a room has at most one agent for each provider.
 type Supervisor struct {
 	mu      sync.Mutex
 	factory Factory
-	agents  map[string]*entry
+	agents  map[agentKey]*entry
 	closed  bool
 }
 
@@ -58,30 +72,36 @@ func New(factory Factory) *Supervisor {
 	}
 	return &Supervisor{
 		factory: factory,
-		agents:  make(map[string]*entry),
+		agents:  make(map[agentKey]*entry),
 	}
 }
 
 // Start reserves the room/provider pair and starts its agent asynchronously.
 func (s *Supervisor) Start(parent context.Context, room, provider string) error {
-	key := agentKey(room, provider)
+	key := newAgentKey(room, provider)
 
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
 		return ErrSupervisorClosed
 	}
+	// An agent that stopped on its own is replaced rather than rejected. It is
+	// released below instead of merely dropped from the map, so its context and
+	// any room connection cannot outlive the entry that tracked it.
+	var replaced *entry
 	if existing, exists := s.agents[key]; exists {
 		if !existing.connected || existing.agent.IsRunning() {
 			s.mu.Unlock()
 			return ErrAgentAlreadyExists
 		}
+		replaced = existing
 		delete(s.agents, key)
 	}
 
 	agent := s.factory(provider)
 	if agent == nil {
 		s.mu.Unlock()
+		releaseEntry(replaced)
 		return errors.New("agent factory returned nil")
 	}
 	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
@@ -96,6 +116,10 @@ func (s *Supervisor) Start(parent context.Context, room, provider string) error 
 	s.agents[key] = current
 	s.mu.Unlock()
 
+	// Release before the replacement joins the room so the two can never be
+	// present as separate participants at the same time.
+	releaseEntry(replaced)
+
 	go s.start(ctx, current)
 	return nil
 }
@@ -103,7 +127,7 @@ func (s *Supervisor) Start(parent context.Context, room, provider string) error 
 // Stop removes and stops one room/provider agent, including an agent that is
 // still connecting.
 func (s *Supervisor) Stop(room, provider string) error {
-	key := agentKey(room, provider)
+	key := newAgentKey(room, provider)
 	s.mu.Lock()
 	current, exists := s.agents[key]
 	if !exists {
@@ -132,19 +156,27 @@ func (s *Supervisor) StopRoom(room string) {
 func (s *Supervisor) Status() []Status {
 	s.mu.Lock()
 	status := make([]Status, 0, len(s.agents))
+	var reaped []*entry
 	for key, current := range s.agents {
 		if current.connected && !current.agent.IsRunning() {
 			delete(s.agents, key)
+			reaped = append(reaped, current)
 			continue
 		}
 		status = append(status, Status{
-			Key:      current.key,
-			Room:     current.room,
-			Provider: current.provider,
-			Running:  true,
+			Key:       current.displayKey(),
+			Room:      current.room,
+			Provider:  current.provider,
+			Running:   true,
+			Connected: current.connected && current.agent.IsRunning(),
 		})
 	}
 	s.mu.Unlock()
+
+	// Reporting status must not leak the agents it reaps along the way.
+	for _, current := range reaped {
+		releaseEntry(current)
+	}
 
 	sort.Slice(status, func(i, j int) bool {
 		return status[i].Key < status[j].Key
@@ -239,6 +271,15 @@ func stopEntry(current *entry) {
 	current.agent.Stop()
 }
 
-func agentKey(room, provider string) string {
-	return fmt.Sprintf("%s-%s", room, provider)
+// releaseEntry stops an entry that was removed from the map outside Stop, so
+// dropping an agent from tracking always cancels its context too.
+func releaseEntry(current *entry) {
+	if current == nil {
+		return
+	}
+	stopEntry(current)
+}
+
+func newAgentKey(room, provider string) agentKey {
+	return agentKey{room: room, provider: provider}
 }

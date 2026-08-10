@@ -19,15 +19,16 @@ import (
 )
 
 const (
-	openAITranscriptionProviderName = "gpt-realtime-whisper"
-	openAITranscriptionModel        = "gpt-realtime-whisper"
-	openAITranscriptionEndpoint     = "wss://api.openai.com/v1/realtime?intent=transcription"
-	openAITranscriptionSampleRate   = 24000
-	openAITranscriptionReadyTimeout = 10 * time.Second
-	openAITranscriptionDrain        = time.Second
-	openAITranscriptionMaxTextBytes = 32 * 1024
-	openAITranscriptionReplay       = time.Second
-	openAITranscriptionMaxReconnect = 3
+	openAITranscriptionProviderName   = "gpt-realtime-whisper"
+	openAITranscriptionModel          = "gpt-realtime-whisper"
+	openAITranscriptionEndpoint       = "wss://api.openai.com/v1/realtime?intent=transcription"
+	openAITranscriptionSampleRate     = 24000
+	openAITranscriptionReadyTimeout   = 10 * time.Second
+	openAITranscriptionDrain          = time.Second
+	openAITranscriptionMaxTextBytes   = 32 * 1024
+	openAITranscriptionReplay         = time.Second
+	openAITranscriptionMaxReconnect   = 3
+	openAITranscriptionMaxActiveItems = 256
 )
 
 const (
@@ -91,6 +92,7 @@ type openAITranscriptionProvider struct {
 	transcriptMu   sync.Mutex
 	resultsMu      sync.Mutex
 	closeOnce      sync.Once
+	doneOnce       sync.Once
 	lastErr        error
 	started        bool
 	starting       bool
@@ -100,13 +102,15 @@ type openAITranscriptionProvider struct {
 	stopped        bool
 	resultsClosed  bool
 
-	transcriptItems map[string]string
-	segmenter       openAITranscriptionSegmenter
-	audioBuf        *ringBuffer
-	handoffBuf      *reconnectAudioBuffer
-	reconnectDelay  func(int) time.Duration
-	loggedAudio     bool
-	loggedEventType map[string]struct{}
+	transcriptItems     map[string]string
+	transcriptItemOrder []string
+	done                chan struct{}
+	segmenter           openAITranscriptionSegmenter
+	audioBuf            *ringBuffer
+	handoffBuf          *reconnectAudioBuffer
+	reconnectDelay      func(int) time.Duration
+	loggedAudio         bool
+	loggedEventType     map[string]struct{}
 }
 
 // OpenAITranscriptionProvider is the LiveKit ASR provider for OpenAI's
@@ -138,6 +142,7 @@ func NewOpenAITranscriptionProvider(ctx context.Context, cfg OpenAITranscription
 		cfg:             normalized,
 		dial:            defaultOpenAITranscriptionDial,
 		results:         make(chan domain.TranscriptResult, 100),
+		done:            make(chan struct{}),
 		segmenter:       newOpenAITranscriptionSegmenter(normalized.SampleRate),
 		transcriptItems: make(map[string]string),
 		audioBuf:        newRingBuffer(normalized.SampleRate * 2 * int(openAITranscriptionReplay/time.Second)),
@@ -555,6 +560,7 @@ func (o *openAITranscriptionProvider) reconnect(ctx context.Context, failedConn 
 
 		o.transcriptMu.Lock()
 		o.segmenter.reset()
+		o.resetTranscriptItemsLocked()
 		o.transcriptMu.Unlock()
 		count, err := o.activateReconnectedSession(ctx)
 		if err != nil {
@@ -654,6 +660,7 @@ func (o *openAITranscriptionProvider) appendTranscriptDelta(itemID string, conte
 		return true
 	}
 	o.transcriptMu.Lock()
+	o.rememberTranscriptItemLocked(key)
 	text := applyOpenAITranscriptionDelta(o.transcriptItems[key], delta)
 	o.transcriptItems[key] = text
 	result := domain.TranscriptResult{
@@ -673,7 +680,7 @@ func (o *openAITranscriptionProvider) completeTranscript(itemID string, contentI
 	transcript = truncateOpenAITranscriptionUTF8(transcript, openAITranscriptionMaxTextBytes)
 	if strings.TrimSpace(transcript) == "" {
 		o.transcriptMu.Lock()
-		delete(o.transcriptItems, key)
+		o.forgetTranscriptItemLocked(key)
 		o.transcriptMu.Unlock()
 		return true
 	}
@@ -682,7 +689,7 @@ func (o *openAITranscriptionProvider) completeTranscript(itemID string, contentI
 		LanguageCode: o.cfg.LanguageCode, TurnID: turnID,
 	}
 	o.transcriptMu.Lock()
-	delete(o.transcriptItems, key)
+	o.forgetTranscriptItemLocked(key)
 	o.transcriptMu.Unlock()
 	return o.publishResults([]domain.TranscriptResult{result}, nil)
 }
@@ -694,6 +701,33 @@ func openAITranscriptionItemIdentity(itemID string, contentIndex int) (key, turn
 	}
 	key = fmt.Sprintf("%s:%d", itemID, contentIndex)
 	return key, fmt.Sprintf("%s:%s", openAITranscriptionProviderName, key), true
+}
+
+func (o *openAITranscriptionProvider) rememberTranscriptItemLocked(key string) {
+	if _, exists := o.transcriptItems[key]; exists {
+		return
+	}
+	if len(o.transcriptItemOrder) >= openAITranscriptionMaxActiveItems {
+		oldest := o.transcriptItemOrder[0]
+		delete(o.transcriptItems, oldest)
+		o.transcriptItemOrder = append([]string(nil), o.transcriptItemOrder[1:]...)
+	}
+	o.transcriptItemOrder = append(o.transcriptItemOrder, key)
+}
+
+func (o *openAITranscriptionProvider) forgetTranscriptItemLocked(key string) {
+	delete(o.transcriptItems, key)
+	for index, candidate := range o.transcriptItemOrder {
+		if candidate == key {
+			o.transcriptItemOrder = append(o.transcriptItemOrder[:index], o.transcriptItemOrder[index+1:]...)
+			return
+		}
+	}
+}
+
+func (o *openAITranscriptionProvider) resetTranscriptItemsLocked() {
+	clear(o.transcriptItems)
+	o.transcriptItemOrder = nil
 }
 
 func (o *openAITranscriptionProvider) Results() <-chan domain.TranscriptResult {
@@ -712,6 +746,11 @@ func (o *openAITranscriptionProvider) Stop() error {
 	started := o.started
 	receiveStarted := o.receiveStart
 	reconnecting := o.reconnecting
+	done := o.done
+	if done == nil {
+		done = make(chan struct{})
+		o.done = done
+	}
 	o.mu.Unlock()
 
 	var closeErr error
@@ -727,6 +766,7 @@ func (o *openAITranscriptionProvider) Stop() error {
 		}
 	}
 
+	o.doneOnce.Do(func() { close(done) })
 	if conn != nil {
 		_ = conn.Close()
 	}
@@ -761,25 +801,38 @@ func (o *openAITranscriptionProvider) closeResults() {
 }
 
 func (o *openAITranscriptionProvider) publishResults(results []domain.TranscriptResult, ctx context.Context) bool {
+	stopDone := o.stopSignal()
 	for _, result := range results {
 		o.resultsMu.Lock()
 		if o.resultsClosed || o.results == nil {
 			o.resultsMu.Unlock()
 			return false
 		}
-		var done <-chan struct{}
+		var contextDone <-chan struct{}
 		if ctx != nil {
-			done = ctx.Done()
+			contextDone = ctx.Done()
 		}
 		select {
 		case o.results <- result:
 			o.resultsMu.Unlock()
-		case <-done:
+		case <-contextDone:
+			o.resultsMu.Unlock()
+			return false
+		case <-stopDone:
 			o.resultsMu.Unlock()
 			return false
 		}
 	}
 	return true
+}
+
+func (o *openAITranscriptionProvider) stopSignal() <-chan struct{} {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if o.done == nil {
+		o.done = make(chan struct{})
+	}
+	return o.done
 }
 
 func parseOpenAITranscriptionEvent(message []byte) (openAITranscriptionEvent, error) {

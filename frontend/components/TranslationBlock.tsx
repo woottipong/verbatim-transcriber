@@ -7,9 +7,10 @@ import {
 
 interface TranslationBlockProps {
   translation?: TranscriptTranslation;
+  showLanguageLabel?: boolean;
 }
 
-function TranslationBlock({ translation }: TranslationBlockProps) {
+function TranslationBlock({ translation, showLanguageLabel = true }: TranslationBlockProps) {
   if (!translation) return null;
 
   const languageLabel = formatLanguageLabel(translation.languageCode);
@@ -17,9 +18,11 @@ function TranslationBlock({ translation }: TranslationBlockProps) {
 
   return (
     <div className="translation-block">
-      <span className="translation-block__label" title={languageLabel} aria-hidden="true">
-        <span className="language-label__text">{languageLabel}</span>
-      </span>
+      {showLanguageLabel && (
+        <span className="translation-block__label" title={languageLabel} aria-hidden="true">
+          <span className="language-label__text">{languageLabel}</span>
+        </span>
+      )}
       <p
         className="translation-block__text"
         lang={languageTag}

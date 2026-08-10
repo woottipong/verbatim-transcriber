@@ -224,6 +224,32 @@ const LiveKitPanel: React.FC<LiveKitPanelProps> = ({
         </div>
       )}
 
+      {connectionState === ConnectionState.DISCONNECTED && transcripts.length > 0 && (
+        <div className="border-b border-slate-700/50 bg-slate-800/60 px-4 py-2.5 sm:px-5">
+          <p className="text-xs text-slate-300 flex items-center justify-between gap-2">
+            <span>
+              Disconnected — showing transcript from previous session.
+            </span>
+            <span className="flex items-center gap-3 shrink-0">
+              <button
+                type="button"
+                onClick={onConnect}
+                className="font-medium text-teal-400 underline hover:text-teal-300 focus:outline-none"
+              >
+                Reconnect
+              </button>
+              <button
+                type="button"
+                onClick={onClear}
+                className="text-slate-400 underline hover:text-slate-200 focus:outline-none"
+              >
+                Clear
+              </button>
+            </span>
+          </p>
+        </div>
+      )}
+
       <div className="relative min-h-[400px] flex-1" ref={scrollRef}>
         {!hasContent ? (
           <div className="absolute inset-0 overflow-y-auto px-4 py-2 sm:px-5">

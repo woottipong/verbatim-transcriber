@@ -4,6 +4,7 @@
 
 import { getControlAuthHeaders, toHttpUrl } from './runtime.ts';
 import type { AgentProvider } from './providers.ts';
+import type { CaptionPolicy } from './appRoutes.ts';
 
 export interface ParticipantInfo {
     identity: string;
@@ -37,6 +38,14 @@ export interface TranscriptTokenResponse {
     token: string;
     expiresAt: string;
     websocketUrl: string;
+    provider?: AgentProvider;
+}
+
+export interface CaptionDeskTokenResponse {
+    token: string;
+    wsUrl: string;
+    identity: string;
+    room: string;
     provider: AgentProvider;
 }
 
@@ -46,32 +55,37 @@ export interface ProvidersResponse {
     azure: boolean;
     'gpt-realtime-whisper': boolean;
     livekit: boolean;
+    captionProofread: boolean;
 }
 
 /**
  * Check which ASR providers are available on the backend
  */
 export async function checkAvailableProviders(backendUrl: string): Promise<ProvidersResponse | null> {
-    try {
-        // Convert WebSocket URL to HTTP
-        const httpUrl = toHttpUrl(backendUrl);
-        const response = await fetch(`${httpUrl}/providers`, {
-            method: 'GET',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        });
+    const httpUrl = toHttpUrl(backendUrl).replace(/\/$/, '');
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+        try {
+            const response = await fetch(`${httpUrl}/providers`, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+            });
 
-        if (!response.ok) {
-            console.warn('Failed to check providers:', response.statusText);
-            return null;
+            if (!response.ok) {
+                throw new Error(`Provider status returned HTTP ${response.status}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            if (attempt === 0) {
+                await new Promise(resolve => setTimeout(resolve, 1_000));
+                continue;
+            }
+            console.warn('Could not check available providers:', error);
         }
-
-        return await response.json();
-    } catch (error) {
-        console.warn('Could not check available providers:', error);
-        return null;
     }
+    return null;
 }
 
 /**
@@ -133,6 +147,32 @@ export async function startRoomAgent(
         body: JSON.stringify({ roomName, provider }),
     });
     await parseApiResponse(response, 'Failed to start agent');
+}
+
+export async function createCaptionDeskToken(
+    backendUrl: string,
+    roomName: string,
+    provider: AgentProvider,
+    sessionId: string,
+    policy: CaptionPolicy,
+): Promise<CaptionDeskTokenResponse> {
+    const params = new URLSearchParams({ sessionId, policy });
+    const response = await fetch(
+        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/caption-token/${encodeURIComponent(provider)}?${params.toString()}`,
+        { method: 'POST', headers: getControlAuthHeaders() },
+    );
+    return parseApiResponse<CaptionDeskTokenResponse>(response, 'Failed to open Caption Desk');
+}
+
+export async function createApprovedCaptionToken(
+    backendUrl: string,
+    roomName: string,
+): Promise<TranscriptTokenResponse> {
+    const response = await fetch(
+        `${toHttpUrl(backendUrl)}/livekit/rooms/${encodeURIComponent(roomName)}/caption-token/ws`,
+        { method: 'POST', headers: getControlAuthHeaders() },
+    );
+    return parseApiResponse<TranscriptTokenResponse>(response, 'Failed to generate approved caption link');
 }
 
 export async function stopRoomAgent(

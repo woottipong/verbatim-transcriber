@@ -1,0 +1,31 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: captionlive-backend:prod
+    container_name: captionlive-backend-prod
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      - ./credential:/app/credential:ro
+    networks:
+      - npm_network
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  npm_network:
+    external: true

@@ -29,4 +29,7 @@ dist-ssr
 *.sw?
 
 .superpowers
+.impeccable
+.playwright-cli
 docs/superpowers
+docs/codemap

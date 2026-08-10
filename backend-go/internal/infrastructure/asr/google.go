@@ -108,7 +108,6 @@ type GoogleProvider struct {
 
 type GoogleConfig struct {
 	CredentialsFile       string
-	APIKey                string
 	ProjectID             string
 	Location              string
 	Model                 string
@@ -134,8 +133,6 @@ func NewGoogleProvider(ctx context.Context, cfg GoogleConfig) (*GoogleProvider, 
 
 	if cfg.CredentialsFile != "" {
 		clientOptions = append(clientOptions, option.WithAuthCredentialsFile(option.ServiceAccount, cfg.CredentialsFile))
-	} else if cfg.APIKey != "" {
-		clientOptions = append(clientOptions, option.WithAPIKey(cfg.APIKey))
 	}
 	client, err = speech.NewClient(ctx, clientOptions...)
 

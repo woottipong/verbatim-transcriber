@@ -84,32 +84,31 @@ export default function StreamPage({ config, initialRoomName, onConfigSave }: St
           <div className="stream-navbar__brand flex min-w-0 items-center gap-3">
             <img src="/captionlive-mark.svg" alt="" className="h-10 w-10 shrink-0 rounded-lg" aria-hidden="true" />
             <div className="min-w-0">
-              <h1 className="flex min-w-0 items-center gap-2 truncate text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                <span className="shrink-0 text-teal-200">CaptionLive</span>
-                <span className="h-4 w-px shrink-0 bg-slate-700" aria-hidden="true" />
+              <h1 className="flex min-w-0 items-center gap-2 truncate text-lg font-semibold tracking-tight sm:text-xl">
+                <span className="shrink-0 text-[var(--accent)]">CaptionLive</span>
+                <span className="h-4 w-px shrink-0 bg-[var(--line)]" aria-hidden="true" />
                 <span className="truncate">Audio Source</span>
               </h1>
-              <div className="mt-0.5 flex min-w-0 items-center gap-2 text-xs text-slate-400">
-                <span className="truncate" aria-label={livekitRoomName ? `Room ${livekitRoomName}` : 'Room ID is missing'}>
-                  Room <strong className="font-semibold text-slate-200">{livekitRoomName || 'Required'}</strong>
-                </span>
+              <p className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-sm">
+                <span className="text-[var(--muted)]">Room</span>
+                <strong className="truncate font-semibold text-[var(--ink)]">{livekitRoomName || 'Required'}</strong>
                 {livekitRoomName && livekitHook.connectionState === ConnectionState.DISCONNECTED && (
                   <>
-                    <span className="text-slate-700" aria-hidden="true">·</span>
+                    <span className="text-[var(--subtle)]" aria-hidden="true">·</span>
                     <button
                       onClick={() => {
                         setLivekitRoomName('');
                         const nextUrl = buildStreamUrl(window.location.origin + window.location.pathname, '');
                         window.location.hash = new URL(nextUrl).hash;
                       }}
-                      className="stream-navbar__inline-action inline-flex items-center px-1 text-xs font-medium text-teal-300 underline hover:text-teal-200"
+                      className="stream-navbar__inline-action inline-flex items-center px-1 text-xs font-medium text-[var(--accent)] underline hover:opacity-80"
                       aria-label="Change room"
                     >
                       Change
                     </button>
                   </>
                 )}
-              </div>
+              </p>
             </div>
           </div>
 

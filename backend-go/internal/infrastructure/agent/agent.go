@@ -8,15 +8,18 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"thai-transcriber-backend/config"
+	"thai-transcriber-backend/internal/application/captionmoderation"
 	"thai-transcriber-backend/internal/domain"
 	"thai-transcriber-backend/internal/infrastructure/asr"
 
@@ -43,16 +46,17 @@ type TranscriptMessage struct {
 }
 
 type dataChannelTranscript struct {
-	Type         string                `json:"type"`
-	Text         string                `json:"text"`
-	IsFinal      bool                  `json:"isFinal"`
-	Provider     string                `json:"provider"`
-	Timestamp    int64                 `json:"timestamp"`
-	Sequence     uint64                `json:"sequence"`
-	Role         domain.TranscriptRole `json:"role,omitempty"`
-	LanguageCode string                `json:"languageCode,omitempty"`
-	TurnID       string                `json:"turnId,omitempty"`
-	SegmentID    string                `json:"segmentId,omitempty"`
+	Type          string                `json:"type"`
+	Text          string                `json:"text"`
+	IsFinal       bool                  `json:"isFinal"`
+	Provider      string                `json:"provider"`
+	Timestamp     int64                 `json:"timestamp"`
+	Sequence      uint64                `json:"sequence"`
+	Role          domain.TranscriptRole `json:"role,omitempty"`
+	LanguageCode  string                `json:"languageCode,omitempty"`
+	TurnID        string                `json:"turnId,omitempty"`
+	SegmentID     string                `json:"segmentId,omitempty"`
+	PublicationID string                `json:"publicationId,omitempty"`
 }
 
 // TranscriptSink receives the complete normalized transcript used by
@@ -60,6 +64,12 @@ type dataChannelTranscript struct {
 type TranscriptSink interface {
 	Publish(room string, message TranscriptMessage)
 }
+
+type CaptionSink interface {
+	PublishCaption(room, text string)
+}
+
+type dataPublishFunc func(payload []byte, topic string, reliable bool, destinations []string) error
 
 const liveAudioBatchDuration = 40 * time.Millisecond
 const maxLoggedTranscriptRunes = 160
@@ -110,6 +120,17 @@ func resamplePCM16(samples []int16, sourceRate, targetRate int) []byte {
 	return out
 }
 
+func isClosedNetworkErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr *net.OpError
+	if errors.As(err, &netErr) {
+		return true
+	}
+	return strings.Contains(err.Error(), "use of closed network connection")
+}
+
 func transcriptLogValue(value string) string {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -154,34 +175,60 @@ func formatTranscriptLog(message TranscriptMessage) string {
 
 // Agent handles audio transcription in a LiveKit room
 type Agent struct {
-	config             *config.Config
-	room               *lksdk.Room
-	asrProvider        domain.ASRProvider
-	activeTrackID      string
-	pendingTrackID     string
-	trackChanged       chan struct{}
-	transcriptSequence uint64
-	mu                 sync.Mutex
-	isRunning          bool
-	stopRequested      bool
-	cancel             context.CancelFunc
-	preferredProvider  string // "google", "gemini", "azure", "gpt-realtime-whisper", or "" for auto
-	roomName           string // store room name for status
-	transcriptSink     TranscriptSink
+	config                    *config.Config
+	room                      *lksdk.Room
+	asrProvider               domain.ASRProvider
+	activeTrackID             string
+	pendingTrackID            string
+	trackChanged              chan struct{}
+	transcriptSequence        uint64
+	mu                        sync.Mutex
+	isRunning                 bool
+	stopRequested             bool
+	cancel                    context.CancelFunc
+	preferredProvider         string // "google", "gemini", "azure", "gpt-realtime-whisper", or "" for auto
+	roomName                  string // store room name for status
+	transcriptSink            TranscriptSink
+	captionSink               CaptionSink
+	moderator                 *captionmoderation.Moderator
+	captionOperatorID         string
+	captionOperatorSessionID  string
+	captionPolicy             captionmoderation.CaptionPolicy
+	earlyFinalCutter          *captionmoderation.EarlyFinalCutter
+	captionReviewStarted      bool
+	captionReviewEndTimer     *time.Timer
+	captionOperatorGrace      time.Duration
+	captionDeliveryMu         sync.Mutex
+	captionModerationMu       sync.Mutex
+	captionDraftTimer         *time.Timer
+	captionDraftPending       *captionDraftDelivery
+	captionDraftLastSent      time.Time
+	captionDraftInterval      time.Duration
+	moderationDraftID         string
+	earlyFinalTimer           *time.Timer
+	earlyFinalTimerGeneration uint64
+	dataPublisher             dataPublishFunc
 }
 
 // New creates a new LiveKit ASR Agent
 // provider can be "google", "gemini", "azure", "gpt-realtime-whisper", or "" for auto-detect
-func New(cfg *config.Config, provider string, sinks ...TranscriptSink) *Agent {
+func New(
+	cfg *config.Config,
+	provider string,
+	sinks ...TranscriptSink,
+) *Agent {
 	var sink TranscriptSink
+	var captionSink CaptionSink
 	if len(sinks) > 0 {
 		sink = sinks[0]
+		captionSink, _ = sinks[0].(CaptionSink)
 	}
-
 	return &Agent{
 		config:            cfg,
 		preferredProvider: provider,
 		transcriptSink:    sink,
+		captionSink:       captionSink,
+		moderator:         captionmoderation.New(provider, time.Now),
 	}
 }
 
@@ -238,12 +285,27 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 			OnTrackUnsubscribed: func(track *webrtc.TrackRemote, publication *lksdk.RemoteTrackPublication, participant *lksdk.RemoteParticipant) {
 				log.Printf("🔇 [Agent] Unsubscribed from track of %s", participant.Identity())
 			},
+			OnDataPacket: func(packet lksdk.DataPacket, params lksdk.DataReceiveParams) {
+				userPacket, ok := packet.(*lksdk.UserDataPacket)
+				if !ok || userPacket.Topic != CaptionCommandTopic || params.Sender == nil {
+					return
+				}
+				payload := append([]byte(nil), userPacket.Payload...)
+				identity := params.SenderIdentity
+				metadata := params.Sender.Metadata()
+				// LiveKit delivers reliable packets in order. Process Caption
+				// commands synchronously so separate goroutines cannot reorder
+				// consecutive operator releases.
+				a.handleCaptionPacket(payload, identity, metadata)
+			},
 		},
 		OnParticipantConnected: func(participant *lksdk.RemoteParticipant) {
 			log.Printf("👤 [Agent] Participant joined: %s", participant.Identity())
+			a.registerCaptionOperator(participant)
 		},
 		OnParticipantDisconnected: func(participant *lksdk.RemoteParticipant) {
 			log.Printf("👋 [Agent] Participant left: %s", participant.Identity())
+			a.clearCaptionOperator(participant.Identity())
 		},
 		OnDisconnected: func() {
 			log.Println("🔌 [Agent] Disconnected from room")
@@ -257,21 +319,28 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 	}
 
 	// Connect to room
-	// Generate identity with provider name for frontend display
-	identity := fmt.Sprintf("agent-%s", a.preferredProvider)
-	if a.preferredProvider == "" {
+	// Generate identity with provider name and room name for clear logging
+	providerTag := a.preferredProvider
+	if providerTag == "" {
 		// Auto-detect: will be determined later, use generic identity
 		if a.config.HasGoogleKey() {
-			identity = "agent-google"
+			providerTag = "google"
 		} else if a.config.HasAzureKey() {
-			identity = "agent-azure"
+			providerTag = "azure"
 		} else if a.config.HasGeminiKey() {
-			identity = "agent-gemini"
+			providerTag = "gemini"
 		} else if a.config.HasOpenAITranscriptionKey() {
-			identity = "agent-gpt-realtime-whisper"
+			providerTag = "gpt-realtime-whisper"
 		} else {
-			identity = "agent-unknown"
+			providerTag = "unknown"
 		}
+	}
+
+	var identity string
+	if providerTag == "gemini" {
+		identity = fmt.Sprintf("agent-gemini-3.5-live-%s", roomName)
+	} else {
+		identity = fmt.Sprintf("agent-%s-%s", providerTag, roomName)
 	}
 
 	room, err := lksdk.ConnectToRoom(
@@ -303,6 +372,10 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 	a.room = room
 	a.mu.Unlock()
 
+	for _, participant := range room.GetRemoteParticipants() {
+		a.registerCaptionOperator(participant)
+	}
+
 	// Note: Auto-subscribe is enabled by default in LiveKit
 	// Tracks will be subscribed automatically via OnTrackSubscribed callback
 
@@ -310,9 +383,32 @@ func (a *Agent) Start(ctx context.Context, roomName string) error {
 	return nil
 }
 
+func (a *Agent) registerCaptionOperator(participant *lksdk.RemoteParticipant) {
+	if participant == nil {
+		return
+	}
+	credentials, ok := a.captionOperatorCredentials(participant.Metadata(), a.preferredProvider)
+	if !ok {
+		return
+	}
+	log.Printf("✍️ [Caption] Operator connected for provider=%s", a.preferredProvider)
+	a.subscribeCaptionOperatorWithPolicy(
+		participant.Identity(),
+		credentials.sessionID,
+		credentials.policy,
+		captionCommandEnvelope{
+			Type:      captionSubscribeType,
+			RequestID: "participant-connected",
+			Provider:  a.preferredProvider,
+		},
+	)
+}
+
 // Stop disconnects from the room
 func (a *Agent) Stop() {
+	a.discardPendingCaptionDraft()
 	a.mu.Lock()
+	a.stopEarlyFinalTimerLocked()
 	if !a.isRunning {
 		a.stopRequested = true
 		a.mu.Unlock()
@@ -386,7 +482,6 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		if a.config.HasGoogleKey() {
 			provider, err = asr.NewGoogleProvider(ctx, asr.GoogleConfig{
 				CredentialsFile:       a.config.GoogleApplicationCredentials,
-				APIKey:                a.config.GoogleAPIKey,
 				ProjectID:             a.config.GoogleCloudProject,
 				Location:              a.config.GoogleConfig.Location,
 				Model:                 a.config.GoogleConfig.Model,
@@ -398,7 +493,7 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 				log.Printf("⚠️ [Agent] Failed to init Google provider: %v", err)
 			}
 		} else {
-			log.Println("⚠️ [Agent] Google requested but no API key configured")
+			log.Println("⚠️ [Agent] Google requested but no credentials configured")
 		}
 	case "gemini":
 		if a.config.HasGeminiKey() {
@@ -433,7 +528,6 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		if a.config.HasGoogleKey() {
 			provider, err = asr.NewGoogleProvider(ctx, asr.GoogleConfig{
 				CredentialsFile:       a.config.GoogleApplicationCredentials,
-				APIKey:                a.config.GoogleAPIKey,
 				ProjectID:             a.config.GoogleCloudProject,
 				Location:              a.config.GoogleConfig.Location,
 				Model:                 a.config.GoogleConfig.Model,
@@ -551,7 +645,11 @@ func (a *Agent) processAudioTrack(ctx context.Context, track *webrtc.TrackRemote
 		// Read RTP packet
 		pkt, _, err := track.ReadRTP()
 		if err != nil {
-			log.Printf("❌ [Agent] Error reading RTP packet: %v", err)
+			if errors.Is(err, io.EOF) || isClosedNetworkErr(err) {
+				log.Printf("ℹ️ [Agent] Audio track closed (EOF): %s", track.ID())
+			} else {
+				log.Printf("⚠️ [Agent] Error reading RTP packet: %v", err)
+			}
 			break
 		}
 
@@ -685,24 +783,8 @@ func (a *Agent) handleTranscriptionResults(provider domain.ASRProvider, speaker 
 
 	for result := range results {
 		msg := newTranscriptMessage(result, provider.Name(), speaker)
-
-		// Convert to JSON
-		data, err := json.Marshal(newDataChannelTranscript(msg, a.nextTranscriptSequence()))
-		if err != nil {
-			log.Printf("❌ [Agent] Error marshaling transcript: %v", err)
-			continue
-		}
-
 		log.Print(formatTranscriptLog(msg))
-
-		// Publish via Data Channel to all participants
-		if err := a.publishTranscript(data, result.IsFinal); err != nil {
-			log.Printf("❌ [Agent] Error publishing transcript: %v", err)
-		}
-
-		if a.transcriptSink != nil {
-			a.transcriptSink.Publish(a.GetRoom(), msg)
-		}
+		a.handleTranscriptMessage(msg)
 	}
 
 	if providerErr := provider.Err(); providerErr != nil {
@@ -784,6 +866,18 @@ func newDataChannelTranscript(message TranscriptMessage, sequence uint64) dataCh
 }
 
 func (a *Agent) publishTranscript(data []byte, reliable bool) error {
+	return a.publishDataPacket(data, "", reliable, nil)
+}
+
+func (a *Agent) publishDataPacket(
+	data []byte,
+	topic string,
+	reliable bool,
+	destinations []string,
+) error {
+	if a.dataPublisher != nil {
+		return a.dataPublisher(data, topic, reliable, destinations)
+	}
 	a.mu.Lock()
 	room := a.room
 	a.mu.Unlock()
@@ -795,5 +889,7 @@ func (a *Agent) publishTranscript(data []byte, reliable bool) error {
 	return room.LocalParticipant.PublishDataPacket(
 		lksdk.UserData(data),
 		lksdk.WithDataPublishReliable(reliable),
+		lksdk.WithDataPublishTopic(topic),
+		lksdk.WithDataPublishDestination(destinations),
 	)
 }

@@ -30,8 +30,9 @@ export function selectRoomAfterDelete(deletedRoomName: string, rooms: RoomDetail
 export function isTranscriptTokenResponse(value: unknown): value is TranscriptTokenResponse {
     if (!value || typeof value !== 'object') return false;
     const candidate = value as Partial<TranscriptTokenResponse>;
-    return typeof candidate.provider === 'string'
-        && TRANSCRIPT_PROVIDERS.has(candidate.provider as AgentProvider)
+    return (candidate.provider === undefined
+        || (typeof candidate.provider === 'string'
+            && TRANSCRIPT_PROVIDERS.has(candidate.provider as AgentProvider)))
         && typeof candidate.token === 'string'
         && candidate.token.length > 0
         && typeof candidate.expiresAt === 'string'
@@ -59,7 +60,11 @@ export function deriveAdminReadiness(
     activeAgentCount: number,
 ): AdminReadiness {
     const hasAudioSender = participants.some(participant =>
-        !participant.isAgent && participant.identity.startsWith('user-'),
+        !participant.isAgent && (
+            participant.identity.startsWith('audio-source-')
+            || participant.identity.startsWith('source-')
+            || participant.identity.startsWith('user-')
+        ),
     );
 
     if (!hasAudioSender) {

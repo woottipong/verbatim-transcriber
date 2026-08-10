@@ -41,6 +41,23 @@ func TestPolicyRejectsInvalidProviderBeforeRoomLookup(t *testing.T) {
 	}
 }
 
+func TestPolicyAllowsRoomScopedCaptionFeed(t *testing.T) {
+	codec := &fakeCodec{}
+	policy := New(
+		fakeRooms{room: roomoperations.Room{Name: "room-a", SID: "RM_1"}},
+		codec,
+		fakeGenerations(2),
+	)
+
+	grant, err := policy.Issue(context.Background(), Scope{Room: "room-a", Purpose: FeedCaption})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if grant.Scope.Provider != "" || codec.provider != "" || codec.purpose != string(FeedCaption) {
+		t.Fatalf("caption grant was not room scoped: %#v, %#v", grant, codec)
+	}
+}
+
 type fakeRooms struct {
 	room roomoperations.Room
 	err  error
@@ -68,6 +85,7 @@ func (f fakeGenerations) Generation(string) uint64 {
 type fakeCodec struct {
 	readyErr   error
 	provider   string
+	purpose    string
 	roomSID    string
 	generation uint64
 }
@@ -76,8 +94,9 @@ func (f *fakeCodec) Ready() error {
 	return f.readyErr
 }
 
-func (f *fakeCodec) IssueScoped(room, provider, roomSID string, generation uint64) (string, time.Time, error) {
+func (f *fakeCodec) IssueScoped(room, provider, purpose, roomSID string, generation uint64) (string, time.Time, error) {
 	f.provider = provider
+	f.purpose = purpose
 	f.roomSID = roomSID
 	f.generation = generation
 	return "token", time.Now().Add(time.Hour), nil
@@ -96,8 +115,9 @@ func TestPolicyChecksCodecReadinessBeforeRoomLookup(t *testing.T) {
 	}
 }
 
-func (f *fakeCodec) VerifyScoped(_ string, _, provider, roomSID string, generation uint64) error {
+func (f *fakeCodec) VerifyScoped(_ string, _, provider, purpose, roomSID string, generation uint64) error {
 	f.provider = provider
+	f.purpose = purpose
 	f.roomSID = roomSID
 	f.generation = generation
 	return nil

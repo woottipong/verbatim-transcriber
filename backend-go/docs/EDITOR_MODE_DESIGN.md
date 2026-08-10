@@ -1,6 +1,6 @@
 # Editor Mode Design: Transcript Review Before Broadcast
 
-> Status: design proposal, not implemented in the current LiveKit transcription flow. Validate this document against current packet/state helpers before implementation.
+> Status: historical design proposal, not an implementation contract. Caption Desk now uses a separate approved-caption lane; see `LIVEKIT_FLOW.md` for current behavior.
 
 **Status**: Design Phase (Not Implemented)
 **Updated**: February 7, 2026

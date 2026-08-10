@@ -70,6 +70,98 @@ test('ignores a delayed lossy interim after a reliable final', () => {
     assert.equal(snapshot.interimTranscripts.size, 0);
 });
 
+test('keeps approved publications out of the raw transcript', () => {
+    const { session } = createSession();
+    const approved = payload({
+        text: 'ตรวจแล้ว', isFinal: true, provider: 'google', publicationId: 'publication-1',
+    });
+    session.ingest(approved, 'agent-google');
+    session.ingest(approved, 'agent-google');
+    session.ingest(payload({ text: 'สดเดิม', isFinal: true, provider: 'google' }), 'agent-google');
+    assert.deepEqual(session.getSnapshot().transcripts.map(item => item.text), ['สดเดิม']);
+});
+
+test('accepts every approved public caption as display-ready text regardless of isFinal', () => {
+    const { session } = createSession('desk');
+
+    session.ingest(payload({
+        text: 'ข้อความที่ตรวจแล้ว', isFinal: false, provider: 'google',
+        publicationId: 'publication-1', timestamp: 1_000,
+    }), 'agent-google', { publicCaptionMode: true });
+
+    assert.deepEqual(session.getSnapshot().transcripts, [{
+        id: 'desk-1',
+        text: 'ข้อความที่ตรวจแล้ว',
+        isFinal: true,
+        timestamp: 1_000,
+        provider: 'caption-desk',
+        role: 'source',
+        segmentId: 'publication-1',
+    }]);
+});
+
+test('accepts an approved public caption when isFinal is omitted', () => {
+    const { session } = createSession('desk');
+
+    session.ingest(payload({
+        text: 'เผยแพร่แล้ว', provider: 'azure',
+        publicationId: 'publication-2', timestamp: 2_000,
+    }), 'agent-azure', { publicCaptionMode: true });
+
+    assert.deepEqual(session.getSnapshot().transcripts.map(item => item.text), ['เผยแพร่แล้ว']);
+});
+
+test('preserves approved caption whitespace exactly as published', () => {
+    const { session } = createSession('desk');
+    const text = '  บรรทัดแรก\nบรรทัด  ถัดไป  ';
+
+    session.ingest(payload({ text, publicationId: 'p-whitespace' }), 'caption-desk', {
+        publicCaptionMode: true,
+    });
+
+    assert.equal(session.getSnapshot().transcripts[0]?.text, text);
+});
+
+test('deduplicates approved public captions by publicationId', () => {
+    const { session } = createSession('desk');
+    const approved = payload({
+        text: 'แสดงครั้งเดียว', isFinal: false, provider: 'gemini',
+        publicationId: 'publication-1', timestamp: 1_000,
+    });
+
+    session.ingest(approved, 'agent-gemini', { publicCaptionMode: true });
+    session.ingest(approved, 'agent-gemini', { publicCaptionMode: true });
+
+    assert.deepEqual(session.getSnapshot().transcripts.map(item => item.text), ['แสดงครั้งเดียว']);
+});
+
+test('notifies live playback once for every unique approved publication', () => {
+    const { session } = createSession('desk');
+    const accepted: string[] = [];
+    const options = {
+        publicCaptionMode: true,
+        onPublicCaptionAccepted: (message: { publicationId?: string }) => {
+            if (message.publicationId) accepted.push(message.publicationId);
+        },
+    };
+
+    session.ingest(payload({ text: 'หนึ่ง', publicationId: 'p1' }), 'caption-desk', options);
+    session.ingest(payload({ text: 'หนึ่งซ้ำ', publicationId: 'p1' }), 'caption-desk', options);
+    session.ingest(payload({ text: 'สอง', publicationId: 'p2' }), 'caption-desk', options);
+
+    assert.deepEqual(accepted, ['p1', 'p2']);
+});
+
+test('rejects ordinary provider packets from the public caption session', () => {
+    const { session } = createSession('desk');
+
+    session.ingest(payload({
+        text: 'ข้อความดิบ', isFinal: true, provider: 'google', timestamp: 1_000,
+    }), 'agent-google', { publicCaptionMode: true });
+
+    assert.equal(session.getSnapshot().transcripts.length, 0);
+});
+
 test('ignores a delayed Gemini translation draft after its final translation', () => {
     const { session } = createSession();
 
@@ -168,6 +260,19 @@ test('removes only transient state for a disconnected source and can clear the f
     );
 
     session.reset(true);
+    assert.equal(session.getSnapshot().transcripts.length, 0);
+    assert.equal(session.getSnapshot().interimTranscripts.size, 0);
+});
+
+test('clear removes committed and transient viewer state without relying on reset flags', () => {
+    const { session, flushNext } = createSession();
+    session.ingest(payload({ text: 'ข้อความเก่า', isFinal: true, provider: 'google' }), 'agent-google');
+    session.ingest(payload({ text: 'ข้อความสด', isFinal: false, provider: 'azure' }), 'agent-azure');
+    flushNext();
+
+    const clear = (session as TranscriptSession & { clear?: () => void }).clear;
+    clear?.call(session);
+
     assert.equal(session.getSnapshot().transcripts.length, 0);
     assert.equal(session.getSnapshot().interimTranscripts.size, 0);
 });

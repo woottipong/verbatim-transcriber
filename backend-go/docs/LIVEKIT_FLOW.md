@@ -49,6 +49,28 @@ Audio source changes are allowed only while disconnected. Selecting Chrome Tab o
 3. It tracks connected agents and derives provider names from packets/identities.
 4. It can filter transcript rows by provider.
 
+## Approved caption flow
+
+```text
+ASR source Draft/final
+  → active room/provider agent
+  ├── raw transcript continues to normal viewers and feeds
+  └── targeted `caption.operator` packet
+      → Caption Desk shows the active Draft as read-only preview and places only finals in the editor
+      → reliable `caption.publish` command
+      → agent validates ordered source IDs and request idempotency
+      ├── reliable `caption.public` → dedicated LiveKit caption consumers
+      └── plain UTF-8 frame → `/ws/caption/:room`
+```
+
+Only one primary Caption Desk operator owns a room/provider queue. Caption Desk
+is an approval lane rather than an agent delivery mode. The active Draft is a
+read-only preview; only finalized source segments enter the editable queue or a
+`caption.publish` command. Unapproved text is never auto-published to the
+approved-caption channel, and the provider's raw transcript remains available
+normally. Gemini translation continues through the existing raw path and is
+not editable in version 1.
+
 ## HTTP routes
 
 | Method | Path | Purpose |
@@ -60,6 +82,9 @@ Audio source changes are allowed only while disconnected. Selecting Chrome Tab o
 | `GET` | `/livekit/rooms/:room/transcripts/ws?token=...` | Read-only source transcript stream |
 | `POST` | `/livekit/rooms/:room/transcript-token/:provider` | Signed room/provider-bound transcript URL |
 | `GET` | `/ws/transcript/:provider/:room?token=...` | Lean provider source transcript stream |
+| `POST` | `/livekit/rooms/:room/caption-token/:provider?sessionId=...` | Dedicated Caption Desk token scoped to a stable browser session |
+| `POST` | `/livekit/rooms/:room/caption-token/ws` | Signed room-scoped approved-caption URL |
+| `GET` | `/ws/caption/:room?token=...` | Approved source text only |
 | `GET` / `DELETE` | `/livekit/rooms/:name` | Inspect/delete room |
 | `DELETE` | `/livekit/rooms/:room/participants/:identity` | Remove participant |
 | `POST` | `/livekit/agent/start` | Start provider agent |
@@ -73,6 +98,8 @@ The provider-specific socket sends one full provider-derived source snapshot per
 ```
 
 Clients replace the current Draft for interim frames and commit then clear it for final frames. Gemini translation stays on the LiveKit data channel. The provider socket has no ready event or replay; the legacy room-wide socket retains its versioned event contract.
+
+The approved-caption socket is separate and room-scoped. It emits exactly one plain UTF-8 frame per accepted publication from the active Caption Desk, regardless of its selected input provider. It has no JSON envelope, Drafts, ready event, replay, or application commands. Signed grants include a feed purpose so raw and approved URLs cannot cross-authorize.
 
 ## Transcript packet
 
@@ -90,7 +117,7 @@ Clients replace the current Draft for interim frames and commit then clear it fo
 }
 ```
 
-Interim transcript packets use lossy data-channel delivery so newer Draft state is not queued behind stale revisions; final packets use reliable delivery. A monotonic agent `sequence` lets clients discard delayed Draft packets that arrive after a newer final. Google interim revisions and their final share an application `segmentId`. Non-final source values remain replaceable Draft state by provider and segment; Gemini keys Drafts by provider, application `turnId`, and role, and pairs source/translation by provider plus `turnId`. Gemini requests a pseudo-turn boundary after 650 ms of low-energy PCM or 30 seconds of continuous audio and then applies a fixed 500 ms translation grace period. Its Live connection uses standard session resumption, sliding-window context compression, `GoAway`/transport-error reconnect, and a nine-minute rotation when a safe resumption handle is available, replaying up to fifteen seconds of audio received during the handoff. GPT Realtime Whisper uses a transcription-only session, streams 24 kHz PCM, manually commits after the shared 650 ms PCM silence boundary or a 30-second hard duration, publishes source interim deltas and completed finals, and performs bounded reconnects with one second of recent-audio replay.
+Interim transcript packets use lossy data-channel delivery so newer Draft state is not queued behind stale revisions; final packets use reliable delivery. A monotonic agent `sequence` lets clients discard delayed Draft packets that arrive after a newer final. Google interim revisions and their final share an application `segmentId`. Non-final source values remain replaceable Draft state by provider and segment; Gemini keys Drafts by provider, application `turnId`, and role, and pairs source/translation by provider plus `turnId`. Gemini requests a pseudo-turn boundary after 650 ms of low-energy PCM or 30 seconds of continuous audio, publishes the source final at that boundary, and retains the same turn for a fixed 500 ms translation grace period. Its Live connection uses standard session resumption, sliding-window context compression, `GoAway`/transport-error reconnect, and a nine-minute rotation when a safe resumption handle is available, replaying up to fifteen seconds of audio received during the handoff. GPT Realtime Whisper uses a transcription-only session, streams 24 kHz PCM, manually commits after the shared 650 ms PCM silence boundary or a 30-second hard duration, publishes source interim deltas and completed finals, and performs bounded reconnects with one second of recent-audio replay.
 
 The frontend coalesces general Draft updates to 33 ms and Gemini updates to 50 ms while applying the first update and final result immediately. Lines view may show a Gemini translation paired beneath its source. Text view shows source only and marks active Draft text inline; per-provider `.txt` export includes finalized source text only. Adjacent finals from the same provider and language may be grouped for display/export within a 1.6-second window unless the previous chunk ends with strong punctuation.
 

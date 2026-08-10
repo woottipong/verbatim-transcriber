@@ -5,6 +5,7 @@ import {
     type RunningAgent,
     type TranscriptTokenResponse,
     createRoom as createRoomRequest,
+    createApprovedCaptionToken,
     createTranscriptToken,
     deleteRoom as deleteRoomRequest,
     fetchAgentStatus,
@@ -31,6 +32,11 @@ interface TranscriptFeedErrorState {
     message: string;
 }
 
+interface CaptionLinkState {
+    roomName: string;
+    response: TranscriptTokenResponse;
+}
+
 interface UseControlRoomOperationsOptions {
     backendUrl: string;
     onRoomsError: (message: string) => void;
@@ -52,9 +58,13 @@ export function useControlRoomOperations({
     const [generatingTranscriptProviders, setGeneratingTranscriptProviders] = useState<ReadonlySet<AgentProvider>>(new Set());
     const [transcriptLinks, setTranscriptLinks] = useState<Partial<Record<AgentProvider, TranscriptLinkState>>>({});
     const [transcriptFeedErrors, setTranscriptFeedErrors] = useState<Partial<Record<AgentProvider, TranscriptFeedErrorState>>>({});
+    const [captionLink, setCaptionLink] = useState<CaptionLinkState | null>(null);
+    const [isGeneratingCaptionLink, setIsGeneratingCaptionLink] = useState(false);
+    const [captionFeedError, setCaptionFeedError] = useState<TranscriptFeedErrorState | null>(null);
     const roomsRequestRef = useRef(0);
     const agentStatusRequestRef = useRef(0);
     const transcriptLinkRequestRef = useRef<Partial<Record<AgentProvider, number>>>({});
+    const captionLinkRequestRef = useRef(0);
 
     const refreshRooms = useCallback(async () => {
         const requestId = ++roomsRequestRef.current;
@@ -130,7 +140,10 @@ export function useControlRoomOperations({
         }
     }, [backendUrl]);
 
-    const startAgent = useCallback(async (roomName: string, provider: AgentProvider): Promise<void> => {
+    const startAgent = useCallback(async (
+        roomName: string,
+        provider: AgentProvider,
+    ): Promise<void> => {
         setIsStartingAgent(true);
         try {
             await startRoomAgent(backendUrl, roomName, provider);
@@ -169,6 +182,8 @@ export function useControlRoomOperations({
             setRooms(current => current.filter(room => room.name !== roomName));
             setTranscriptLinks(current => removeRoomEntries(current, roomName));
             setTranscriptFeedErrors(current => removeRoomEntries(current, roomName));
+            setCaptionLink(current => current?.roomName === roomName ? null : current);
+            setCaptionFeedError(current => current?.roomName === roomName ? null : current);
         } finally {
             setIsDeletingRoom(false);
         }
@@ -229,6 +244,38 @@ export function useControlRoomOperations({
             : null;
     }, [transcriptLinks]);
 
+    const generateCaptionLink = useCallback(async (roomName: string): Promise<TranscriptTokenResponse> => {
+        const requestId = ++captionLinkRequestRef.current;
+        setIsGeneratingCaptionLink(true);
+        setCaptionFeedError(null);
+        try {
+            const response = await createApprovedCaptionToken(backendUrl, roomName);
+            if (!isTranscriptTokenResponse(response)) {
+                throw new Error('Backend returned an invalid approved caption link');
+            }
+            if (captionLinkRequestRef.current === requestId) {
+                setCaptionLink({ roomName, response });
+            }
+            return response;
+        } catch (error) {
+            const message = describeTranscriptFeedError(
+                error instanceof Error ? error.message : 'Failed to generate approved caption link',
+            );
+            if (captionLinkRequestRef.current === requestId) {
+                setCaptionFeedError({ roomName, message });
+            }
+            throw new Error(message);
+        } finally {
+            if (captionLinkRequestRef.current === requestId) setIsGeneratingCaptionLink(false);
+        }
+    }, [backendUrl]);
+
+    const activeCaptionLink = useCallback((roomName: string) => (
+        captionLink?.roomName === roomName && isTranscriptLinkUsable(captionLink.response)
+            ? captionLink.response
+            : null
+    ), [captionLink]);
+
     return {
         rooms,
         agentStatus,
@@ -241,6 +288,8 @@ export function useControlRoomOperations({
         isDeletingRoom,
         generatingTranscriptProviders,
         transcriptFeedErrors,
+        captionFeedError,
+        isGeneratingCaptionLink,
         refreshRooms,
         refreshAgentStatus,
         createRoom,
@@ -250,6 +299,8 @@ export function useControlRoomOperations({
         deleteRoom,
         generateTranscriptLink,
         activeTranscriptLink,
+        generateCaptionLink,
+        activeCaptionLink,
     };
 }
 

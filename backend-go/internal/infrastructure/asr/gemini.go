@@ -649,7 +649,9 @@ func (g *GeminiProvider) transcriptResultsLocked(message *genai.LiveServerMessag
 			g.sourceFinal = g.sourceFinal || isFinal
 		}
 		if reason := g.segmenter.observeSource(now, tail); reason != geminiBoundaryNone {
-			g.requestBoundaryLocked(now, reason)
+			if g.requestBoundaryLocked(now, reason) {
+				results = append(results, g.finalizePendingSourceLocked()...)
+			}
 		}
 	}
 
@@ -713,10 +715,7 @@ func (g *GeminiProvider) observeAudioForSegmentation(audio []byte, now time.Time
 	if !g.requestBoundaryLocked(now, geminiBoundarySilence) {
 		return nil
 	}
-	if delay, pending := g.segmenter.boundaryDelay(now); pending && delay <= 0 {
-		return g.completePendingBoundaryLocked()
-	}
-	return nil
+	return g.finalizePendingSourceLocked()
 }
 
 func (g *GeminiProvider) currentTurnIDLocked() string {
@@ -731,6 +730,22 @@ func (g *GeminiProvider) requestBoundaryLocked(now time.Time, reason geminiBound
 	g.pendingBoundaryReason = reason
 	g.scheduleBoundaryLocked(geminiTranslationGrace)
 	return true
+}
+
+func (g *GeminiProvider) finalizePendingSourceLocked() []domain.TranscriptResult {
+	if g.pendingBoundaryReason == geminiBoundaryNone || g.sourceFinal {
+		return nil
+	}
+	sourceTail, prefixOK := g.sourceAccumulator.tailAt(g.pendingSourceCutoff)
+	g.logPrefixInvariantLocked("source", prefixOK)
+	if sourceTail == "" {
+		return nil
+	}
+	g.sourceFinal = true
+	return []domain.TranscriptResult{{
+		Text: sourceTail, IsFinal: true, Role: domain.TranscriptRoleSource,
+		LanguageCode: g.sourceLanguage, TurnID: g.currentTurnIDLocked(),
+	}}
 }
 
 func (g *GeminiProvider) completePendingBoundaryLocked() []domain.TranscriptResult {
@@ -781,7 +796,9 @@ func (g *GeminiProvider) completePendingBoundaryLocked() []domain.TranscriptResu
 			LanguageCode: g.sourceLanguage, TurnID: nextTurnID,
 		})
 		if reason := g.segmenter.observeSource(requestedAt, bufferedSource); reason != geminiBoundaryNone {
-			g.requestBoundaryLocked(requestedAt, reason)
+			if g.requestBoundaryLocked(requestedAt, reason) {
+				results = append(results, g.finalizePendingSourceLocked()...)
+			}
 		}
 	}
 	bufferedTranslation, translationPrefixOK := g.translationAccumulator.tail()

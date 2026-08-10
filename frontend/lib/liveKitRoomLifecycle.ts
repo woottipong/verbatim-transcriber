@@ -1,4 +1,4 @@
-import { RoomEvent, type Room, type RoomOptions } from 'livekit-client';
+import { RoomEvent, type Room, type RoomConnectOptions, type RoomOptions } from 'livekit-client';
 
 export type RoomEndReason = 'replaced' | 'manual' | 'remote' | 'failed' | 'disposed';
 
@@ -15,6 +15,7 @@ interface RoomConnectionOptions<TPreparation> {
     prepare: () => Promise<TPreparation>;
     disposePreparation?: (preparation: TPreparation) => void;
     roomOptions: RoomOptions;
+    connectOptions?: RoomConnectOptions;
     createRoom: (options: RoomOptions) => Room;
     registerAdapterEvents: (room: Room) => void;
     afterConnect?: (room: Room, preparation: TPreparation) => Promise<void>;
@@ -60,7 +61,10 @@ export class LiveKitRoomLifecycle {
             const serverUrl = typeof options.serverUrl === 'function'
                 ? options.serverUrl(preparation)
                 : options.serverUrl;
-            await room.connect(serverUrl, token, { autoSubscribe: true });
+            await room.connect(serverUrl, token, {
+                autoSubscribe: true,
+                ...options.connectOptions,
+            });
             if (!this.isAttemptCurrent(attempt) || !this.isCurrent(room)) return null;
 
             await options.afterConnect?.(room, preparation);

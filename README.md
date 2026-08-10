@@ -11,10 +11,11 @@ The system is designed for operators who need explicit room, audio, provider, an
 ## What the system provides
 
 - Microphone and Chrome Tab audio publishing through LiveKit.
-- Independent Google, Gemini, Azure, and GPT Realtime Whisper provider agents.
+- Independent Google, Gemini, Azure, and GPT Realtime Translate provider agents.
 - Replaceable interim Draft text and committed final transcript rows.
 - Read-only live Transcript view with provider filtering and final-only text export.
-- Signed provider-specific WebSocket feeds for external systems.
+- A keyboard-first Caption Desk that publishes approved captions alongside the raw provider transcript.
+- Separate signed WebSocket feeds for raw provider output and approved plain-text captions.
 - Room, participant, provider, and link management from one Control Room.
 
 ## Product surfaces
@@ -24,6 +25,7 @@ The system is designed for operators who need explicit room, audio, provider, an
 | **Control Room** | `#admin` or `/` | Create rooms, share links, run providers, monitor participants, and generate external feeds |
 | **Audio Source** | `#stream?room=<room>` | Select microphone or Chrome Tab audio and publish it to the room |
 | **Transcript** | `#viewer?room=<room>&autoconnect=1` | Subscribe to room audio and follow live transcript output without publishing |
+| **Caption Desk** | `#caption-desk?room=<room>&provider=<provider>` | Review finalized provider text and publish approved captions with Enter |
 
 The normal operating sequence is:
 
@@ -73,6 +75,25 @@ Audio never travels through the public backend WebSocket API. The browser publis
 
 ## Transcript lifecycle
 
+Each room/provider agent always publishes the raw provider transcript to the
+normal Transcript and provider-feed paths. Caption Desk is a separate approval
+lane attached to an active provider: it receives targeted source Draft/final
+packets and publishes operator-approved text on `caption.public` and the
+room-scoped approved-caption WebSocket.
+
+Caption Desk keeps the active provider Draft as a read-only preview. Only
+provider Final text enters the editor and can be published. The operator uses
+`Enter` to publish and `Shift+Enter` for a newline. It permits one in-flight
+publication per source segment; later finalized segments may continue to queue.
+Pending review state is bounded and held in agent memory; restarting the agent
+clears it.
+
+Only one Caption Desk session may own a room/provider lane at a time. The same
+browser session may reconnect during a 10-second grace period without losing
+its review buffer. When that grace period expires, the review window closes so
+the next operator starts at the current caption rather than receiving backlog
+from the previous Desk.
+
 Provider output stays identifiable and replaceable while it is still changing:
 
 ```text
@@ -87,6 +108,31 @@ The lean external WebSocket uses one JSON object per text frame:
 {"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":false}
 {"text":"ผู้ป่วยมีอาการเจ็บหน้าอก","isFinal":true}
 ```
+
+Caption Desk additionally exposes one room-scoped approved-caption feed. It emits one plain UTF-8 text frame per approved publication, regardless of the selected input provider:
+
+```text
+ผู้ป่วยมีอาการเจ็บหน้าอก
+```
+
+It emits no JSON, Drafts, ready event, replay, or client commands. Raw and approved tokens carry different signed feed purposes and cannot be used interchangeably.
+
+### Approved-caption playback
+
+When **Transcript** follows the approved Caption Desk output, it presents text
+as a two-line live-caption window rather than rendering every publication as a
+static transcript row. Publications remain FIFO and preserve the operator's
+published whitespace. Text reveals at the selected reading pace, then rolls
+the lower line upward as more text arrives; reaching the internal display
+buffer never discards the queue or introduces a deliberate hold. The Viewer
+shows whether that queue is empty or waiting so an operator can distinguish
+displayed text from pending text.
+
+The default pace is 17 visible characters per second, adjustable from 10 to
+20 characters per second for readability. With the operating system's
+**Reduce Motion** preference enabled, the same content advances as discrete,
+readable two-line windows without the roll animation; it still preserves order
+and does not skip queued text.
 
 Interim and final text originates from the selected ASR provider. CaptionLive routes provider results, accumulates provider deltas into full snapshots where required, and applies deterministic spacing normalization. Google Thai additionally removes provider-added spaces between Thai words; other providers retain the shared policy. CaptionLive does not invent interim wording.
 
@@ -172,7 +218,8 @@ Handlers only parse HTTP input and map module errors to status codes. LiveKit SD
 │       ├── domain/            # Provider contracts and normalization
 │       └── infrastructure/    # LiveKit adapters, room agent, transcript/JWT, ASR providers
 ├── livekit/                   # Local LiveKit Docker Compose environment
-├── start.sh                  # Local frontend/backend launcher
+├── start_backend.sh          # Local backend launcher with a fresh build
+├── start_frontend.sh         # Local frontend development launcher
 └── AGENTS.md                 # Repository development rules
 ```
 
@@ -181,9 +228,9 @@ Handlers only parse HTTP input and map module errors to status codes. LiveKit SD
 | Provider | Main output |
 | --- | --- |
 | Google Cloud STT | Thai source transcript with interim and final results |
-| Gemini Live | Source transcript plus configured-target translation in the in-app Lines view |
+| Gemini 3.5 Live | Source transcript plus configured-target translation in the in-app Lines view |
 | Azure Speech | Source interim hypotheses and finalized phrases |
-| GPT Realtime Whisper | Source-only Draft and final transcription |
+| GPT Realtime Translate | Source-only Draft and final transcription |
 
 Provider models, sample rates, endpointing, reconnect behavior, and credentials are documented in [backend-go/README.md](backend-go/README.md#provider-behavior).
 
@@ -236,8 +283,11 @@ cd ..
 
 ### 4. Start CaptionLive
 
+Start each process in its own terminal:
+
 ```bash
-./start.sh
+./start_backend.sh
+./start_frontend.sh
 ```
 
 Open:
@@ -247,7 +297,7 @@ Open:
 - Transcript: [http://localhost:5173/#viewer?room=test&autoconnect=1](http://localhost:5173/#viewer?room=test&autoconnect=1)
 - Backend health: [http://localhost:3000/health](http://localhost:3000/health)
 
-LiveKit must already be running; `start.sh` starts only the frontend and backend.
+LiveKit must already be running; the two launcher scripts start only the backend and frontend.
 
 ## Essential configuration
 
@@ -297,6 +347,8 @@ Start here, then move to the document that owns the detail:
 
 | Document | Use it for |
 | --- | --- |
+| [Interactive System Flow](docs/captionlive-system-flow.html) | Interactive data pipeline step-by-step playback, WebRTC audio, raw and approved transcript lanes |
+| [Interactive Product Surfaces](docs/captionlive-product-surface.html) | Interactive guide to Control Room, Audio Source, Caption Desk, and Transcript surfaces |
 | [Frontend guide](frontend/README.md) | Routes, browser requirements, transcript UI state, frontend environment |
 | [Backend guide](backend-go/README.md) | Provider behavior, environment variables, HTTP/WebSocket contracts |
 | [LiveKit local setup](livekit/README.md) | Containers, ports, verification, and production networking checklist |
@@ -308,7 +360,7 @@ Start here, then move to the document that owns the detail:
 | [Product principles](PRODUCT.md) | Product and interface decisions |
 | [Repository agent guide](AGENTS.md) | Development constraints and verification rules |
 
-`backend-go/docs/EDITOR_MODE_DESIGN.md` is a design proposal, not implemented behavior.
+`backend-go/docs/EDITOR_MODE_DESIGN.md` is the earlier design proposal. Use the implemented flow documented above and in `backend-go/docs/LIVEKIT_FLOW.md` as the current contract.
 
 ## License
 

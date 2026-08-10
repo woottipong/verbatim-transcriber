@@ -146,7 +146,7 @@ func TestGeminiTurnCompleteWhileBoundaryPendingFinalizesRemainingTailOnce(t *tes
 	}
 }
 
-func TestGeminiProviderFinalizesPseudoTurnAfterSilenceAndGrace(t *testing.T) {
+func TestGeminiProviderFinalizesSourceAtSilenceBeforeTranslationGrace(t *testing.T) {
 	provider := &GeminiProvider{cfg: normalizeGeminiConfig(GeminiConfig{})}
 	startedAt := time.Unix(1000, 0)
 	currentTime := startedAt
@@ -158,24 +158,28 @@ func TestGeminiProviderFinalizesPseudoTurnAfterSilenceAndGrace(t *testing.T) {
 	provider.observeAudioForSegmentation(pcm16Batch(4000, 100*time.Millisecond, 16000), startedAt)
 
 	currentTime = startedAt.Add(geminiTurnSilence)
-	if finals := provider.observeAudioForSegmentation(
+	sourceFinals := provider.observeAudioForSegmentation(
 		pcm16Batch(0, geminiTurnSilence, 16000),
 		currentTime,
-	); len(finals) != 0 {
-		t.Fatalf("silence finalized before translation grace: %#v", finals)
+	)
+	if len(sourceFinals) != 1 {
+		t.Fatalf("silence finals = %#v, want source final immediately", sourceFinals)
 	}
+	if !sourceFinals[0].IsFinal || sourceFinals[0].Role != domain.TranscriptRoleSource ||
+		sourceFinals[0].TurnID != "gemini-1" || sourceFinals[0].LanguageCode != "de" {
+		t.Fatalf("source final = %#v", sourceFinals[0])
+	}
+
 	currentTime = currentTime.Add(geminiTranslationGrace)
 	provider.transcriptMu.Lock()
 	finals := provider.completePendingBoundaryLocked()
 	provider.transcriptMu.Unlock()
-	if len(finals) != 2 {
-		t.Fatalf("finals = %#v, want source and translation", finals)
+	if len(finals) != 1 {
+		t.Fatalf("grace finals = %#v, want translation only", finals)
 	}
-	if !finals[0].IsFinal || finals[0].TurnID != "gemini-1" || finals[0].LanguageCode != "de" {
-		t.Fatalf("final source = %#v", finals[0])
-	}
-	if !finals[1].IsFinal || finals[1].TurnID != "gemini-1" || finals[1].LanguageCode != "th" {
-		t.Fatalf("final translation = %#v", finals[1])
+	if !finals[0].IsFinal || finals[0].Role != domain.TranscriptRoleTranslation ||
+		finals[0].TurnID != "gemini-1" || finals[0].LanguageCode != "th" {
+		t.Fatalf("final translation = %#v", finals[0])
 	}
 
 	next := provider.transcriptResults(&genai.LiveServerMessage{ServerContent: &genai.LiveServerContent{
@@ -205,7 +209,7 @@ func TestGeminiProviderCancelsPendingBoundaryOnStop(t *testing.T) {
 	}
 }
 
-func TestGeminiSilenceRequestsFixedBoundary(t *testing.T) {
+func TestGeminiSilenceFinalizesSourceAndKeepsFixedTranslationGrace(t *testing.T) {
 	now := time.Unix(1200, 0)
 	provider := &GeminiProvider{
 		cfg:       normalizeGeminiConfig(GeminiConfig{}),
@@ -215,8 +219,9 @@ func TestGeminiSilenceRequestsFixedBoundary(t *testing.T) {
 	provider.transcriptResults(interimInput("continuous source"))
 	provider.observeAudioForSegmentation(pcm16Batch(4000, 100*time.Millisecond, 16000), now)
 	now = now.Add(geminiTurnSilence)
-	if results := provider.observeAudioForSegmentation(pcm16Batch(0, geminiTurnSilence, 16000), now); len(results) != 0 {
-		t.Fatalf("silence returned early finals: %#v", results)
+	results := provider.observeAudioForSegmentation(pcm16Batch(0, geminiTurnSilence, 16000), now)
+	if len(results) != 1 || !results[0].IsFinal || results[0].Role != domain.TranscriptRoleSource {
+		t.Fatalf("silence results = %#v, want immediate source final", results)
 	}
 
 	provider.transcriptMu.Lock()

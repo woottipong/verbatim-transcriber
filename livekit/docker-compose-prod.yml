@@ -1,42 +1,80 @@
-# LiveKit Server for Thai Transcription Production Orchestration
-# Usage: docker compose -f docker-compose-prod.yml up -d
+
+# Domain routing:
+# livekit.yourdomain.com
+#   → Nginx Proxy Manager :443
+#   → livekit:7880 ผ่าน npm_network
+
+# turn.yourdomain.com
+#   → ชี้ Public IP ของเครื่องโดยตรง
+#   → UDP 3478 = STUN และ TURN/UDP
+#   → TCP 5349 = TURN/TLS เมื่อ UDP ใช้ไม่ได้
+# ไม่ต้องสร้าง Proxy Host ใน NPM
+
+# Client/Worker ใช้:
+# LIVEKIT_URL=wss://livekit.yourdomain.com
 
 services:
   livekit:
-    image: livekit/livekit-server:latest
+    image: livekit/livekit-server:v1.13.4
     container_name: livekit-server-prod
-    ports:
-      - "7880:7880"       # HTTP API / WebSocket signaling
-      - "7881:7881"       # WebRTC TCP fallback
-      - "7882:7882/udp"   # WebRTC UDP signaling
-      - "50000-50100:50000-50100/udp" # WebRTC media stream UDP range
-      - "3478:3478/udp"   # TURN server standard port
-      - "5349:5349/tcp"   # TURN server over TLS
-    environment:
-      # Inject API key and Secret via env variables or .env file
-      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
-    volumes:
-      # Mount the production yaml config
-      - ./livekit-prod.yaml:/etc/livekit.yaml:ro
-      # Mount SSL certificate folder from host (e.g. Let's Encrypt /etc/letsencrypt/live/turn.yourdomain.com)
-      # Ensure you link these files correctly in livekit-prod.yaml
-      - /etc/letsencrypt/live/turn.yourdomain.com/fullchain.pem:/etc/certs/fullchain.pem:ro
-      - /etc/letsencrypt/live/turn.yourdomain.com/privkey.pem:/etc/certs/privkey.pem:ro
-    command: --config /etc/livekit.yaml
     restart: unless-stopped
+    networks:
+      - npm_network
+      - livekit_internal
+    ports:
+      # WebRTC TCP fallback
+      - "7881:7881/tcp"
+      # TURN/UDP และ STUN
+      - "3478:3478/udp"
+      # TURN/TLS
+      - "5349:5349/tcp"
+      # WebRTC media UDP range
+      - "50000-60000:50000-60000/udp"
+    expose:
+      # ให้ NPM proxy เข้า livekit:7880
+      - "7880"
+    environment:
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
+    command:
+      - --config
+      - /etc/livekit/livekit.yaml
+    volumes:
+      - ./livekit-prod.yaml:/etc/livekit/livekit.yaml:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
 
   redis:
-    image: redis:alpine
+    image: redis:7-alpine
     container_name: livekit-redis-prod
-    command: redis-server --appendonly yes
-    ports:
-      - "6379:6379"
-    volumes:
-      # Persistent storage for room and session data
-      - redis-data-prod:/data
     restart: unless-stopped
+    networks:
+      - livekit_internal
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redis-data-prod:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
 volumes:
   redis-data-prod:
+
+networks:
+  npm_network:
+    external: true
+
+  livekit_internal:
+    internal: true

@@ -9,6 +9,7 @@ React 19 + TypeScript + Vite application for operating CaptionLive rooms, publis
 | Control Room | `/#admin` or `/` | Create rooms, manage providers and participants, and generate external transcript feeds |
 | Audio Source | `/#stream?room=<room>` | Publish microphone or Chrome Tab audio to a room |
 | Transcript | `/#viewer?room=<room>&autoconnect=1` | View the read-only live transcript |
+| Caption Desk | `/#caption-desk?room=<room>&provider=<provider>` | Attach to one active provider and publish approved captions |
 
 The frontend never sends audio directly to an ASR provider or to the Go backend. Audio and transcript data use LiveKit; the backend HTTP API is used for tokens, room administration, agent control, and signed external-feed links.
 
@@ -92,6 +93,65 @@ frontend/
 Keep provider-independent room and transcript behavior in the shared lifecycle/session modules. The React hooks adapt those modules to each workspace and own browser or LiveKit side effects.
 
 ## Transcript behavior
+
+### Approved captions
+
+Control Room starts transcription providers normally. Caption Desk lists only the providers already active in the selected room, then connects to that agent with a dedicated server-issued LiveKit identity and one editing buffer:
+
+- the active provider Draft remains a read-only preview and never enters a publish command;
+- only provider Final text enters the editable review buffer;
+- Draft revisions replace only the preview, and a matching Final clears it;
+- `Enter` publishes while `Shift+Enter` inserts a newline;
+- IME composition Enter never publishes;
+- only one publication per source segment may wait for acknowledgement at a time;
+- a rejected publication is restored ahead of newer text.
+- one browser session owns each room/provider Desk lane; reconnects within 10 seconds retain its buffer, while a different Desk is rejected;
+- after the reconnect grace period expires, the next Desk starts at the current caption without the previous operator's backlog.
+
+Caption Desk is an approval lane, not an agent delivery mode. The raw provider
+transcript continues through its existing viewer/feed paths.
+The browser cannot publish approved captions directly; it sends a reliable
+`caption.publish` command to the active agent, which remains authoritative.
+
+The editor also provides operator-side review assistance:
+
+- Thai typo suggestions are local, optional hints; applying one changes only the
+  selected text and never publishes automatically.
+- **AI Auto** is optional and available only when the backend reports the
+  Caption Desk proofreader as enabled. It reviews newly appended final text in
+  bounded batches after 1,200 ms of inactivity, at a 2,500 ms hard ceiling, or
+  when the batch reaches 320 grapheme clusters.
+- AI suggestions are advisory. A manual edit, publication, or reconnect that
+  makes a result stale leaves the operator's current text unchanged; transient
+  AI failures keep the original caption and use the shared notification area.
+  After three consecutive failures, AI Auto pauses until the operator enables
+  it again.
+- The latest approved caption is sent as bounded context for the next batch to
+  help with names and continuations, but it is never copied into the editor.
+
+### Approved-caption playback in Transcript
+
+Selecting **Caption Desk** in the Transcript source list subscribes to the
+room-scoped `caption.public` lane. Every accepted publication is appended to a
+browser-local FIFO playback queue exactly as published; this surface does not
+infer wording, combine providers, or normalize the operator's whitespace.
+
+- The visible output is a rolling, two-line subtitle window. A line is bounded
+  to 35 grapheme clusters before the next line rolls in, so Thai combining
+  marks remain attached to their base character.
+- Normal motion reveals text at the selected pace (10–20 visible characters per
+  second; 17 by default). The playback buffer retains the visible tail and
+  continues releasing queued text when its internal limit is reached—there is
+  no intentional pause at that boundary.
+- A delayed animation frame preserves its elapsed reveal progress; the next
+  render can cross a rolling boundary without dropping or reordering queued
+  text.
+- With `prefers-reduced-motion`, the Viewer disables the roll animation and
+  advances through one readable two-line window at a time. It does not skip to
+  the newest text or discard the remainder.
+- The subtitle toolbar reports `Queue empty` when everything is displayed, or
+  `Waiting: <cues> · <characters>` when captions remain pending. `Clear` clears
+  both the current caption and this local playback queue.
 
 - Every packet is validated with `parseTranscriptMessage`.
 - `TranscriptSession` owns decoding, provider resolution, interim buffering, Gemini source/translation pairing, committed rows, and source cleanup.

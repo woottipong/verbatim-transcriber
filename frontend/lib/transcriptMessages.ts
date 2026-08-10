@@ -13,6 +13,7 @@ export interface TranscriptMessage {
     languageCode?: string;
     turnId?: string;
     segmentId?: string;
+    publicationId?: string;
 }
 
 export interface InterimTranscript {
@@ -20,6 +21,7 @@ export interface InterimTranscript {
     text: string;
     provider: string;
     sourceIdentity: string;
+    timestamp?: number;
     languageCode?: string;
     turnId?: string;
     segmentId?: string;
@@ -49,6 +51,9 @@ function joinTranscriptChunks(previous: string, next: string): string {
     if (!left) return right;
     if (!right || left === right) return left;
     if (right.startsWith(left)) return right;
+    if (THAI_SCRIPT.test(left.slice(-1)) || THAI_SCRIPT.test(right.charAt(0))) {
+        return `${left}${right}`;
+    }
     return `${left} ${right}`;
 }
 
@@ -66,22 +71,28 @@ export function groupFinalTranscriptRows(
             previous.provider === segment.provider &&
             normalizeLanguageTag(previous.languageCode) === normalizeLanguageTag(segment.languageCode) &&
             gap >= 0 && gap <= windowMs &&
-            !containsThaiText(previous) && !containsThaiText(segment) &&
             !STRONG_SENTENCE_END.test(previous.text.trim())
         );
         if (!canGroup || !previous) return [...rows, segment];
 
         const previousTranslation = previous.translation;
         const nextTranslation = segment.translation;
-        const canCombineTranslation = previousTranslation && nextTranslation &&
-            normalizeLanguageTag(previousTranslation.languageCode) === normalizeLanguageTag(nextTranslation.languageCode);
-        const translation = canCombineTranslation
-            ? {
-                text: joinTranscriptChunks(previousTranslation.text, nextTranslation.text),
-                languageCode: nextTranslation.languageCode,
-                isFinal: previousTranslation.isFinal && nextTranslation.isFinal,
+        let translation: TranscriptSegment['translation'] = undefined;
+
+        if (previousTranslation && nextTranslation) {
+            if (normalizeLanguageTag(previousTranslation.languageCode) === normalizeLanguageTag(nextTranslation.languageCode)) {
+                translation = {
+                    text: joinTranscriptChunks(previousTranslation.text, nextTranslation.text),
+                    languageCode: nextTranslation.languageCode,
+                    isFinal: previousTranslation.isFinal && nextTranslation.isFinal,
+                };
             }
-            : undefined;
+        } else if (previousTranslation) {
+            translation = previousTranslation;
+        } else if (nextTranslation) {
+            translation = nextTranslation;
+        }
+
         const grouped: TranscriptSegment = {
             ...previous,
             text: joinTranscriptChunks(previous.text, segment.text),
@@ -212,6 +223,7 @@ export function parseTranscriptMessage(value: unknown): TranscriptMessage | unde
             : undefined;
     const turnId = typeof candidate.turnId === 'string' ? candidate.turnId.trim() : undefined;
     const segmentId = typeof candidate.segmentId === 'string' ? candidate.segmentId.trim() : undefined;
+    const publicationId = typeof candidate.publicationId === 'string' ? candidate.publicationId.trim() : undefined;
     if (!role || (role === 'translation' && !turnId)) return undefined;
 
     const text = candidate.text.replace(/\s+/g, ' ').trim();
@@ -230,6 +242,33 @@ export function parseTranscriptMessage(value: unknown): TranscriptMessage | unde
         ...(typeof candidate.languageCode === 'string' ? { languageCode: candidate.languageCode } : {}),
         ...(turnId ? { turnId } : {}),
         ...(segmentId ? { segmentId } : {}),
+        ...(publicationId ? { publicationId } : {}),
+    };
+}
+
+export function parsePublicCaptionMessage(value: unknown): TranscriptMessage | undefined {
+    if (typeof value !== 'object' || value === null) return undefined;
+
+    const candidate = value as Record<string, unknown>;
+    const publicationId = typeof candidate.publicationId === 'string'
+        ? candidate.publicationId.trim()
+        : '';
+    if (typeof candidate.text !== 'string' || !publicationId) return undefined;
+
+    const text = candidate.text;
+    if (!text.trim()) return undefined;
+
+    return {
+        type: 'transcript',
+        text,
+        isFinal: true,
+        role: 'source',
+        publicationId,
+        segmentId: publicationId,
+        ...(typeof candidate.timestamp === 'number' ? { timestamp: candidate.timestamp } : {}),
+        ...(typeof candidate.sequence === 'number' && Number.isSafeInteger(candidate.sequence) && candidate.sequence > 0
+            ? { sequence: candidate.sequence }
+            : {}),
     };
 }
 
@@ -330,6 +369,7 @@ export function createInterimTranscript(
         text: message.text,
         provider,
         sourceIdentity,
+        timestamp: message.timestamp ?? Date.now(),
         ...(message.languageCode ? { languageCode: message.languageCode } : {}),
         ...(message.turnId ? { turnId: message.turnId } : {}),
         ...(message.segmentId ? { segmentId: message.segmentId } : {}),

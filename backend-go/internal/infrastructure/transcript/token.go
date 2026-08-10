@@ -27,6 +27,7 @@ type Claims struct {
 	Provider   string `json:"provider,omitempty"`
 	RoomSID    string `json:"roomSid,omitempty"`
 	Generation uint64 `json:"generation,omitempty"`
+	Purpose    string `json:"purpose"`
 	jwt.RegisteredClaims
 }
 
@@ -74,14 +75,18 @@ func (s *TokenService) IssueForProviderRoom(room, provider, roomSID string, gene
 	return s.issue(room, provider, roomSID, generation)
 }
 
-func (s *TokenService) IssueScoped(room, provider, roomSID string, generation uint64) (string, time.Time, error) {
+func (s *TokenService) IssueScoped(room, provider, purpose, roomSID string, generation uint64) (string, time.Time, error) {
 	if strings.TrimSpace(provider) == "" {
-		return s.IssueForRoom(room, roomSID, generation)
+		return s.issue(room, "", roomSID, generation, purpose)
 	}
-	return s.IssueForProviderRoom(room, provider, roomSID, generation)
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if !isSupportedProvider(provider) {
+		return "", time.Time{}, ErrInvalidTranscriptProvider
+	}
+	return s.issue(room, provider, roomSID, generation, purpose)
 }
 
-func (s *TokenService) issue(room, provider, roomSID string, generation uint64) (string, time.Time, error) {
+func (s *TokenService) issue(room, provider, roomSID string, generation uint64, purposes ...string) (string, time.Time, error) {
 	if err := s.Ready(); err != nil {
 		return "", time.Time{}, err
 	}
@@ -90,12 +95,20 @@ func (s *TokenService) issue(room, provider, roomSID string, generation uint64) 
 		return "", time.Time{}, ErrInvalidTranscriptRoom
 	}
 	now := s.now()
+	purpose := "transcript"
+	if len(purposes) > 0 && strings.TrimSpace(purposes[0]) != "" {
+		purpose = strings.TrimSpace(purposes[0])
+	}
+	if purpose != "transcript" && purpose != "caption" {
+		return "", time.Time{}, ErrInvalidTranscriptToken
+	}
 	expiresAt := now.Add(s.ttl)
 	claims := Claims{
 		Room:       room,
 		Provider:   provider,
 		RoomSID:    roomSID,
 		Generation: generation,
+		Purpose:    purpose,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    TokenIssuer,
 			Subject:   TokenSubject,
@@ -138,13 +151,19 @@ func (s *TokenService) VerifyForProviderRoom(rawToken, expectedRoom, expectedPro
 	return s.verify(rawToken, expectedRoom, expectedProvider, expectedRoomSID, expectedGeneration)
 }
 
-func (s *TokenService) VerifyScoped(rawToken, room, provider, roomSID string, generation uint64) error {
-	if strings.TrimSpace(provider) == "" {
-		_, err := s.VerifyForRoom(rawToken, room, roomSID, generation)
+func (s *TokenService) VerifyScoped(rawToken, room, provider, purpose, roomSID string, generation uint64) error {
+	claims, err := s.verify(rawToken, room, strings.ToLower(strings.TrimSpace(provider)), roomSID, generation)
+	if err != nil {
 		return err
 	}
-	_, err := s.VerifyForProviderRoom(rawToken, room, provider, roomSID, generation)
-	return err
+	expectedPurpose := strings.TrimSpace(purpose)
+	if expectedPurpose == "" {
+		expectedPurpose = "transcript"
+	}
+	if claims.Purpose != expectedPurpose {
+		return ErrInvalidTranscriptToken
+	}
+	return nil
 }
 
 func (s *TokenService) verify(rawToken, expectedRoom, expectedProvider, expectedRoomSID string, expectedGeneration uint64) (*Claims, error) {

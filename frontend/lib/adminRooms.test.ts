@@ -45,6 +45,11 @@ test('transcript token responses are validated without storing them', () => {
         expiresAt: '2026-07-17T10:00:00Z',
         websocketUrl: 'wss://example.test/ws/transcript/google/demo?token=signed-token',
     }), true);
+    assert.equal(isTranscriptTokenResponse({
+        token: 'signed-caption-token',
+        expiresAt: '2026-07-17T10:00:00Z',
+        websocketUrl: 'wss://example.test/ws/caption/demo?token=signed-caption-token',
+    }), true);
     assert.equal(isTranscriptTokenResponse({ provider: 'openai', token: 'x', expiresAt: '2026-07-17T10:00:00Z', websocketUrl: 'ws://x' }), false);
     assert.equal(isTranscriptTokenResponse({ provider: 'google', token: 'x', expiresAt: 'not-a-date', websocketUrl: 'ws://x' }), false);
     assert.equal(isTranscriptTokenResponse({ provider: 'google', token: 'x', expiresAt: '2026-07-17T10:00:00Z', websocketUrl: 'https://x' }), false);
@@ -67,6 +72,14 @@ test('admin readiness leads the operator from audio to transcription', () => {
         title: 'Waiting for audio',
         detail: 'Open Audio Source to publish microphone or tab audio.',
         nextAction: 'open-audio',
+    });
+    assert.deepEqual(deriveAdminReadiness([
+        { identity: 'audio-source-test-123', name: 'Sender', isAgent: false, state: 'ACTIVE' },
+    ], 0), {
+        state: 'waiting-agent',
+        title: 'Audio connected',
+        detail: 'Start a provider to begin transcription.',
+        nextAction: 'start-agent',
     });
     assert.deepEqual(deriveAdminReadiness([
         { identity: 'user-1', name: 'Sender', isAgent: false, state: 'ACTIVE' },

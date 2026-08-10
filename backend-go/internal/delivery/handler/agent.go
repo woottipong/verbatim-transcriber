@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -14,13 +15,21 @@ import (
 
 // HandleAgentStart starts the LiveKit ASR agent
 func HandleAgentStart(c *fiber.Ctx, cfg *config.Config, supervisor *agentsupervisor.Supervisor) error {
-	// Parse request
-	var req models.AgentStartRequest
-	if err := c.BodyParser(&req); err != nil {
+	var payload struct {
+		models.AgentStartRequest
+		LegacyMode json.RawMessage `json:"mode"`
+	}
+	if err := c.BodyParser(&payload); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "Invalid request body",
 		})
 	}
+	if len(payload.LegacyMode) != 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "mode is no longer supported",
+		})
+	}
+	req := payload.AgentStartRequest
 
 	if req.RoomName == "" {
 		req.RoomName = "transcription-room" // default room
@@ -33,7 +42,6 @@ func HandleAgentStart(c *fiber.Ctx, cfg *config.Config, supervisor *agentsupervi
 		})
 	}
 	req.Provider = provider
-
 	if err := supervisor.Start(c.UserContext(), req.RoomName, req.Provider); err != nil {
 		if errors.Is(err, agentsupervisor.ErrAgentAlreadyExists) {
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{

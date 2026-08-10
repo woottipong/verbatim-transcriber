@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+credential/
+credentail/
+*.json
+server
+*.exe
+*.test
+*.out
+vendor/
+.git
+.DS_Store
+.vscode/
+.idea/
+README.md
+docs/

@@ -8,6 +8,7 @@ import { AppRoute, parseAppRoute } from './lib/appRoutes';
 const AdminPage = lazy(() => import('./components/AdminPage'));
 const ViewerPage = lazy(() => import('./components/ViewerPage'));
 const StreamPage = lazy(() => import('./components/StreamPage'));
+const CaptionDeskPage = lazy(() => import('./components/CaptionDeskPage'));
 
 // Load initial config from localStorage or use defaults
 const getInitialConfig = (): AppConfig => {
@@ -39,7 +40,9 @@ export default function App() {
       ? 'Control Room'
       : route.page === 'stream'
         ? 'Audio Source'
-        : 'Transcript';
+        : route.page === 'caption-desk'
+          ? 'Caption Desk'
+          : 'Transcript';
     document.title = `${pageTitle} · CaptionLive`;
   }, [route.page]);
 
@@ -56,6 +59,8 @@ export default function App() {
         backendUrl={config.backendUrl}
         initialRoomName={route.roomName}
         autoConnect={route.autoConnect}
+        initialProviderName={route.providerName}
+        cleanOutput={route.cleanOutput === true}
       />
     </Suspense>;
   }
@@ -65,6 +70,17 @@ export default function App() {
       <AdminPage
         onBack={window.opener ? () => window.close() : undefined}
         backendUrl={config.backendUrl}
+      />
+    </Suspense>;
+  }
+
+  if (route.page === 'caption-desk') {
+    return <Suspense fallback={<RouteLoading />}>
+      <CaptionDeskPage
+        backendUrl={config.backendUrl}
+        roomName={route.roomName}
+        providerName={route.providerName}
+        captionPolicy={route.captionPolicy}
       />
     </Suspense>;
   }

@@ -8,6 +8,7 @@ import {
     ExternalLink,
     Eye,
     LoaderCircle,
+    PencilLine,
     Plus,
     Radio,
     RefreshCw,
@@ -19,7 +20,7 @@ import {
 } from 'lucide-react';
 import ToastViewport from './ToastViewport';
 import type { ParticipantInfo, RunningAgent } from '../lib/api';
-import { buildStreamUrl, buildViewerUrl } from '../lib/appRoutes';
+import { buildCaptionDeskUrl, buildStreamUrl, buildViewerUrl } from '../lib/appRoutes';
 import {
     canRemoveParticipant,
     deriveAdminReadiness,
@@ -103,6 +104,8 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         isDeletingRoom,
         generatingTranscriptProviders,
         transcriptFeedErrors,
+        captionFeedError,
+        isGeneratingCaptionLink,
         refreshRooms,
         refreshAgentStatus,
         createRoom,
@@ -112,6 +115,8 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         deleteRoom: deleteRoomOperation,
         generateTranscriptLink,
         activeTranscriptLink: getActiveTranscriptLink,
+        generateCaptionLink,
+        activeCaptionLink,
     } = useControlRoomOperations({
         backendUrl,
         onRoomsError: handleRoomsError,
@@ -143,6 +148,10 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         return rooms.filter(room => room.name.toLowerCase().includes(query));
     }, [rooms, searchQuery]);
     const activeTranscriptLink = (provider: AgentProvider) => getActiveTranscriptLink(selectedRoomName, provider);
+    const approvedLink = activeCaptionLink(selectedRoomName);
+    const approvedError = captionFeedError?.roomName === selectedRoomName
+        ? captionFeedError.message
+        : null;
     const readiness = deriveAdminReadiness(selectedRoom?.participants ?? [], selectedAgents.length);
 
     const rememberDialogTrigger = (trigger: HTMLElement) => {
@@ -284,6 +293,24 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
         await copyText(response.websocketUrl, `${providerLabels[provider]} WebSocket link`);
     };
 
+    const copyApprovedLink = async () => {
+        if (!approvedLink) {
+            showNotice({ tone: 'error', message: 'Generate the approved caption link before copying it.' });
+            return;
+        }
+        await copyText(approvedLink.websocketUrl, 'Approved caption link');
+    };
+
+    const getApprovedLink = async () => {
+        if (!selectedRoom) return;
+        try {
+            await generateCaptionLink(selectedRoom.name);
+            showNotice({ tone: 'success', message: 'Approved caption link is ready.' });
+        } catch (err) {
+            showNotice({ tone: 'error', message: err instanceof Error ? err.message : 'Failed to generate approved caption link' });
+        }
+    };
+
     const openLink = (url: string) => {
         window.open(url, '_blank', 'noopener,noreferrer');
     };
@@ -306,19 +333,14 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                         )}
                         <img src="/captionlive-mark.svg" alt="" className="h-10 w-10 shrink-0 rounded-lg" aria-hidden="true" />
                         <div className="min-w-0">
-                            <h1 className="flex min-w-0 items-center gap-2 truncate text-lg font-semibold tracking-tight text-slate-50 sm:text-xl">
-                                <span className="shrink-0 text-teal-200">CaptionLive</span>
-                                <span className="h-4 w-px shrink-0 bg-slate-700" aria-hidden="true" />
+                            <h1 className="flex min-w-0 items-center gap-2 truncate text-lg font-semibold tracking-tight sm:text-xl">
+                                <span className="shrink-0 text-[var(--accent)]">CaptionLive</span>
+                                <span className="h-4 w-px shrink-0 bg-[var(--line)]" aria-hidden="true" />
                                 <span className="truncate">Control Room</span>
                             </h1>
-                            <div className="flex flex-wrap items-center gap-2 mt-0.5">
-                                <p className="truncate text-xs text-slate-400">Manage rooms and transcription</p>
-                                <span className="h-2 w-px bg-slate-700 hidden sm:inline" aria-hidden="true" />
-                                <div className="hidden items-center gap-1.5 text-[10px] text-slate-500 sm:flex select-none">
-                                    <span className="status-dot status-dot--live !h-1.5 !w-1.5" aria-hidden="true" />
-                                    <span>LiveKit plane</span>
-                                </div>
-                            </div>
+                            <p className="mt-0.5 flex min-w-0 items-center gap-1.5 truncate text-sm">
+                                <span className="text-[var(--muted)]">Manage rooms and transcription</span>
+                            </p>
                         </div>
                     </div>
                     <div className="flex items-center gap-2">
@@ -422,6 +444,15 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                         <div className="mt-2">
                                             <ShareRow icon={<Eye size={16} />} label="Transcript" description="Open the read-only live transcript" onOpen={() => openLink(viewerUrl)} onCopy={() => void copyText(viewerUrl, 'Transcript link')} />
                                         </div>
+                                        <div className="mt-2">
+                                            <ShareRow
+                                                icon={<PencilLine size={16} />}
+                                                label="Caption Desk"
+                                                description="Review and approve captions"
+                                                onOpen={() => openLink(buildCaptionDeskUrl(appBaseUrl, selectedRoom.name, ''))}
+                                                onCopy={() => void copyText(buildCaptionDeskUrl(appBaseUrl, selectedRoom.name, ''), 'Caption Desk link')}
+                                            />
+                                        </div>
                                     </section>
 
                                     <section className="admin-section order-2" aria-labelledby="agent-control-heading">
@@ -452,20 +483,23 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                             {selectedAgents.length > 0 && (
                                                 <div className="mt-3 flex flex-wrap gap-2 border-t border-slate-700/60 pt-3">
                                                     {selectedAgents.map(agent => (
-                                                        <button
-                                                            key={agent.key}
-                                                            onClick={() => void stopAgent(agent)}
-                                                            disabled={stoppingAgentKey === agent.key}
-                                                            className="inline-flex min-h-11 max-w-full items-center gap-2 rounded-full border border-slate-700 bg-slate-900/40 px-3 text-sm font-medium text-slate-200 transition-colors hover:border-red-400/35 hover:bg-slate-800 hover:text-red-200 disabled:cursor-not-allowed disabled:opacity-50"
-                                                            aria-label={`Stop ${providerLabels[agent.provider as AgentProvider] || agent.provider}`}
-                                                            title={`Stop ${providerLabels[agent.provider as AgentProvider] || agent.provider}`}
-                                                        >
-                                                            <span className="status-dot status-dot--live" aria-hidden="true" />
-                                                            <span className="truncate">{providerLabels[agent.provider as AgentProvider] || agent.provider}</span>
-                                                            {stoppingAgentKey === agent.key
-                                                                ? <LoaderCircle size={14} className="shrink-0 animate-spin" aria-hidden="true" />
-                                                                : <X size={14} className="shrink-0 text-slate-500" aria-hidden="true" />}
-                                                        </button>
+                                                        <div key={agent.key} className="inline-flex min-h-11 max-w-full items-center overflow-hidden rounded-full border border-slate-700 bg-slate-900/40 text-sm font-medium text-slate-200">
+                                                            <span className="flex min-w-0 items-center gap-2 px-3">
+                                                                <span className="status-dot status-dot--live" aria-hidden="true" />
+                                                                <span className="truncate">{providerLabels[agent.provider as AgentProvider] || agent.provider}</span>
+                                                            </span>
+                                                            <button
+                                                                type="button"
+                                                                onClick={() => void stopAgent(agent)}
+                                                                disabled={stoppingAgentKey === agent.key}
+                                                                className="flex min-h-11 items-center border-l border-slate-700 px-3 hover:bg-slate-800 hover:text-red-200 disabled:opacity-50"
+                                                                aria-label={`Stop ${providerLabels[agent.provider as AgentProvider] || agent.provider}`}
+                                                            >
+                                                                {stoppingAgentKey === agent.key
+                                                                    ? <LoaderCircle size={14} className="animate-spin" />
+                                                                    : <X size={14} />}
+                                                            </button>
+                                                        </div>
                                                     ))}
                                                 </div>
                                             )}
@@ -482,7 +516,7 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                     </section>
 
                                     <section className="admin-section order-4 xl:col-span-2" aria-labelledby="external-systems-heading">
-                                        <SectionHeading id="external-systems-heading" icon={<Cable size={16} />} title="External systems" detail="Generate one signed feed for each active provider." />
+                                        <SectionHeading id="external-systems-heading" icon={<Cable size={16} />} title="External systems" detail="Generate provider live feeds and one approved feed for this room." />
                                         <div className="mt-3 space-y-2">
                                         {runningTranscriptProviders.length === 0 ? (
                                             <div className="rounded-lg bg-slate-950/20 px-4 py-4">
@@ -497,7 +531,10 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                             return (
                                                 <div key={provider} className="admin-control-surface rounded-lg p-3 sm:p-4">
                                                     <div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
-                                                        <p className="text-sm font-medium text-white">{providerLabels[provider]}</p>
+                                                        <div className="min-w-32">
+                                                            <p className="text-sm font-medium text-white">{providerLabels[provider]}</p>
+                                                            <p className="text-xs text-slate-500">Live transcript</p>
+                                                        </div>
                                                         {link && (
                                                             <div className="min-w-0 rounded-md border border-slate-700 bg-slate-950/45 px-3 py-2">
                                                                 <code className="block truncate text-xs text-slate-300" title={maskTranscriptWebSocketUrl(link.websocketUrl)}>
@@ -541,13 +578,54 @@ export default function AdminPage({ onBack, backendUrl }: AdminPageProps) {
                                             );
                                         })}
                                         {runningTranscriptProviders.length > 0 && (
+                                            <div className="admin-control-surface rounded-lg p-3 sm:p-4">
+                                                <div className="grid items-center gap-2 sm:grid-cols-[auto_minmax(0,1fr)_auto]">
+                                                    <div className="min-w-32">
+                                                        <p className="text-sm font-medium text-white">Approved captions</p>
+                                                        <p className="text-xs text-slate-500">Caption Desk · room output</p>
+                                                    </div>
+                                                    {approvedLink && (
+                                                        <div className="min-w-0 rounded-md border border-slate-700 bg-slate-950/45 px-3 py-2">
+                                                            <code className="block truncate text-xs text-slate-300" title={maskTranscriptWebSocketUrl(approvedLink.websocketUrl)}>
+                                                                {maskTranscriptWebSocketUrl(approvedLink.websocketUrl)}
+                                                            </code>
+                                                        </div>
+                                                    )}
+                                                    <div className="flex shrink-0 flex-wrap gap-2 sm:col-start-3">
+                                                        <button
+                                                            onClick={() => void getApprovedLink()}
+                                                            disabled={isGeneratingCaptionLink}
+                                                            className="control-button control-button--inline"
+                                                            aria-label={`${approvedError ? 'Retry' : approvedLink ? 'Generate new' : 'Generate'} approved caption WebSocket link`}
+                                                        >
+                                                            {isGeneratingCaptionLink ? <LoaderCircle size={15} className="animate-spin" aria-hidden="true" /> : <RefreshCw size={15} aria-hidden="true" />}
+                                                            {approvedError ? 'Retry' : approvedLink ? 'Generate new' : 'Generate link'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => void copyApprovedLink()}
+                                                            disabled={!approvedLink || isGeneratingCaptionLink || Boolean(approvedError)}
+                                                            className="control-button control-button--inline control-button--inline-accent"
+                                                            aria-label="Copy approved caption WebSocket URL"
+                                                        >
+                                                            <Copy size={15} aria-hidden="true" /> Copy URL
+                                                        </button>
+                                                    </div>
+                                                </div>
+                                                {approvedLink && !approvedError && (
+                                                    <p className="mt-2 text-xs text-emerald-200">Ready · expires {formatExpiry(approvedLink.expiresAt)}</p>
+                                                )}
+                                                {approvedError && <p className="mt-2 text-xs text-red-200" role="alert">{approvedError}</p>}
+                                            </div>
+                                        )}
+                                        {runningTranscriptProviders.length > 0 && (
                                             <div className="px-1">
                                                 <p className="text-xs leading-5 text-slate-500">Anyone with a signed URL can read that provider’s live transcript until it expires.</p>
                                                 <details className="mt-2 text-xs text-slate-400">
                                                     <summary className="cursor-pointer select-none font-medium text-slate-300">Integration details</summary>
                                                     <div className="mt-2 space-y-2 rounded-lg border border-slate-700/70 bg-slate-950/25 p-3 leading-5">
-                                                        <p>Connect with the copied URL. Each WebSocket message is a JSON object; replace interim text until <code>isFinal</code> is true.</p>
-                                                        <code className="block overflow-x-auto rounded bg-slate-950/60 px-2 py-1.5 text-slate-300">{'{"text":"ผู้ป่วยมีอาการ","isFinal":false}'}</code>
+                                                <p>The live transcript feed sends JSON; replace interim text until <code>isFinal</code> is true.</p>
+                                                <code className="block overflow-x-auto rounded bg-slate-950/60 px-2 py-1.5 text-slate-300">{'{"text":"ผู้ป่วยมีอาการ","isFinal":false}'}</code>
+                                                <p>The approved caption feed sends one plain UTF-8 text message for each Caption Desk publication.</p>
                                                     </div>
                                                 </details>
                                             </div>

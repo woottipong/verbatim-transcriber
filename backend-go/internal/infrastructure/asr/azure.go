@@ -34,6 +34,8 @@ type AzureProvider struct {
 	segmentationMaxSilenceDuration int    // milliseconds
 	lastErr                        error
 	stopped                        bool
+	activeSegmentID                string
+	segmentSequence                uint64
 }
 
 type AzureConfig struct {
@@ -245,8 +247,9 @@ func (a *AzureProvider) parseTextMessage(message string) {
 		}
 		if err := json.Unmarshal([]byte(body), &hypothesis); err == nil && hypothesis.Text != "" {
 			if !a.emitResult(domain.TranscriptResult{
-				Text:    hypothesis.Text,
-				IsFinal: false,
+				Text:      hypothesis.Text,
+				IsFinal:   false,
+				SegmentID: a.ensureSegmentID(),
 			}) {
 				log.Println("⚠️ [Azure] Results channel full, dropping interim")
 			}
@@ -261,6 +264,8 @@ func (a *AzureProvider) parseTextMessage(message string) {
 			} `json:"NBest"`
 		}
 		if err := json.Unmarshal([]byte(body), &phrase); err == nil {
+			segmentID := a.ensureSegmentID()
+			defer a.finishSegment()
 			if phrase.RecognitionStatus == "Success" {
 				text := phrase.DisplayText
 				confidence := 0.0
@@ -274,6 +279,7 @@ func (a *AzureProvider) parseTextMessage(message string) {
 						Text:       text,
 						IsFinal:    true,
 						Confidence: confidence,
+						SegmentID:  segmentID,
 					}) {
 						log.Println("⚠️ [Azure] Results channel full, dropping final")
 					}
@@ -281,6 +287,18 @@ func (a *AzureProvider) parseTextMessage(message string) {
 			}
 		}
 	}
+}
+
+func (a *AzureProvider) ensureSegmentID() string {
+	if a.activeSegmentID == "" {
+		a.segmentSequence++
+		a.activeSegmentID = fmt.Sprintf("azure-%d", a.segmentSequence)
+	}
+	return a.activeSegmentID
+}
+
+func (a *AzureProvider) finishSegment() {
+	a.activeSegmentID = ""
 }
 
 func (a *AzureProvider) emitResult(result domain.TranscriptResult) bool {
