@@ -235,6 +235,31 @@ test('finals arriving after a rejection stay behind the failed retry', () => {
   assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-2', 'g-3']);
 });
 
+test('multiple rejected releases retry in source order', () => {
+  const session = new CaptionDeskSession();
+  session.ingestOperatorPacket(pending('g-1', 'หนึ่ง'));
+  const first = session.release('google')!;
+  session.ingestOperatorPacket(pending('g-2', 'สอง'));
+  const second = session.release('google')!;
+  session.ingestOperatorPacket(pending('g-3', 'สาม'));
+
+  session.reject({
+    type: 'caption.rejected', requestId: first.requestId, provider: 'google',
+    code: 'source_mismatch', message: 'ลองใหม่',
+  });
+  session.reject({
+    type: 'caption.rejected', requestId: second.requestId, provider: 'google',
+    code: 'source_mismatch', message: 'ลองใหม่',
+  });
+
+  const retryFirst = session.release('google');
+  assert.deepEqual(retryFirst?.sourceSegmentIds, ['g-1']);
+  const retrySecond = session.release('google');
+  assert.deepEqual(retrySecond?.sourceSegmentIds, ['g-2']);
+  const retryThird = session.release('google');
+  assert.deepEqual(retryThird?.sourceSegmentIds, ['g-3']);
+});
+
 test('final review mode keeps the current draft separate from editable finals', () => {
   const session = new CaptionDeskSession();
   session.ingestOperatorPacket(pending('g-0', 'ข้อความก่อนหน้า'));

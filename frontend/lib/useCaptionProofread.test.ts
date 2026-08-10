@@ -259,10 +259,14 @@ test('shows one calm warning after three consecutive AI failures', async t => {
   t.mock.timers.enable({ apis: ['setTimeout', 'Date'], now: 1_000 });
   installBrowserGlobals();
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response('{}', {
-    status: 503,
-    headers: { 'Content-Type': 'application/json' },
-  });
+  let requests = 0;
+  globalThis.fetch = async () => {
+    requests += 1;
+    return new Response('{}', {
+      status: 503,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  };
 
   let renderer: ReactTestRenderer;
   let latestState: ReturnType<typeof useCaptionProofread> | undefined;
@@ -291,6 +295,8 @@ test('shows one calm warning after three consecutive AI failures', async t => {
 
     assert.equal(latestState?.notice?.tone, 'warning');
     assert.equal(latestState?.notice?.message, 'AI ตรวจแก้คำหยุดทำงานชั่วคราว ข้อความเดิมยังอยู่ครบ');
+    assert.equal(latestState?.autoEnabled, false);
+    assert.equal(requests, 3);
   } finally {
     await act(async () => renderer?.unmount());
     globalThis.fetch = originalFetch;

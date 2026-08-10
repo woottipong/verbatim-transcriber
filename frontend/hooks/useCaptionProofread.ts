@@ -144,7 +144,11 @@ export function useCaptionProofread({
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') return;
       consecutiveFailuresRef.current += 1;
-      if (consecutiveFailuresRef.current === 3) {
+      if (consecutiveFailuresRef.current >= 3) {
+        persistedEnabledRef.current = false;
+        savePersistedAiAutoEnabled(false);
+        setAutoEnabled(false);
+        resetPending();
         setNotice({
           id: `proofread-warning-${Date.now()}`,
           tone: 'warning',
@@ -234,6 +238,10 @@ export function useCaptionProofread({
     setAutoEnabled(next);
     persistedEnabledRef.current = next;
     savePersistedAiAutoEnabled(next);
+    if (next) {
+      consecutiveFailuresRef.current = 0;
+      setNotice(null);
+    }
     if (!next) {
       cancelActiveWork();
     }

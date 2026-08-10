@@ -113,6 +113,22 @@ transcript continues through its existing viewer/feed paths.
 The browser cannot publish approved captions directly; it sends a reliable
 `caption.publish` command to the active agent, which remains authoritative.
 
+The editor also provides operator-side review assistance:
+
+- Thai typo suggestions are local, optional hints; applying one changes only the
+  selected text and never publishes automatically.
+- **AI Auto** is optional and available only when the backend reports the
+  Caption Desk proofreader as enabled. It reviews newly appended final text in
+  bounded batches after 1,200 ms of inactivity, at a 2,500 ms hard ceiling, or
+  when the batch reaches 320 grapheme clusters.
+- AI suggestions are advisory. A manual edit, publication, or reconnect that
+  makes a result stale leaves the operator's current text unchanged; transient
+  AI failures keep the original caption and use the shared notification area.
+  After three consecutive failures, AI Auto pauses until the operator enables
+  it again.
+- The latest approved caption is sent as bounded context for the next batch to
+  help with names and continuations, but it is never copied into the editor.
+
 ### Approved-caption playback in Transcript
 
 Selecting **Caption Desk** in the Transcript source list subscribes to the

@@ -31,6 +31,8 @@ interface QueuedCaption {
   text: string;
   rawText: string;
   sourceSegmentIds: string[];
+  order: number;
+  isRetry: boolean;
 }
 
 const EMPTY: CaptionDeskSnapshot = {
@@ -46,6 +48,10 @@ export class CaptionDeskSession {
   private listeners = new Set<() => void>();
   private edited = false;
   private queued: QueuedCaption[] = [];
+  private waitingOrders = new Map<string, number>();
+  private nextCaptionOrder = 0;
+  private activeCaptionOrder: number | null = null;
+  private activeRetryOrder: number | null = null;
   private activeIsDraft = false;
   private activeDraftID = '';
   private activeDraftSequence = 0;
@@ -125,9 +131,12 @@ export class CaptionDeskSession {
       sourceSegmentIds: [...this.snapshot.sourceSegmentIds],
       ...(remainingText ? { remainingText } : {}),
     };
+    const activeOrder = this.ensureActiveCaptionOrder();
+    this.waitingOrders.set(waiting.requestId, activeOrder);
     const next = remainingText ? undefined : this.queued.shift();
     const remainderSourceId = this.snapshot.sourceSegmentIds.at(-1);
     this.edited = remainingText !== '' || Boolean(next && next.text !== next.rawText);
+    if (!remainingText) this.setActiveCaption(next);
     this.update({
       ...this.snapshot,
       reviewText: remainingText || next?.text || '',
@@ -151,6 +160,7 @@ export class CaptionDeskSession {
   }
 
   acknowledge(message: CaptionPublishedMessage): void {
+    this.waitingOrders.delete(message.requestId);
     this.update({
       ...this.snapshot,
       waiting: this.snapshot.waiting.filter(item => item.requestId !== message.requestId),
@@ -165,19 +175,41 @@ export class CaptionDeskSession {
   reject(message: CaptionRejectedMessage): void {
     const failed = this.snapshot.waiting.find(item => item.requestId === message.requestId);
     if (!failed) return;
-    if (!failed.remainingText && this.snapshot.sourceSegmentIds.length > 0) {
-      this.queued.unshift({
-        text: this.snapshot.reviewText,
-        rawText: this.snapshot.rawText,
-        sourceSegmentIds: [...this.snapshot.sourceSegmentIds],
+    const failedOrder = this.waitingOrders.get(message.requestId) ?? this.nextCaptionOrder++;
+    this.waitingOrders.delete(message.requestId);
+    const failedText = failed.remainingText ? `${failed.text}${failed.remainingText}` : failed.text;
+    const hasCurrentCaption = this.snapshot.sourceSegmentIds.length > 0 && Boolean(this.snapshot.reviewText.trim());
+    const currentOverlapsFailed = this.snapshot.sourceSegmentIds.some(id => failed.sourceSegmentIds.includes(id));
+    const shouldActivateFailed = !hasCurrentCaption
+      || this.activeRetryOrder === null
+      || failedOrder < this.activeRetryOrder;
+    if (shouldActivateFailed) {
+      if (hasCurrentCaption && !currentOverlapsFailed) {
+        this.enqueueCaption({
+          text: this.snapshot.reviewText,
+          rawText: this.snapshot.rawText,
+          sourceSegmentIds: [...this.snapshot.sourceSegmentIds],
+          order: this.activeCaptionOrder ?? this.nextCaptionOrder++,
+          isRetry: this.activeRetryOrder !== null,
+        });
+      }
+      this.activeCaptionOrder = failedOrder;
+      this.activeRetryOrder = failedOrder;
+    } else {
+      this.enqueueCaption({
+        text: failedText,
+        rawText: failedText,
+        sourceSegmentIds: [...failed.sourceSegmentIds],
+        order: failedOrder,
+        isRetry: true,
       });
     }
     this.edited = true;
     this.update({
       ...this.snapshot,
-      reviewText: failed.remainingText ? `${failed.text}${failed.remainingText}` : failed.text,
-      rawText: failed.remainingText ? `${failed.text}${failed.remainingText}` : failed.text,
-      sourceSegmentIds: [...failed.sourceSegmentIds],
+      reviewText: shouldActivateFailed ? failedText : this.snapshot.reviewText,
+      rawText: shouldActivateFailed ? failedText : this.snapshot.rawText,
+      sourceSegmentIds: shouldActivateFailed ? [...failed.sourceSegmentIds] : this.snapshot.sourceSegmentIds,
       queuedCount: this.queued.length,
       waiting: this.snapshot.waiting.filter(item => item.requestId !== message.requestId),
       error: message.message || 'Caption was not published.',
@@ -191,6 +223,10 @@ export class CaptionDeskSession {
     this.activeDraftSequence = 0;
     this.latestSourceSequence = 0;
     this.queued = [];
+    this.waitingOrders.clear();
+    this.nextCaptionOrder = 0;
+    this.activeCaptionOrder = null;
+    this.activeRetryOrder = null;
     this.update(EMPTY);
   }
 
@@ -261,6 +297,8 @@ export class CaptionDeskSession {
       this.activeDraftSequence = message.draft?.sequence || 0;
       this.latestSourceSequence = Math.max(this.latestSourceSequence, snapshotSequence);
       this.queued = [];
+      this.activeRetryOrder = null;
+      this.activeCaptionOrder = sources.length > 0 ? this.nextCaptionOrder++ : null;
       this.update({
         ...this.snapshot,
         reviewText: this.edited
@@ -285,6 +323,9 @@ export class CaptionDeskSession {
       this.activeIsDraft = false;
       this.activeDraftID = '';
       this.activeDraftSequence = 0;
+      if (this.snapshot.sourceSegmentIds.length === 0) {
+        this.activeCaptionOrder = this.nextCaptionOrder++;
+      }
       this.update({
         ...this.snapshot,
         reviewText: appendSourceText(this.snapshot.reviewText, source.text, source.joinWithoutSpace),
@@ -308,6 +349,10 @@ export class CaptionDeskSession {
       latestQueued.sourceSegmentIds.push(source.segmentId);
       return;
     }
+    if (this.snapshot.sourceSegmentIds.length === 0) {
+      this.activeCaptionOrder = this.nextCaptionOrder++;
+      this.activeRetryOrder = null;
+    }
     this.update({
       ...this.snapshot,
       reviewText: appendSourceText(this.snapshot.reviewText, source.text, source.joinWithoutSpace),
@@ -322,6 +367,26 @@ export class CaptionDeskSession {
   private update(next: CaptionDeskSnapshot): void {
     this.snapshot = next;
     this.listeners.forEach(listener => listener());
+  }
+
+  private ensureActiveCaptionOrder(): number {
+    if (this.activeCaptionOrder === null) {
+      this.activeCaptionOrder = this.nextCaptionOrder++;
+    }
+    return this.activeCaptionOrder;
+  }
+
+  private setActiveCaption(next: QueuedCaption | undefined): void {
+    this.activeCaptionOrder = next?.order ?? null;
+    this.activeRetryOrder = next?.isRetry ? next.order : null;
+  }
+
+  private enqueueCaption(caption: QueuedCaption): void {
+    if (!caption.text.trim() || caption.sourceSegmentIds.length === 0) return;
+    this.queued = this.queued
+      .filter(item => !item.sourceSegmentIds.some(id => caption.sourceSegmentIds.includes(id)))
+      .concat(caption)
+      .sort((left, right) => left.order - right.order);
   }
 }
 
