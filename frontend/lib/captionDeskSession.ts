@@ -3,7 +3,6 @@ import {
   type CaptionPublishCommand,
   type CaptionPublishedMessage,
   type CaptionRejectedMessage,
-  type CaptionSource,
   MAX_CAPTION_TEXT_BYTES,
   parseCaptionOperatorPacket,
 } from './captionDeskMessages.ts';
@@ -28,6 +27,12 @@ export interface CaptionDeskSnapshot {
   error: string | null;
 }
 
+interface QueuedCaption {
+  text: string;
+  rawText: string;
+  sourceSegmentIds: string[];
+}
+
 const EMPTY: CaptionDeskSnapshot = {
   reviewText: '', rawText: '', sourceSegmentIds: [], isDraftActive: false,
   draftPreview: '', draftJoinWithoutSpace: false,
@@ -40,7 +45,7 @@ export class CaptionDeskSession {
   private snapshot: CaptionDeskSnapshot = { ...EMPTY };
   private listeners = new Set<() => void>();
   private edited = false;
-  private queued: CaptionSource[] = [];
+  private queued: QueuedCaption[] = [];
   private activeIsDraft = false;
   private activeDraftID = '';
   private activeDraftSequence = 0;
@@ -120,17 +125,17 @@ export class CaptionDeskSession {
       sourceSegmentIds: [...this.snapshot.sourceSegmentIds],
       ...(remainingText ? { remainingText } : {}),
     };
-    this.edited = remainingText !== '';
     const next = remainingText ? undefined : this.queued.shift();
     const remainderSourceId = this.snapshot.sourceSegmentIds.at(-1);
+    this.edited = remainingText !== '' || Boolean(next && next.text !== next.rawText);
     this.update({
       ...this.snapshot,
       reviewText: remainingText || next?.text || '',
-      rawText: remainingText || next?.text || '',
+      rawText: remainingText || next?.rawText || '',
       sourceSegmentIds: remainingText && remainderSourceId
         ? [remainderSourceId]
         : next
-          ? [next.segmentId]
+          ? [...next.sourceSegmentIds]
           : [],
       isDraftActive: this.snapshot.isDraftActive,
       draftPreview: this.snapshot.draftPreview,
@@ -162,11 +167,9 @@ export class CaptionDeskSession {
     if (!failed) return;
     if (!failed.remainingText && this.snapshot.sourceSegmentIds.length > 0) {
       this.queued.unshift({
-        segmentId: this.snapshot.sourceSegmentIds[0],
         text: this.snapshot.reviewText,
-        provider: message.provider,
-        isFinal: true,
-        sequence: 0,
+        rawText: this.snapshot.rawText,
+        sourceSegmentIds: [...this.snapshot.sourceSegmentIds],
       });
     }
     this.edited = true;
@@ -297,7 +300,14 @@ export class CaptionDeskSession {
     if (this.snapshot.sourceSegmentIds.includes(source.segmentId)) {
       return;
     }
-    if (this.queued.some(item => item.segmentId === source.segmentId)) return;
+    if (this.queued.some(item => item.sourceSegmentIds.includes(source.segmentId))) return;
+    if (this.queued.length > 0) {
+      const latestQueued = this.queued[this.queued.length - 1];
+      latestQueued.text = appendSourceText(latestQueued.text, source.text, source.joinWithoutSpace);
+      latestQueued.rawText = appendSourceText(latestQueued.rawText, source.text, source.joinWithoutSpace);
+      latestQueued.sourceSegmentIds.push(source.segmentId);
+      return;
+    }
     this.update({
       ...this.snapshot,
       reviewText: appendSourceText(this.snapshot.reviewText, source.text, source.joinWithoutSpace),

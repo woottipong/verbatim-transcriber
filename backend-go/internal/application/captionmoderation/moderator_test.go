@@ -103,6 +103,60 @@ func TestModeratorBoundsPendingSegmentsAtFiveHundred(t *testing.T) {
 	}
 }
 
+func TestModeratorRollbackKeepsRestoredSourcesAndLatestPendingSegments(t *testing.T) {
+	moderator := New("google", time.Now)
+	for index := 1; index <= maxPendingSegments; index++ {
+		moderator.Ingest(SourceSegment{
+			ID:       fmt.Sprintf("google-%d", index),
+			Provider: "google",
+			Text:     fmt.Sprintf("ข้อความ %d", index),
+			IsFinal:  true,
+			Sequence: uint64(index),
+		})
+	}
+
+	publication, _, err := moderator.Publish(PublishCommand{
+		RequestID:        "rollback-bounded",
+		Provider:         "google",
+		SourceSegmentIDs: []string{"google-1", "google-2"},
+		Text:             "ข้อความที่ตรวจแล้ว",
+	})
+	if err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	moderator.Ingest(SourceSegment{
+		ID:       "google-501",
+		Provider: "google",
+		Text:     "ข้อความ 501",
+		IsFinal:  true,
+		Sequence: 501,
+	})
+	moderator.Ingest(SourceSegment{
+		ID:       "google-502",
+		Provider: "google",
+		Text:     "ข้อความ 502",
+		IsFinal:  true,
+		Sequence: 502,
+	})
+
+	if !moderator.Rollback(publication.RequestID) {
+		t.Fatal("Rollback() did not restore the publication")
+	}
+	snapshot := moderator.Snapshot()
+	if got, want := len(snapshot.Pending), maxPendingSegments; got != want {
+		t.Fatalf("pending length after rollback = %d, want %d", got, want)
+	}
+	if got, want := pendingIDs(snapshot)[:2], []string{"google-1", "google-2"}; !equalStrings(got, want) {
+		t.Fatalf("restored prefix = %v, want %v", got, want)
+	}
+	if got, want := snapshot.Pending[2].ID, "google-5"; got != want {
+		t.Fatalf("first retained pending ID = %q, want %q", got, want)
+	}
+	if got, want := snapshot.Pending[len(snapshot.Pending)-1].ID, "google-502"; got != want {
+		t.Fatalf("latest pending ID = %q, want %q", got, want)
+	}
+}
+
 func TestModeratorStartReviewWindowKeepsActiveDraftAndDropsPreJoinFinals(t *testing.T) {
 	moderator := New("google", time.Now)
 	ingestFinals(moderator, "google-1", "google-2")

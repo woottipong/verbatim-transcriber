@@ -173,6 +173,68 @@ test('rejection restores failed text before newer edits', () => {
   assert.equal(session.getSnapshot().reviewText, 'แก้สอง');
 });
 
+test('rejection keeps every newer final bound to the retried batch', () => {
+  const session = new CaptionDeskSession();
+  session.ingestOperatorPacket(pending('g-1', 'หนึ่ง'));
+  const first = session.release('google')!;
+  session.ingestOperatorPacket(pending('g-2', 'สอง'));
+  session.ingestOperatorPacket(pending('g-3', 'สาม'));
+
+  session.reject({
+    type: 'caption.rejected', requestId: first.requestId, provider: 'google',
+    code: 'publish_failed', message: 'ลองใหม่',
+  });
+
+  assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-1']);
+  assert.equal(session.getSnapshot().queuedCount, 1);
+  const retry = session.release('google');
+  assert.deepEqual(retry?.sourceSegmentIds, ['g-1']);
+  assert.equal(session.getSnapshot().reviewText, 'สอง สาม');
+  assert.equal(session.getSnapshot().rawText, 'สอง สาม');
+  assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-2', 'g-3']);
+  assert.equal(session.getSnapshot().queuedCount, 0);
+});
+
+test('rejection preserves edits when a multi-source batch is restored', () => {
+  const session = new CaptionDeskSession();
+  session.ingestOperatorPacket(pending('g-1', 'หนึ่ง'));
+  const first = session.release('google')!;
+  session.ingestOperatorPacket(pending('g-2', 'สอง'));
+  session.ingestOperatorPacket(pending('g-3', 'สาม'));
+  session.edit('แก้สอง แก้สาม');
+
+  session.reject({
+    type: 'caption.rejected', requestId: first.requestId, provider: 'google',
+    code: 'publish_failed', message: 'ลองใหม่',
+  });
+  const retry = session.release('google');
+
+  assert.equal(retry?.text, 'หนึ่ง');
+  assert.equal(session.getSnapshot().reviewText, 'แก้สอง แก้สาม');
+  assert.equal(session.getSnapshot().rawText, 'สอง สาม');
+  assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-2', 'g-3']);
+  session.ingestOperatorPacket(pending('g-4', 'สี่'));
+  assert.equal(session.getSnapshot().reviewText, 'แก้สอง แก้สาม สี่');
+});
+
+test('finals arriving after a rejection stay behind the failed retry', () => {
+  const session = new CaptionDeskSession();
+  session.ingestOperatorPacket(pending('g-1', 'หนึ่ง'));
+  const first = session.release('google')!;
+  session.ingestOperatorPacket(pending('g-2', 'สอง'));
+  session.reject({
+    type: 'caption.rejected', requestId: first.requestId, provider: 'google',
+    code: 'publish_failed', message: 'ลองใหม่',
+  });
+
+  session.ingestOperatorPacket(pending('g-3', 'สาม'));
+  const retry = session.release('google');
+
+  assert.deepEqual(retry?.sourceSegmentIds, ['g-1']);
+  assert.equal(session.getSnapshot().reviewText, 'สอง สาม');
+  assert.deepEqual(session.getSnapshot().sourceSegmentIds, ['g-2', 'g-3']);
+});
+
 test('final review mode keeps the current draft separate from editable finals', () => {
   const session = new CaptionDeskSession();
   session.ingestOperatorPacket(pending('g-0', 'ข้อความก่อนหน้า'));

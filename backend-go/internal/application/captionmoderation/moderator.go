@@ -225,7 +225,7 @@ func (m *Moderator) Publish(command PublishCommand) (Publication, bool, error) {
 		if id == "" {
 			return Publication{}, false, ErrSourceMismatch
 		}
-		if index < pendingCount && (m.pending[index].ID != id || m.pending[index].Provider != command.Provider) {
+		if m.pending[index].ID != id || m.pending[index].Provider != command.Provider {
 			return Publication{}, false, ErrSourceMismatch
 		}
 		sourceIDs[index] = id
@@ -273,10 +273,17 @@ func (m *Moderator) Rollback(requestID string) bool {
 		m.pending[0].ID == record.sources[len(record.sources)-1].ID {
 		m.pending = m.pending[1:]
 	}
-	m.pending = append(append([]SourceSegment(nil), record.sources...), m.pending...)
-	if len(m.pending) > maxPendingSegments {
-		m.pending = m.pending[:maxPendingSegments]
+	restored := append([]SourceSegment(nil), record.sources...)
+	available := maxPendingSegments - len(restored)
+	if available < 0 {
+		available = 0
 	}
+	if len(m.pending) > available {
+		m.pending = append([]SourceSegment(nil), m.pending[len(m.pending)-available:]...)
+	} else {
+		m.pending = append([]SourceSegment(nil), m.pending...)
+	}
+	m.pending = append(restored, m.pending...)
 	m.rebuildPendingIndexLocked()
 	return true
 }
